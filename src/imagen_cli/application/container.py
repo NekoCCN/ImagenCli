@@ -89,6 +89,16 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command in {"providers", "models", "capabilities"}:
+            from jsonschema import validate
+
+            from imagen_cli.cli.commands import discovery
+
+            validate(args, discover(command)["input_schema"])
+            return discovery.list_(
+                self.repositories, command, **args,
+                limit=self.options.limit, cursor=self.options.cursor,
+            )
         if command not in {
             "session create", "session list", "session show", "session resume",
             "job get", "job wait", "job fetch", "job reconcile",

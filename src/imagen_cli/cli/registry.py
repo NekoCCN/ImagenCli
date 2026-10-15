@@ -25,9 +25,6 @@ COMMANDS = {
         *(
             Command(name, "尚未交付；不会上传或创建请求")
             for name in (
-                "providers",
-                "models",
-                "capabilities",
                 "capabilities refresh",
                 "profile add",
                 "profile list",
@@ -41,6 +38,9 @@ COMMANDS = {
         *(
             Command(name, summary, available=True)
             for name, summary in (
+                ("providers", "查询本地 profile 的供应商；不联网探测"),
+                ("models", "查询本地声明的模型与修订；不联网探测"),
+                ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
                 ("session create", "创建本地创作会话"),
                 ("session list", "分页列出本地会话"),
                 ("session show", "查看本地会话历史"),
@@ -200,6 +200,12 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name in {"providers", "models", "capabilities"}:
+        return _object({
+            "items": {"type": "array", "items": {"type": "object"}},
+            "next_cursor": {"type": ["string", "null"]},
+            "evidence": {"const": "offline_persisted"},
+        }, ("items", "next_cursor", "evidence"))
     if command.name.startswith("session "):
         row = {"type": "object"}
         rows = {"type": "array", "items": row}

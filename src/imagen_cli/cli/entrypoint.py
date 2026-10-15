@@ -29,7 +29,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             agent = True
         elif token.startswith("--"):
             name, separator, raw_value = token[2:].partition("=")
-            local_option = name in {"intent-file", "profile", "model"}
+            local_option = name in {"intent-file", "profile", "model", "operation"}
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
             field = name.replace("-", "_") if name != "async" else "async_"
@@ -89,12 +89,20 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     if agent:
         raise ValueError("agent is a help option")
     extra_controls = {
+        "providers": {"limit", "cursor"},
+        "models": {"limit", "cursor"},
+        "capabilities": {"limit", "cursor"},
         "session list": {"limit", "cursor"},
         "job wait": {"timeout"},
     }.get(command, set())
     if set(controls) - common - extra_controls:
         raise ValueError("unexpected option")
     schema = discover(command)["input_schema"]
+    if command in {"providers", "models", "capabilities"}:
+        if words:
+            raise ValueError("unexpected positional arguments")
+        validate(parameters, schema)
+        return command, parameters, options
     if command.startswith("session ") and command in {
         "session create", "session list", "session show", "session resume"
     } or command in {"job get", "job wait", "job fetch", "job reconcile"}:
