@@ -33,17 +33,22 @@ COMMANDS = {
                 "profile list",
                 "profile show",
                 "profile update",
-                "session create",
-                "session list",
-                "session show",
-                "session resume",
                 "generate",
                 "edit",
-                "job get",
-                "job wait",
-                "job fetch",
-                "job reconcile",
                 "job cancel",
+            )
+        ),
+        *(
+            Command(name, summary, available=True)
+            for name, summary in (
+                ("session create", "创建本地创作会话"),
+                ("session list", "分页列出本地会话"),
+                ("session show", "查看本地会话历史"),
+                ("session resume", "恢复本地会话快照；不发送请求"),
+                ("job get", "查看持久任务事实"),
+                ("job wait", "有界等待本地任务状态；不轮询供应商"),
+                ("job fetch", "读取已保存的本地产物；不下载或重新生成"),
+                ("job reconcile", "核对本地 staging 产物；不重新生成"),
             )
         ),
         *(
@@ -195,6 +200,31 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name.startswith("session "):
+        row = {"type": "object"}
+        rows = {"type": "array", "items": row}
+        if command.name == "session list":
+            return _object(
+                {"sessions": rows, "next_cursor": {"type": ["string", "null"]}},
+                ("sessions", "next_cursor"),
+            )
+        properties: dict[str, Any] = {"session": row}
+        if command.name in {"session show", "session resume"}:
+            properties.update({"turns": rows, "references": rows})
+        required = tuple(properties)
+        if command.name == "session resume":
+            properties["next_actions"] = rows
+            required += ("next_actions",)
+        return _object(properties, required)
+    if command.name.startswith("job "):
+        return _object(
+            {
+                "job": {"type": "object"},
+                "artifacts": {"type": "array", "items": {"type": "object"}},
+                "next_actions": {"type": "array", "items": {"type": "object"}},
+            },
+            ("job", "artifacts", "next_actions"),
+        )
     return _object(
         {
             "commands": {"type": "array", "items": {"type": "object"}},
@@ -219,6 +249,14 @@ def discover(name: str | None = None, *, agent: bool = False) -> dict[str, Any]:
         data_schema = _data_schema(command)
         output_schema = Result.model_json_schema()
         output_schema["properties"]["data"] = deepcopy(data_schema)
+        if command.available and command.name not in {"help", "schema"}:
+            output_schema["properties"]["data"] = {
+                "anyOf": [deepcopy(data_schema), _object({})],
+            }
+            output_schema["allOf"] = [{
+                "if": {"properties": {"ok": {"const": True}}},
+                "then": {"properties": {"data": deepcopy(data_schema)}},
+            }]
         records.append({
             **asdict(command),
             "input_schema": _input_schema(command.name),

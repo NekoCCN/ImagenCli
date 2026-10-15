@@ -24,7 +24,11 @@ def test_every_command_has_strict_input_and_data_discovery() -> None:
         assert not jsonschema.Draft202012Validator(data["input_schema"]).is_valid(
             {"invented_parameter": True}
         )
-        assert data["output_schema"]["properties"]["data"] == data["data_schema"]
+        output_data = data["output_schema"]["properties"]["data"]
+        if COMMANDS[name].available and name not in {"help", "schema"}:
+            assert data["data_schema"] in output_data["anyOf"]
+        else:
+            assert output_data == data["data_schema"]
         assert data["commands"][0]["input_schema"] == data["input_schema"]
         assert data["commands"][0]["data_schema"] == data["data_schema"]
 
@@ -107,7 +111,7 @@ def test_catalog_and_machine_results_validate_the_advertised_data(tmp_path: Path
         response = json.loads(out.getvalue())
         assert len(response["data"]["commands"]) == (len(COMMANDS) if name is None else 1)
         jsonschema.validate(response["data"], discover("schema")["data_schema"])
-        if name is not None and name not in {"help", "schema"}:
+        if name is not None and not COMMANDS[name].available:
             status, payload = Container(workspace=str(tmp_path / "unused")).execute(name)
             assert status == "unsupported_capability"
             assert payload == {}
