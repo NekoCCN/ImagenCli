@@ -29,29 +29,42 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             agent = True
         elif token.startswith("--"):
             name, separator, raw_value = token[2:].partition("=")
-            local_option = name in {"intent-file", "profile", "model", "operation", "config-file"}
+            local_option = name in {
+                "intent-file", "profile", "model", "operation", "config-file", "session",
+                "prompt-file", "prompt-stdin", "input-json", "input", "mask", "reference",
+                "count", "size", "provider-params-file", "digest",
+            }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
-            field = name.replace("-", "_") if name != "async" else "async_"
+            field = {"input": "inputs", "reference": "references"}.get(
+                name, name.replace("-", "_") if name != "async" else "async_",
+            )
             target = parameters if local_option else controls
-            if field in target:
+            repeated = name in {"input", "reference"}
+            if field in target and not repeated:
                 raise ValueError("duplicate option")
             value: Any = raw_value
-            if OPTION_METADATA.get(name, {}).get("type") == "boolean":
+            if name == "prompt-stdin" or OPTION_METADATA.get(name, {}).get("type") == "boolean":
                 if separator:
                     raise ValueError("flag takes no value")
                 value = True
             else:
                 if not separator:
                     index += 1
-                    if index == len(argv) or argv[index].startswith("-"):
+                    if index == len(argv) or (
+                        argv[index].startswith("-")
+                        and not (name == "input-json" and argv[index] == "-")
+                    ):
                         raise ValueError("option needs value")
                     value = argv[index]
-                if name in {"limit", "timeout"}:
+                if name in {"limit", "timeout", "count"}:
                     value = int(value)
                 elif not value or "\0" in value:
                     raise ValueError("option needs text")
-            target[field] = value
+            if repeated:
+                target.setdefault(field, []).append(value)
+            else:
+                target[field] = value
         elif token.startswith("-"):
             raise ValueError("unknown option")
         else:
@@ -95,6 +108,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         "profile list": {"limit", "cursor"},
         "session list": {"limit", "cursor"},
         "job wait": {"timeout"},
+        "generate": {"dry_run", "timeout", "wait", "async_"},
+        "edit": {"dry_run", "timeout", "wait", "async_"},
     }.get(command, set())
     if set(controls) - common - extra_controls:
         raise ValueError("unexpected option")
@@ -114,6 +129,23 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise ValueError("unexpected positional arguments")
         validate(parameters, schema)
         return command, parameters, options
+    if command in {"plan show", "plan approve"}:
+        if len(words) != 1:
+            raise ValueError("one plan identity required")
+        parameters["plan_id"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command in {"generate", "edit"}:
+        if words:
+            raise ValueError("unexpected positional arguments")
+        if not parameters:
+            return command, [], options
+        if options.async_:
+            return command, [], options
+        from imagen_cli.cli.creation_input import parse_creation
+
+        creation = parse_creation(command, parameters)
+        return command, creation.model_dump(mode="json", exclude_none=True), options
     if command.startswith("session ") and command in {
         "session create", "session list", "session show", "session resume"
     } or command in {"job get", "job wait", "job fetch", "job reconcile"}:
@@ -126,6 +158,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters[identity] = words[0]
         validate(parameters, schema)
         return command, parameters, options
+
     if words or parameters:
         raise ValueError("unexpected arguments")
     return command, [], options

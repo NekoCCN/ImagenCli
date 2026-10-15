@@ -1,0 +1,111 @@
+"""Offline preflight and immutable creation planning; never dispatch here."""
+
+from pathlib import Path
+from typing import Any
+
+from imagen_cli.application.planning_service import PlanningService
+from imagen_cli.application.profile_service import ProfileService
+from imagen_cli.application.session_service import SessionService
+from imagen_cli.capabilities.catalog import CapabilityCatalog
+from imagen_cli.capabilities.validator import CapabilityValidator
+from imagen_cli.domain.contracts import CreationInput
+from imagen_cli.domain.primitive import new_id, sha256_bytes
+from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
+from imagen_cli.storage.repositories import Repositories
+
+
+def plan_creation(
+    repositories: Repositories, artifacts: ArtifactStore, creation: CreationInput,
+    *, dry_run: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    sessions = SessionService(repositories, artifacts)
+    from imagen_cli.cli.commands.session import show
+
+    status, snapshot = show(sessions, creation.session)
+    if status != "succeeded":
+        return status, {}
+    session_id = snapshot["session"]["id"]
+    session = sessions.resume(session_id)["session"]
+    identity = creation.profile or session.default_profile_id
+    row = repositories.get("profiles", identity) if identity else None
+    if row is None:
+        return "not_found", {}
+    profile = ProfileService().load(row)
+    model = creation.model or session.default_model or profile.model_default
+    records = repositories.list("capabilities", limit=1000)
+    catalog = CapabilityCatalog(records)
+    matches = [record for record in catalog.records() if (
+        record.provider == profile.provider and record.family == profile.family
+        and record.model == model and record.operation == creation.operation
+    )]
+    if len(matches) != 1:
+        return "unsupported_capability", {}
+    record = matches[0]
+    parameters = dict(creation.provider_params)
+    if "count" in parameters or "size" in parameters:
+        return "validation_error", {}
+    parameters["count"] = creation.count
+    if creation.size is not None:
+        parameters["size"] = creation.size
+    try:
+        decision = CapabilityValidator(catalog).validate(
+            profile.provider, profile.family, model, record.model_revision,
+            creation.operation, parameters,
+        )
+    except ValueError:
+        return "unsupported_capability", {}
+    if creation.mask or creation.references or creation.retry_of_job_id:
+        return "unsupported_capability", {}
+    if creation.inputs and record.continuation_strategy != "explicit_images":
+        return "unsupported_capability", {}
+    input_hashes: list[str] = []
+    input_artifact_ids: list[str] = []
+    total_bytes = 0
+    pending_inputs: list[tuple[str, bytes]] = []
+    for source in creation.inputs:
+        try:
+            if source.startswith("artifact:"):
+                identity = source.removeprefix("artifact:")
+                path = artifacts.get(identity)
+                if path is None:
+                    return "not_found", {}
+            else:
+                identity = new_id("art")
+                path = Path(source.removeprefix("file:"))
+            if not path.is_file():
+                return "validation_error", {}
+            with path.open("rb") as stream:
+                content = stream.read(MAX_BYTES + 1)
+            total_bytes += len(content)
+            if not content or len(content) > MAX_BYTES or total_bytes > 256 * 1024 * 1024:
+                return "validation_error", {}
+            inspect_media(content)
+            if source.startswith("file:"):
+                pending_inputs.append((identity, content))
+            input_hashes.append(sha256_bytes(content))
+            input_artifact_ids.append(identity)
+        except (OSError, ValueError):
+            return "validation_error", {}
+    for identity, content in pending_inputs:
+        artifacts.stage(identity, content, origin_manifest={"kind": "input"})
+        artifacts.publish(identity)
+    context = (
+        {"kind": "explicit_images", "input_artifact_ids": input_artifact_ids,
+         "mask_artifact_id": None}
+        if input_artifact_ids else {"kind": "none"}
+    )
+    target = {
+        "profile_identity": profile.id, "profile_revision": profile.revision,
+        "endpoint_origin": profile.base_url,
+        "allowed_upload_targets": profile.trust_policy.get(
+            "allowed_upload_targets", [profile.base_url],
+        ),
+        "provider": profile.provider, "family": profile.family,
+        "model_revision": record.model_revision,
+    }
+    plan, _ = PlanningService(repositories).create_plan(
+        session_id=session.id, target_snapshot=target, operation=creation.operation,
+        model=model, normalized_parameters=parameters, prompt_snapshot=creation.prompt,
+        input_hashes=input_hashes, portable_context=context, capability_digest=decision.digest,
+    )
+    return "planned" if dry_run else "approval_required", {"plan": plan.model_dump(mode="json")}

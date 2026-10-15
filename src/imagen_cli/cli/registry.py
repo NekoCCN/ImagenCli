@@ -30,14 +30,16 @@ COMMANDS = {
                 "profile list",
                 "profile show",
                 "profile update",
-                "generate",
-                "edit",
                 "job cancel",
             )
         ),
         *(
             Command(name, summary, available=True)
             for name, summary in (
+                ("generate", "生成本地执行计划并要求批准；尚不发送供应商请求"),
+                ("edit", "冻结输入并生成本地编辑计划；尚不发送供应商请求"),
+                ("plan show", "查看持久执行计划；不发送请求"),
+                ("plan approve", "显式批准计划摘要；不发送请求"),
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
                 ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
@@ -67,8 +69,6 @@ COMMANDS = {
                 "batch submit",
                 "batch get",
                 "batch wait",
-                "plan show",
-                "plan approve",
                 "plan execute",
                 "worker start",
                 "worker status",
@@ -204,6 +204,12 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name in {"generate", "edit"}:
+        return _object({"plan": {"type": "object"}}, ("plan",))
+    if command.name == "plan show":
+        return _object({"plan": {"type": "object"}}, ("plan",))
+    if command.name == "plan approve":
+        return _object({"approval": {"type": "object"}}, ("approval",))
     if command.name.startswith("profile "):
         if command.name == "profile list":
             return _object({

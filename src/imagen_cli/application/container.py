@@ -89,6 +89,20 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command in {"plan show", "plan approve"}:
+            from imagen_cli.cli.commands import plan
+
+            return plan.execute(self.repositories, command, args["plan_id"], args.get("digest"))
+        if command in {"generate", "edit"}:
+            from imagen_cli.application.preflight import plan_creation
+            from imagen_cli.domain.contracts import CreationInput
+
+            creation = CreationInput.model_validate(args)
+            if creation.operation != command:
+                raise ValueError("operation does not match command")
+            return plan_creation(
+                self.repositories, self.artifact_store, creation, dry_run=self.options.dry_run,
+            )
         if command.startswith("profile "):
             from jsonschema import validate
 
