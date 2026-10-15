@@ -3,15 +3,18 @@
 import sys
 from typing import Any, TextIO
 
+from jsonschema import ValidationError, validate
+
 from imagen_cli.application.container import Container
 
 from .options import OPTION_METADATA, SharedOptions
-from .registry import COMMANDS, select_output
+from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
 
 
-def _parse(argv: list[str]) -> tuple[str, list[str], SharedOptions]:
+def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOptions]:
     controls: dict[str, Any] = {}
+    parameters: dict[str, Any] = {}
     positional: list[str] = []
     agent = False
     help_flag = False
@@ -21,43 +24,92 @@ def _parse(argv: list[str]) -> tuple[str, list[str], SharedOptions]:
         if token in {"--help", "-h"}:
             help_flag = True
         elif token == "--agent":
+            if agent:
+                raise ValueError("duplicate option")
             agent = True
         elif token.startswith("--"):
             name, separator, raw_value = token[2:].partition("=")
-            value: Any = raw_value
-            if name not in OPTION_METADATA:
+            local_option = name in {"intent-file", "profile", "model"}
+            if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
             field = name.replace("-", "_") if name != "async" else "async_"
-            if field in controls:
+            target = parameters if local_option else controls
+            if field in target:
                 raise ValueError("duplicate option")
-            if OPTION_METADATA[name].get("type") == "boolean":
+            value: Any = raw_value
+            if OPTION_METADATA.get(name, {}).get("type") == "boolean":
                 if separator:
                     raise ValueError("flag takes no value")
                 value = True
             else:
                 if not separator:
                     index += 1
-                    if index == len(argv):
+                    if index == len(argv) or argv[index].startswith("-"):
                         raise ValueError("option needs value")
                     value = argv[index]
                 if name in {"limit", "timeout"}:
                     value = int(value)
-            controls[field] = value
+                elif not value or "\0" in value:
+                    raise ValueError("option needs text")
+            target[field] = value
+        elif token.startswith("-"):
+            raise ValueError("unknown option")
         else:
             positional.append(token)
         index += 1
     options = SharedOptions(**controls)
-    if help_flag or not positional:
-        command, args = "help", positional
+    if not positional:
+        command, words = "help", []
     elif positional[0] in {"help", "schema"}:
-        command, args = positional[0], [" ".join(positional[1:])] if positional[1:] else []
+        command, words = positional[0], positional[1:]
     else:
-        command, args = " ".join(positional), []
-    if command not in COMMANDS:
-        raise ValueError("unknown command")
+        command = next(
+            (name for name in sorted(COMMANDS, key=len, reverse=True)
+             if positional[:len(name.split())] == name.split()),
+            "",
+        )
+        if not command:
+            raise ValueError("unknown command")
+        words = positional[len(command.split()):]
+        if help_flag:
+            command, words = "help", command.split()
+    if help_flag:
+        command = "help"
+    common = {"workspace", "output", "no_interactive"}
+    if command in {"help", "schema"}:
+        target_command = " ".join(words) if words else None
+        if parameters or set(controls) - common:
+            raise ValueError("unexpected option")
+        if target_command is not None and target_command not in COMMANDS:
+            raise ValueError("unknown help target")
+        if agent and command != "help":
+            raise ValueError("agent is a help option")
+        args = ([target_command] if target_command else []) + (["--agent"] if agent else [])
+        return command, args, options
     if agent:
-        args.append("--agent")
-    return command, args, options
+        raise ValueError("agent is a help option")
+    extra_controls = {
+        "session list": {"limit", "cursor"},
+        "job wait": {"timeout"},
+    }.get(command, set())
+    if set(controls) - common - extra_controls:
+        raise ValueError("unexpected option")
+    schema = discover(command)["input_schema"]
+    if command.startswith("session ") and command in {
+        "session create", "session list", "session show", "session resume"
+    } or command in {"job get", "job wait", "job fetch", "job reconcile"}:
+        identity = ("name" if command == "session create" else
+                    "session" if command.startswith("session ") else "job_id")
+        required_words = 0 if command == "session list" else 1
+        if len(words) != required_words:
+            raise ValueError("unexpected positional arguments")
+        if words:
+            parameters[identity] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if words or parameters:
+        raise ValueError("unexpected arguments")
+    return command, [], options
 
 
 def main(
@@ -71,9 +123,10 @@ def main(
         command, args, options = _parse(argv)
         if renderer.mode == "jsonl":
             renderer.start(command)
-        status, data = Container(workspace=options.workspace).execute(command, args)
+        with Container(workspace=options.workspace, options=options) as container:
+            status, data = container.execute(command, args)
         value = result(status, data)
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, ValidationError):
         value = result("validation_error")
     except KeyboardInterrupt:
         value = result("canceled")

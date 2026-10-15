@@ -1,9 +1,11 @@
 """Dependency composition root; offline commands have no provider or storage side effects."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
+
+from imagen_cli.cli.options import SharedOptions
 
 if TYPE_CHECKING:
     from imagen_cli.storage.artifacts import ArtifactStore
@@ -18,12 +20,14 @@ class Container:
     """Application boundary intentionally keeps provider dependencies optional."""
 
     workspace: str | None = None
+    options: SharedOptions = field(default_factory=SharedOptions)
 
     @cached_property
     def resolved_workspace(self) -> "Workspace":
         from imagen_cli.storage.workspace import resolve_workspace
 
-        return resolve_workspace(self.workspace)
+        workspace = self.workspace if self.workspace is not None else self.options.workspace
+        return resolve_workspace(workspace)
 
     @cached_property
     def connection(self) -> "ProcessConnection":
@@ -71,12 +75,53 @@ class Container:
     ) -> None:
         self.close()
 
-    def execute(self, command: str, args: list[str] | None = None) -> tuple[str, dict[str, Any]]:
+    def execute(
+        self, command: str, args: list[str] | dict[str, Any] | None = None
+    ) -> tuple[str, dict[str, Any]]:
         from imagen_cli.cli.registry import discover
 
-        if command == "help":
+        if command in {"help", "schema"}:
+            if args is not None and not isinstance(args, list):
+                raise ValueError("discovery requires a command target")
             target = next((arg for arg in (args or []) if arg != "--agent"), None)
-            return "succeeded", discover(target, agent="--agent" in (args or []))
-        if command == "schema":
-            return "succeeded", discover(args[0] if args and not args[0].startswith("--") else None)
-        return "unsupported_capability", {}
+            return "succeeded", discover(
+                target, agent=command == "help" and "--agent" in (args or [])
+            )
+        if not isinstance(args, dict):
+            return "unsupported_capability", {}
+        if command not in {
+            "session create", "session list", "session show", "session resume",
+            "job get", "job wait", "job fetch", "job reconcile",
+        }:
+            return "unsupported_capability", {}
+
+        from jsonschema import validate
+
+        from imagen_cli.application.artifact_service import ArtifactService
+        from imagen_cli.application.session_service import SessionService
+        from imagen_cli.cli.commands import job, session
+        from imagen_cli.cli.input_readers import read_text
+
+        validate(args, discover(command)["input_schema"])
+        if command == "session create":
+            # Read bounded, explicitly selected text before initializing storage.
+            intent = read_text(args["intent_file"]) if "intent_file" in args else ""
+            return session.create(
+                SessionService(self.repositories, self.artifact_store),
+                name=args["name"],
+                intent=intent,
+                profile=args.get("profile"),
+                model=args.get("model"),
+            )
+        if command.startswith("session "):
+            service = SessionService(self.repositories, self.artifact_store)
+            if command == "session list":
+                return session.list_(service, limit=self.options.limit, cursor=self.options.cursor)
+            if command == "session show":
+                return session.show(service, args["session"])
+            return session.resume(service, args["session"])
+        artifacts = ArtifactService(self.repositories, self.artifact_store)
+        if command == "job wait":
+            return job.wait_(artifacts, args["job_id"], timeout=self.options.timeout)
+        handler = {"job get": job.get_, "job fetch": job.fetch_, "job reconcile": job.reconcile_}
+        return handler[command](artifacts, args["job_id"])
