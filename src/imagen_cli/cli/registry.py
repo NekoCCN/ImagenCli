@@ -41,6 +41,10 @@ COMMANDS = {
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
                 ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
+                ("profile add", "新增本地 profile；只保存 credential_ref"),
+                ("profile list", "列出本地 profile"),
+                ("profile show", "查看本地 profile"),
+                ("profile update", "创建新的 profile revision"),
                 ("session create", "创建本地创作会话"),
                 ("session list", "分页列出本地会话"),
                 ("session show", "查看本地会话历史"),
@@ -200,6 +204,13 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name.startswith("profile "):
+        if command.name == "profile list":
+            return _object({
+                "profiles": {"type": "array", "items": {"type": "object"}},
+                "next_cursor": {"type": ["string", "null"]},
+            }, ("profiles", "next_cursor"))
+        return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name in {"providers", "models", "capabilities"}:
         return _object({
             "items": {"type": "array", "items": {"type": "object"}},

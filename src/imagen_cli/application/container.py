@@ -89,6 +89,19 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command.startswith("profile "):
+            from jsonschema import validate
+
+            from imagen_cli.cli.commands import profile
+
+            validate(args, discover(command)["input_schema"])
+            data = profile.read_config(args["config_file"], args["profile"]) if (
+                "config_file" in args
+            ) else None
+            return profile.execute(
+                self.repositories, command, profile=args.get("profile"), data=data,
+                limit=self.options.limit, cursor=self.options.cursor,
+            )
         if command in {"providers", "models", "capabilities"}:
             from jsonschema import validate
 
