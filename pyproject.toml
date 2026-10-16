@@ -57,5 +57,5 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["onnxruntime", "onnxruntime.*", "torch", "torch.*"]
+module = ["onnxruntime", "onnxruntime.*", "torch", "torch.*", "keyring"]
 ignore_missing_imports = true

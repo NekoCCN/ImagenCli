@@ -44,7 +44,7 @@ def _windows_start(pid: int) -> str | None:
     creation, exit_time = wintypes.FILETIME(), wintypes.FILETIME()
     kernel, user = wintypes.FILETIME(), wintypes.FILETIME()
     try:
-        ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined]
+        ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined, unused-ignore]
             handle, ctypes.byref(creation), ctypes.byref(exit_time),
             ctypes.byref(kernel), ctypes.byref(user),
         )
@@ -52,7 +52,7 @@ def _windows_start(pid: int) -> str | None:
             return None
         return f"{creation.dwHighDateTime:08x}{creation.dwLowDateTime:08x}"
     finally:
-        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined, unused-ignore]
 
 
 def process_start(pid: int) -> str | None:

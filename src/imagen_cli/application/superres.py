@@ -176,7 +176,9 @@ def _make_torch_runner(model: str, *, device: str | None,
     path = ensure_weights(model, accept=accept, suffix=".pt")
     target = device or ("cuda" if torch.cuda.is_available() else "cpu")
     try:
-        session = torch.jit.load(str(path), map_location=target)
+        session = torch.jit.load(  # type: ignore[no-untyped-call, unused-ignore]
+            str(path), map_location=target
+        )
     except Exception as error:  # noqa: BLE001 - torch raises backend-specific errors
         raise ValueError("weights are not a loadable TorchScript model") from error
 
@@ -216,7 +218,9 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
     def run(tile: Any) -> Any:
         array = numpy.asarray(tile, dtype=numpy.float32) / 255.0
         chw = numpy.transpose(array, (2, 0, 1))[None]
-        output = session.run(None, {name: chw})[0]
+        output = session.run(  # type: ignore[no-untyped-call, unused-ignore]
+            None, {name: chw}
+        )[0]
         result = numpy.squeeze(output, axis=0)
         result = numpy.transpose(result, (1, 2, 0))
         return numpy.clip(result, 0, 1) * 255
