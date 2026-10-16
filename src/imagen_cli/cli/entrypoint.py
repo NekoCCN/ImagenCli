@@ -32,7 +32,10 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             local_option = name in {
                 "intent-file", "profile", "model", "operation", "config-file", "session",
                 "prompt-file", "prompt-stdin", "input-json", "input", "mask", "reference",
-                "count", "size", "provider-params-file", "digest",
+                "count", "size", "provider-params-file", "digest", "scope", "concurrency",
+                "to", "from-turn", "artifact", "name", "plan",
+                "provider", "family", "base-url", "model-default", "credential-ref",
+                "revision", "pipeline", "op", "send-credential", "id",
             }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
@@ -44,7 +47,10 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             if field in target and not repeated:
                 raise ValueError("duplicate option")
             value: Any = raw_value
-            if name == "prompt-stdin" or OPTION_METADATA.get(name, {}).get("type") == "boolean":
+            boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
+                "send-credential",
+            }
+            if name == "prompt-stdin" or boolean:
                 if separator:
                     raise ValueError("flag takes no value")
                 value = True
@@ -57,7 +63,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     ):
                         raise ValueError("option needs value")
                     value = argv[index]
-                if name in {"limit", "timeout", "count"}:
+                if name in {"limit", "timeout", "count", "concurrency", "revision"}:
                     value = int(value)
                 elif not value or "\0" in value:
                     raise ValueError("option needs text")
@@ -108,6 +114,18 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         "profile list": {"limit", "cursor"},
         "session list": {"limit", "cursor"},
         "job wait": {"timeout"},
+        "batch wait": {"timeout"},
+        "plan execute": {"timeout"},
+        "session delete": {"yes"},
+        "asset gc": {"dry_run", "yes"},
+        "cache purge": {"plan", "yes"},
+        "transform": {"pipeline", "op", "session"},
+        "models refresh": {"profile", "send_credential"},
+        "models add": {"profile", "id"},
+        "models list": {"profile"},
+        "profile set": {
+            "provider", "family", "base_url", "model_default", "credential_ref", "revision",
+        },
         "generate": {"dry_run", "timeout", "wait", "async_"},
         "edit": {"dry_run", "timeout", "wait", "async_"},
     }.get(command, set())
@@ -135,22 +153,85 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         parameters["plan_id"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
+    if command in {"worker start", "worker status", "worker recover"}:
+        if words or parameters:
+            raise ValueError("unexpected arguments")
+        return command, {}, options
     if command in {"generate", "edit"}:
         if words:
             raise ValueError("unexpected positional arguments")
         if not parameters:
             return command, [], options
-        if options.async_:
-            return command, [], options
         from imagen_cli.cli.creation_input import parse_creation
 
         creation = parse_creation(command, parameters)
         return command, creation.model_dump(mode="json", exclude_none=True), options
+    if command == "batch submit":
+        if words or set(parameters) - {"input_json", "concurrency"}:
+            raise ValueError("unexpected arguments")
+        if "input_json" not in parameters:
+            raise ValueError("structured input is required")
+        from imagen_cli.cli.input_readers import read_json
+
+        payload = read_json(parameters["input_json"])
+        if "concurrency" in parameters:
+            if "concurrency" in payload:
+                raise ValueError("duplicate option")
+            payload["concurrency"] = parameters["concurrency"]
+        validate(payload, schema)
+        return command, payload, options
+    if command in {"session fork", "session export", "session delete"}:
+        if len(words) != 1:
+            raise ValueError("one session identity required")
+        parameters["session"] = words[0]
+        if command == "session delete" and options.yes:
+            parameters["yes"] = True
+        validate(parameters, schema)
+        return command, parameters, options
+    if command == "session import":
+        if len(words) != 1 or parameters:
+            raise ValueError("one archive path required")
+        parameters["archive"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command == "transform":
+        if len(words) != 1:
+            raise ValueError("one artifact identity required")
+        parameters["artifact"] = words[0]
+        if "pipeline" not in parameters and "op" not in parameters:
+            raise ValueError("pipeline or op is required")
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("models "):
+        if words:
+            raise ValueError("unexpected positional arguments")
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("cache "):
+        if words:
+            raise ValueError("unexpected positional arguments")
+        if options.yes:
+            parameters["yes"] = True
+        validate(parameters, schema)
+        return command, parameters, options
+    if command == "asset gc":
+        if words:
+            raise ValueError("unexpected positional arguments")
+        if options.dry_run:
+            parameters["dry_run"] = True
+        if options.yes:
+            parameters["yes"] = True
+        validate(parameters, schema)
+        return command, parameters, options
     if command.startswith("session ") and command in {
         "session create", "session list", "session show", "session resume"
-    } or command in {"job get", "job wait", "job fetch", "job reconcile"}:
+    } or command in {
+        "job get", "job wait", "job fetch", "job reconcile", "job cancel",
+        "batch get", "batch wait",
+    }:
         identity = ("name" if command == "session create" else
-                    "session" if command.startswith("session ") else "job_id")
+                    "session" if command.startswith("session ") else
+                    "batch_id" if command.startswith("batch ") else "job_id")
         required_words = 0 if command == "session list" else 1
         if len(words) != required_words:
             raise ValueError("unexpected positional arguments")

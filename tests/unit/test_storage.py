@@ -26,7 +26,7 @@ def test_workspace_is_explicit_or_platform_default(tmp_path, monkeypatch):
 
 def test_database_pragmas_migrations_and_backup(tmp_path):
     from imagen_cli.storage.database import connect
-    from imagen_cli.storage.migrations import migrate
+    from imagen_cli.storage.migrations import SCHEMA_VERSION, migrate
 
     path = tmp_path / "state.sqlite3"
     db = connect(path)
@@ -34,7 +34,7 @@ def test_database_pragmas_migrations_and_backup(tmp_path):
     assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert db.execute("PRAGMA synchronous").fetchone()[0] == 2
     assert db.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     db.close()
     # Upgrade an existing version-zero DB, including committed WAL data.

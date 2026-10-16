@@ -127,6 +127,20 @@ def test_missing_jobs_and_unsupported_reconcile(work):
     assert job.reconcile_(service, identity)[0] == "unsupported_capability"
 
 
+@pytest.mark.parametrize("handler", [job.fetch_, job.reconcile_])
+def test_remote_success_without_any_local_rows_is_save_failed(work, handler):
+    service, identity = work
+    service.repositories.update(
+        "jobs", identity,
+        {"remote_state": "succeeded", "actual_count": 1, "state": "running"},
+    )
+    status, data = handler(service, identity)
+    assert status == "save_failed"
+    assert data["artifacts"] == []
+    assert data["job"]["remote_state"] == "succeeded"
+    assert len(service.repositories.list("jobs")) == 1
+
+
 @pytest.mark.parametrize("timeout", [True, 0, 86401])
 def test_invalid_wait_deadline(work, timeout):
     with pytest.raises(ValueError):

@@ -84,13 +84,10 @@ class Renderer:
                 }
             )
         elif self.mode == "human":
+            from imagen_cli.cli.human import color_enabled, render
+
             safe = redact(value)
-            text = (
-                json.dumps(safe["data"], ensure_ascii=False, indent=2)
-                if safe["ok"]
-                else safe["error"]["message"]
-            )
-            self.stdout.write(text + "\n")
+            self.stdout.write(render(safe, color=color_enabled(self.stdout)) + "\n")
             self.stdout.flush()
             self.ended = True
         else:

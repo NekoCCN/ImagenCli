@@ -19,3 +19,8 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+live-results/
+.claude/
+.agents/
+.specify/
+.codegraph/

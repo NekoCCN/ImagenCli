@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import warnings
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,7 @@ class ArtifactStore:
             "save_state": "staging",
             **metadata,
             "origin_manifest": origin_manifest or {"kind": "local"},
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
         self.repositories.insert("artifacts", row)
         fd = os.open(

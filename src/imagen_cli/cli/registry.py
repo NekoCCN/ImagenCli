@@ -48,32 +48,39 @@ COMMANDS = {
                 ("profile list", "列出本地 profile"),
                 ("profile show", "查看本地 profile"),
                 ("profile update", "创建新的 profile revision"),
+                ("profile set", "以命令行参数创建或更新 profile；只接受 env: 引用"),
                 ("session create", "创建本地创作会话"),
                 ("session list", "分页列出本地会话"),
                 ("session show", "查看本地会话历史"),
                 ("session resume", "恢复本地会话快照；不发送请求"),
+                ("session fork", "从指定 turn 与产物分支新会话；不发送请求"),
+                ("session export", "导出不含秘密的可移植 ZIP；不发送请求"),
+                ("session import", "校验 ZIP 并事务导入，重映射全部标识"),
+                ("session delete", "逻辑删除 session；需显式 --yes"),
                 ("job get", "查看持久任务事实"),
                 ("job wait", "有界等待本地任务状态；不轮询供应商"),
-                ("job fetch", "读取已保存的本地产物；不下载或重新生成"),
-                ("job reconcile", "核对本地 staging 产物；不重新生成"),
+                ("job fetch", "从本地持久响应补存内联图片或安全下载结果；不重新生成"),
+                ("job reconcile", "核对本地 staging 并恢复图片；不重新生成"),
+                ("job cancel", "wait 停止观察；local 校验执行者身份后请求终止；remote 未开放"),
+                ("worker status", "查看持久 worker 与启动身份；不派发创建"),
+                ("worker start", "在支持的平台启动隔离 worker 并完成握手"),
+                ("worker recover", "仅接管过期租约做观察/恢复；不重发创建"),
+                ("batch submit", "离线校验全部子请求后按并发上限执行；每个子项独立 job"),
+                ("batch get", "查看批次汇总与全部子任务事实；不改变子任务"),
+                ("batch wait", "有界等待批次汇总；不重试子任务"),
+                ("asset gc", "dry-run 列出未被引用的受管产物；--plan --yes 仅确认该清单"),
+                ("cache audit", "列出可回收空间与字节数；不删除"),
+                ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
+                ("models refresh", "从 profile 端点拉取模型列表；只写 provider_models"),
+                ("models add", "手工声明一个模型，evidence=manual"),
+                ("models list", "列出 profile 的已声明模型"),
+                ("transform", "对产物应用确定性变换并生成新产物；不覆盖源文件"),
+                ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
         ),
         *(
             Command(name, "尚未交付；不会上传或创建请求", "M3")
-            for name in (
-                "session fork",
-                "session export",
-                "session import",
-                "session delete",
-                "asset show",
-                "asset gc",
-                "batch submit",
-                "batch get",
-                "batch wait",
-                "worker start",
-                "worker status",
-                "worker recover",
-            )
+            for name in ("asset show",)
         ),
     )
 }
@@ -136,6 +143,14 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {"command": {"enum": list(COMMANDS)}}
         if name == "help":
             properties["agent"] = {"type": "boolean", "default": False}
+    elif name.startswith("models "):
+        properties = {"profile": text}
+        required = ("profile",)
+        if name == "models refresh":
+            properties["send_credential"] = {"type": "boolean", "default": False}
+        elif name == "models add":
+            properties["id"] = text
+            required += ("id",)
     elif name.split()[0] in {"providers", "models", "capabilities"}:
         properties = dict.fromkeys(("profile", "model", "operation"), text)
     elif name.startswith("profile "):
@@ -145,6 +160,12 @@ def _input_schema(name: str) -> dict[str, Any]:
         if name in {"profile add", "profile update"}:
             properties["config_file"] = text
             required += ("config_file",)
+        elif name == "profile set":
+            properties.update(dict.fromkeys(
+                ("provider", "family", "base_url", "model_default", "credential_ref"), text,
+            ))
+            properties["revision"] = {"type": "integer", "minimum": 1, "default": 1}
+            required += ("provider", "family", "base_url", "model_default", "credential_ref")
     elif name == "session create":
         properties = dict.fromkeys(("name", "intent_file", "profile", "model"), text)
         required = ("name",)
@@ -162,13 +183,19 @@ def _input_schema(name: str) -> dict[str, Any]:
             required += ("yes",)
     elif name == "session import":
         properties, required = {"archive": text}, ("archive",)
+    elif name.startswith("cache "):
+        if name == "cache purge":
+            properties = {
+                "plan": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "yes": {"const": True},
+            }
     elif name.startswith(("job ", "batch ", "plan ")) and name != "batch submit":
         entity = name.split()[0]
         field = entity + "_id"
         prefix = {"job": "job", "batch": "bat", "plan": "pln"}[entity]
         properties = {field: {"type": "string", "pattern": f"^{prefix}_[0-9a-f]{{32}}$"}}
         required = (field,)
-        if name.endswith(" wait"):
+        if name.endswith(" wait") or name == "plan execute":
             properties["timeout"] = OPTION_METADATA["timeout"]
         if name == "job cancel":
             properties["scope"] = {"enum": ["wait", "local", "remote"]}
@@ -186,6 +213,14 @@ def _input_schema(name: str) -> dict[str, Any]:
         # Nested creation references still resolve against the document root.
         schema["$defs"] = creation.pop("$defs")
         return schema
+    elif name == "transform":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "pipeline": text,
+            "op": text,
+            "session": text,
+        }
+        required = ("artifact",)
     elif name == "asset show":
         properties = {"artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}}
         required = ("artifact",)
@@ -204,13 +239,48 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name == "transform":
+        return _object({"artifact": {"type": "object"}, "source": {"type": "string"}})
+    if command.name.startswith("models "):
+        return _object({
+            "models": {"type": "array", "items": {"type": "object"}},
+            "model": {"type": "object"},
+        })
+    if command.name == "cache audit":
+        return _object({
+            "entries": {"type": "array", "items": {"type": "object"}},
+            "plan_digest": {"type": "string"},
+            "planned_bytes": {"type": "integer"},
+            "count": {"type": "integer"},
+        }, ("entries", "plan_digest", "planned_bytes", "count"))
+    if command.name == "cache purge":
+        return _object({
+            "dry_run": {"type": "boolean"},
+            "entries": {"type": "array", "items": {"type": "object"}},
+            "plan_digest": {"type": "string"},
+            "planned_bytes": {"type": "integer"},
+            "deleted_bytes": {"type": "integer"},
+            "results": {"type": "array", "items": {"type": "object"}},
+        }, ("dry_run",))
     if command.name == "plan execute":
         return _object({
             "job": {"type": "object"}, "turn": {"type": "object"},
             "artifacts": {"type": "array", "items": {"type": "object"}},
         }, ("job", "turn", "artifacts"))
     if command.name in {"generate", "edit"}:
-        return _object({"plan": {"type": "object"}}, ("plan",))
+        return _object({
+            "plan": {"type": "object"},
+            "job": {"type": "object"},
+            "turn": {"type": "object"},
+        })
+    if command.name == "worker status":
+        return _object({"workers": {"type": "array", "items": {"type": "object"}}}, ("workers",))
+    if command.name == "worker start":
+        return _object({"worker": {"type": "object"}}, ("worker",))
+    if command.name == "worker recover":
+        return _object(
+            {"recovered": {"type": "array", "items": {"type": "object"}}}, ("recovered",)
+        )
     if command.name == "plan show":
         return _object({"plan": {"type": "object"}}, ("plan",))
     if command.name == "plan approve":
@@ -228,6 +298,41 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "next_cursor": {"type": ["string", "null"]},
             "evidence": {"const": "offline_persisted"},
         }, ("items", "next_cursor", "evidence"))
+    if command.name == "session fork":
+        return _object({"session": {"type": "object"}}, ("session",))
+    if command.name == "session export":
+        return _object({
+            "archive": {"type": "string"},
+            "session_id": {"type": "string"},
+            "turns": {"type": "integer"},
+            "artifacts": {"type": "integer"},
+            "references": {"type": "integer"},
+            "omissions": {"type": "array", "items": {"type": "object"}},
+        }, ("archive", "session_id", "turns", "artifacts", "references", "omissions"))
+    if command.name == "session import":
+        return _object({
+            "session": {"type": "object"},
+            "turns": {"type": "integer"},
+            "artifacts": {"type": "integer"},
+            "references": {"type": "integer"},
+            "origin_map": {"type": "object"},
+            "omissions": {"type": "array", "items": {"type": "object"}},
+            "native_contexts_missing": {"type": "array", "items": {"type": "object"}},
+        }, ("session", "turns", "artifacts", "references", "origin_map", "omissions",
+            "native_contexts_missing"))
+    if command.name == "session delete":
+        return _object({
+            "session": {"type": "object"},
+            "deleted": {"type": "boolean"},
+            "exported_files_untouched": {"type": "boolean"},
+        }, ("session", "deleted", "exported_files_untouched"))
+    if command.name == "asset gc":
+        return _object({
+            "dry_run": {"type": "boolean"},
+            "plan": {"type": "string"},
+            "candidates": {"type": "array", "items": {"type": "object"}},
+            "deleted": {"type": "array", "items": {"type": "string"}},
+        }, ("dry_run", "plan", "candidates", "deleted"))
     if command.name.startswith("session "):
         row = {"type": "object"}
         rows = {"type": "array", "items": row}
@@ -244,6 +349,16 @@ def _data_schema(command: Command) -> dict[str, Any]:
             properties["next_actions"] = rows
             required += ("next_actions",)
         return _object(properties, required)
+    if command.name.startswith("batch "):
+        return _object(
+            {
+                "batch": {"type": "object"},
+                "summary": {"type": "object"},
+                "children": {"type": "array", "items": {"type": "object"}},
+                "events": {"type": "array", "items": {"type": "object"}},
+            },
+            ("batch", "summary", "children", "events"),
+        )
     if command.name.startswith("job "):
         return _object(
             {

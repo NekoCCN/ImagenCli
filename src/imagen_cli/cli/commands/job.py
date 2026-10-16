@@ -72,6 +72,27 @@ def get_(service: ArtifactService, job_id: str) -> tuple[str, dict[str, Any]]:
     return "succeeded", _result(job, _artifacts(service, job_id))
 
 
+def cancel_(
+    service: ArtifactService, job_id: str, *, scope: str,
+) -> tuple[str, dict[str, Any]]:
+    if scope not in {"wait", "local", "remote"}:
+        raise ValueError("invalid cancellation scope")
+    try:
+        job, _ = _data(service, job_id)
+    except KeyError:
+        return "not_found", {}
+    if scope == "local":
+        from imagen_cli.application.cancel_service import cancel_local
+
+        status = cancel_local(service.repositories, job_id)
+        return status, _result(job, _artifacts(service, job_id))
+    if scope != "wait":
+        # No provider declares a verified remote cancellation contract yet.
+        return "unsupported_capability", _result(job, _artifacts(service, job_id))
+    service.repositories.append_event(job_id, "wait_stopped", {"source": "job cancel"})
+    return "succeeded", _result(job, _artifacts(service, job_id))
+
+
 def wait_(
     service: ArtifactService, job_id: str, *, timeout: int = 300
 ) -> tuple[str, dict[str, Any]]:
@@ -82,12 +103,22 @@ def wait_(
     except KeyError:
         return "not_found", {}
     deadline = time.monotonic() + timeout
+    connection = service.repositories.connection
+    observed_seq = connection.execute(
+        "SELECT COALESCE(MAX(job_seq),0) FROM events WHERE job_id=?", (job_id,),
+    ).fetchone()[0]
     while job["state"] in {"queued", "running"}:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         time.sleep(min(0.05, remaining))
         job, _ = _data(service, job_id)
+        stopped = connection.execute(
+            "SELECT 1 FROM events WHERE job_id=? AND job_seq>? "
+            "AND event_type='wait_stopped' LIMIT 1", (job_id, observed_seq),
+        ).fetchone()
+        if stopped:
+            return "canceled", _result(job, _artifacts(service, job_id))
     artifacts = _artifacts(service, job_id)
     if job["state"] in {"queued", "running"}:
         return "wait_timeout", _result(job, artifacts)
@@ -103,7 +134,7 @@ def fetch_(service: ArtifactService, job_id: str) -> tuple[str, dict[str, Any]]:
     local_rows = service.repositories.list("artifacts", producer_job_id=job_id)
     if len(artifacts) < max(len(local_rows), job.get("actual_count", 0)) and artifacts:
         return "partial_success", _result(job, artifacts)
-    if len(artifacts) < len(local_rows):
+    if len(artifacts) < max(len(local_rows), job.get("actual_count", 0)):
         return "save_failed", _result(job, artifacts)
     if not artifacts:
         return "unsupported_capability", {
@@ -123,7 +154,7 @@ def reconcile_(service: ArtifactService, job_id: str) -> tuple[str, dict[str, An
     local_rows = service.repositories.list("artifacts", producer_job_id=job_id)
     if len(artifacts) < max(len(local_rows), job.get("actual_count", 0)) and artifacts:
         return "partial_success", _result(job, artifacts)
-    if len(artifacts) < len(local_rows):
+    if len(artifacts) < max(len(local_rows), job.get("actual_count", 0)):
         return "save_failed", _result(job, artifacts)
     if not artifacts:
         return "unsupported_capability", {

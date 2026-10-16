@@ -1,11 +1,14 @@
 """Opaque private state: fail closed without verified current-user permissions."""
 
 import hashlib
+import json
 import os
+import re
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from imagen_cli.storage.safety import (
     _WINDOWS,
@@ -95,6 +98,21 @@ class PrivateStateStore:
                 path.unlink(missing_ok=True)
                 raise
             return {"private_relpath": name, "sha256": hashlib.sha256(data).hexdigest()}
+
+    def read_response(self, job_id: str, locator_json: str) -> dict[str, Any]:
+        locator = json.loads(locator_json)
+        if not isinstance(locator, dict) or set(locator) != {"private_relpath", "sha256"}:
+            raise ValueError("invalid private response locator")
+        if (
+            locator["private_relpath"] != job_id + ".bin"
+            or not isinstance(locator["sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", locator["sha256"]) is None
+        ):
+            raise ValueError("invalid private response locator")
+        value = json.loads(self.read(job_id, locator["sha256"]))
+        if not isinstance(value, dict):
+            raise ValueError("private response must be an object")
+        return value
 
     def read(self, identity: str, expected_sha256: str) -> bytes:
         with self._directory():

@@ -170,6 +170,7 @@ class PlanningService:
         return dict(plan)
 
     def approve(self, plan_id: str, digest: str) -> ApprovalContext:
+        expired = False
         with self.repositories.transaction():
             self._validated_plan(plan_id, digest)
             approval = self._approval(plan_id)
@@ -177,17 +178,20 @@ class PlanningService:
                 self.repositories.update(
                     "approvals", approval["id"], {"state": ApprovalState.EXPIRED.value}
                 )
-                raise ValueError("approval expired")
-            if approval["state"] == ApprovalState.APPROVED.value:
+                expired = True
+            elif approval["state"] == ApprovalState.APPROVED.value:
                 return ApprovalContext.model_validate(approval)
-            if approval["state"] != ApprovalState.PENDING.value:
+            elif approval["state"] != ApprovalState.PENDING.value:
                 raise ValueError("approval is not pending")
-            updated = self.repositories.update(
-                "approvals",
-                approval["id"],
-                {"state": ApprovalState.APPROVED.value, "approved_at": _utc(self._now())},
-            )
-            return ApprovalContext.model_validate(updated)
+            else:
+                updated = self.repositories.update(
+                    "approvals",
+                    approval["id"],
+                    {"state": ApprovalState.APPROVED.value, "approved_at": _utc(self._now())},
+                )
+                return ApprovalContext.model_validate(updated)
+        # Record expiry durably, then refuse outside the transaction.
+        raise ValueError("approval expired" if expired else "approval is not pending")
 
     def execute_approved(
         self,

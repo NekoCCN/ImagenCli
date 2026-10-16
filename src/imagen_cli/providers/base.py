@@ -74,6 +74,41 @@ class ImmediateResult:
         object.__setattr__(self, "private_response", _freeze(self.private_response))
 
 
+@dataclass(frozen=True)
+class RemoteHandle:
+    """A committed remote identity; polling never creates another request."""
+
+    remote_id: str
+    polling_url: str | None = None
+    cancel_url: str | None = None
+    private: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "private", _freeze(self.private))
+
+
+@dataclass(frozen=True)
+class RemoteObservation:
+    state: str
+    artifacts: tuple[ArtifactDescriptor, ...] = ()
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    private_response: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", tuple(self.artifacts))
+        object.__setattr__(self, "usage", _freeze(self.usage))
+        object.__setattr__(self, "private_response", _freeze(self.private_response))
+
+
+@dataclass(frozen=True)
+class CancelObservation:
+    """A cancel request is not a confirmed cancel; the state says which one."""
+
+    state: str
+    detail: str | None = None
+
+
 @dataclass(init=False)
 class ProviderFailure(Exception):
     type: str

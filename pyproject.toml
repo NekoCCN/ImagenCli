@@ -14,6 +14,9 @@ imagen = "imagen_cli.cli.entrypoint:main"
 
 [project.optional-dependencies]
 vertex = ["google-auth>=2"]
+tui = [
+    "textual>=0.80",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.11", "mypy>=1.15", "jsonschema>=4.23", "types-jsonschema>=4"]

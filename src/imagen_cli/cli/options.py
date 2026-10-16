@@ -32,7 +32,7 @@ OPTION_METADATA: dict[str, dict[str, Any]] = {
     "dry-run": {"type": "boolean", "default": False},
     "timeout": {"type": "integer", "default": 300, "minimum": 1, "maximum": 86400},
     "wait": {"type": "boolean", "default": False},
-    "async": {"type": "boolean", "default": False, "available": False},
+    "async": {"type": "boolean", "default": False},
     "yes": {"type": "boolean", "default": False},
     "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
     "cursor": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,2048}$"},

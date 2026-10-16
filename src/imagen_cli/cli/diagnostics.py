@@ -9,6 +9,11 @@ from typing import Any, TextIO
 _PRIVATE = re.compile(
     r"prompt|secret|token|key|signature|url|uri|response|base64|authorization|credential", re.I
 )
+# Usage counts are billing evidence, not credentials, even when named *Token*.
+_USAGE = {
+    "input_tokens", "output_tokens", "total_tokens",
+    "promptTokenCount", "candidatesTokenCount", "totalTokenCount", "images",
+}
 
 
 def redact(value: Any) -> Any:
@@ -18,7 +23,7 @@ def redact(value: Any) -> Any:
                 {name: redact(schema) for name, schema in item.items()}
                 if key == "properties" and isinstance(item, Mapping)
                 else "[redacted]"
-                if _PRIVATE.search(str(key))
+                if str(key) not in _USAGE and _PRIVATE.search(str(key))
                 else redact(item)
             )
             for key, item in value.items()

@@ -187,13 +187,29 @@ class CancellationFact(StrictModel):
 class Cost(StrictModel):
     estimate: Annotated[float, Field(ge=0)] | None
     actual: Annotated[float, Field(ge=0)] | None
-    currency: NonEmptyString
+    currency: NonEmptyString | None = None
+    billing_unit: NonEmptyString | None = None
+    actual_source: NonEmptyString | None = None
+    estimate_source: NonEmptyString | None = None
+    estimate_date: date | None = None
+    estimate_assumptions: list[NonEmptyString] = Field(default_factory=list)
+    usage: dict[str, NonNegativeInt] | None = None
     unknown_reason: NonEmptyString | None = None
 
     @model_validator(mode="after")
     def unknown_has_reason(self) -> Self:
         if (self.estimate is None or self.actual is None) and self.unknown_reason is None:
             raise ValueError("unknown costs require a reason")
+        if self.estimate is not None and (
+            not self.estimate_source or self.estimate_date is None or not self.estimate_assumptions
+        ):
+            raise ValueError("estimates require source, date and assumptions")
+        if (self.actual is not None or self.estimate is not None) and (
+            not self.currency or not self.billing_unit
+        ):
+            raise ValueError("known amounts require currency and billing unit")
+        if self.actual is not None and not self.actual_source:
+            raise ValueError("actual cost requires a source")
         return self
 
 

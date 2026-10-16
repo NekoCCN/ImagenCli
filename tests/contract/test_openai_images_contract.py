@@ -117,6 +117,21 @@ def test_generate_normalizes_and_extracts_independent_candidates(
     assert base64.b64encode(png_bytes).decode() not in repr(result)
 
 
+def test_explicit_gateway_model_is_sent_without_substitution(profile, creation, png_bytes):
+    model = "A6N/gpt-image-1.5"
+    profile = profile.model_copy(update={
+        "base_url": "http://127.0.0.1:3000/v1", "model_default": model,
+    })
+
+    def respond(sent):
+        assert str(sent.url) == "http://127.0.0.1:3000/v1/images/generations"
+        assert json.loads(sent.content)["model"] == model
+        return httpx.Response(200, json=payload(png_bytes, 1))
+
+    result = adapter(profile, respond).create(replace(creation, model=model))
+    assert result.actual_count == 1
+
+
 def test_edit_uses_frozen_ordered_images_and_mask(
     profile: ProviderProfile,
     creation: ValidatedRequest,

@@ -16,8 +16,13 @@ from imagen_cli.storage.repositories import Repositories
 
 def plan_creation(
     repositories: Repositories, artifacts: ArtifactStore, creation: CreationInput,
-    *, dry_run: bool = False,
+    *, dry_run: bool = False, asynchronous: bool = False,
 ) -> tuple[str, dict[str, Any]]:
+    if asynchronous:
+        from imagen_cli.execution import worker
+
+        if not worker.detached_supported():
+            return "unsupported_capability", {}
     sessions = SessionService(repositories, artifacts)
     from imagen_cli.cli.commands.session import show
 
@@ -94,7 +99,7 @@ def plan_creation(
          "mask_artifact_id": None}
         if input_artifact_ids else {"kind": "none"}
     )
-    target = {
+    target: dict[str, Any] = {
         "profile_identity": profile.id, "profile_revision": profile.revision,
         "endpoint_origin": profile.base_url,
         "allowed_upload_targets": profile.trust_policy.get(
@@ -103,6 +108,17 @@ def plan_creation(
         "provider": profile.provider, "family": profile.family,
         "model_revision": record.model_revision,
     }
+    if asynchronous and not dry_run:
+        # Durable queue entry only: no approval is consumed and nothing is sent.
+        turn = sessions.create_turn(
+            session.id, instruction=creation.prompt, operation=creation.operation,
+            resolved_profile_snapshot=target, model=model, parameters=parameters,
+            requested_count=creation.count, parent_turn_id=session.current_turn_id,
+        )
+        return "accepted", {
+            "job": repositories.get("jobs", turn.job_id),
+            "turn": repositories.get("turns", turn.id),
+        }
     plan, _ = PlanningService(repositories).create_plan(
         session_id=session.id, target_snapshot=target, operation=creation.operation,
         model=model, normalized_parameters=parameters, prompt_snapshot=creation.prompt,

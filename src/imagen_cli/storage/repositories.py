@@ -56,6 +56,10 @@ FIELDS = {
     ),
     "approvals": "id plan_id plan_digest state approved_at execution_job_id expires_at",
     "events": "id job_id job_seq event_type timestamp safe_payload",
+    "provider_models": (
+        "id profile_id model_id display_name fetched_at source_url evidence"
+    ),
+    "artifact_links": "session_id artifact_id role created_at",
     "workers": "id pid boot_identity state heartbeat_at start_nonce",
 }
 PRIVATE = PRIVATE_FIELDS | {"lease_token", "staging_relpath"}
@@ -311,6 +315,12 @@ class Repositories:
                 f'UPDATE "{table}" SET {assignments} WHERE id=?', (*values.values(), identity)
             )
             return existing
+
+    def delete(self, table: str, identity: str) -> None:
+        if table not in FIELDS:
+            raise ValueError("unknown entity field")
+        with self.transaction():
+            self.connection.execute(f'DELETE FROM "{table}" WHERE id=?', (identity,))
 
     def publish_turn(self, session_id: str, turn_id: str, expected_version: int) -> bool:
         if type(expected_version) is not int or expected_version < 0:

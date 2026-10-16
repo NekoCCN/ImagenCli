@@ -57,3 +57,21 @@ def test_profile_rejects_plaintext_credential_and_bad_config(tmp_path):
     path.write_text(path.read_text() + '\napi_key = "secret"\n', encoding="utf-8")
     assert invoke(workspace, "profile", "add", "local", "--config-file", str(path))[0] == 2
     assert invoke(workspace, "profile", "show", "missing")[0] == 4
+
+
+def test_config_is_explicit_and_never_reads_ambient_env_files(tmp_path):
+    workspace = tmp_path / "work"
+    (tmp_path / ".env").write_text("IMAGEN_KEY=ambient-secret\n", encoding="utf-8")
+    assert invoke(workspace, "profile", "add", "local")[0] == 2
+    assert invoke(workspace, "profile", "list")[1]["data"]["profiles"] == []
+
+    path = tmp_path / "bad.toml"
+    config(path)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            'credential_ref = "keyring:local"', 'credential_ref = "local"',
+        ),
+        encoding="utf-8",
+    )
+    assert invoke(workspace, "profile", "add", "local", "--config-file", str(path))[0] == 2
+    assert invoke(workspace, "profile", "list")[1]["data"]["profiles"] == []

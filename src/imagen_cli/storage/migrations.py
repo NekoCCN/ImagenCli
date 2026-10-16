@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -82,6 +82,26 @@ CREATE TRIGGER current_turn_update BEFORE UPDATE OF current_turn_id ON sessions
 """
 
 
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS provider_models (
+ id TEXT PRIMARY KEY,
+ profile_id TEXT NOT NULL REFERENCES profiles(id),
+ model_id TEXT NOT NULL, display_name TEXT,
+ fetched_at TEXT NOT NULL, source_url TEXT,
+ evidence TEXT NOT NULL CHECK(evidence IN ('discovered','manual')),
+ payload TEXT NOT NULL DEFAULT '{}',
+ UNIQUE(profile_id, model_id));
+CREATE INDEX IF NOT EXISTS provider_models_profile ON provider_models(profile_id);
+CREATE TABLE IF NOT EXISTS artifact_links (
+ session_id TEXT NOT NULL REFERENCES sessions(id),
+ artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+ role TEXT NOT NULL CHECK(role IN ('input','mask','reference','output')),
+ created_at TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
+ PRIMARY KEY(session_id, artifact_id, role));
+CREATE INDEX IF NOT EXISTS artifact_links_artifact ON artifact_links(artifact_id);
+"""
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     if connection.in_transaction:
         raise ValueError("migration requires no active transaction")
@@ -103,11 +123,15 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.backup(backup)
         finally:
             backup.close()
-    # executescript owns the transaction so DDL and version advance are atomic.
+    # Each step owns its transaction so DDL and the version advance are atomic.
+    steps = [(1, SCHEMA), (2, SCHEMA_V2)] if version == 0 else [(2, SCHEMA_V2)]
     try:
-        connection.executescript(
-            "BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=1;\nCOMMIT;"
-        )
+        for target, script in steps:
+            if target <= version:
+                continue
+            connection.executescript(
+                "BEGIN IMMEDIATE;\n" + script + f"\nPRAGMA user_version={target};\nCOMMIT;"
+            )
     except BaseException:
         if connection.in_transaction:
             connection.rollback()

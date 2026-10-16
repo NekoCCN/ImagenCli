@@ -22,6 +22,22 @@ from imagen_cli.storage.private_state import PrivateStateStore
 
 __all__ = ["GeminiAdapter", "ProviderFailure", "ValidatedRequest"]
 
+# Declared image-model suffixes; a gateway may prefix its own routing segment.
+_MODELS = {"gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image"}
+_OFFICIAL = "generativelanguage.googleapis.com"
+
+
+def _trusted_endpoint(base_url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(base_url.rstrip("/"))
+    if not parts.path.rstrip("/").endswith("/v1beta"):
+        return False
+    if parts.scheme == "https":
+        return parts.hostname == _OFFICIAL or parts.hostname == "127.0.0.1"
+    # Plain HTTP is limited to the loopback gateway, never a remote host.
+    return parts.scheme == "http" and parts.hostname in {"127.0.0.1", "localhost"}
+
 
 @dataclass(frozen=True)
 class ContextRestoration:
@@ -64,12 +80,11 @@ class GeminiAdapter:
         if (
             self.profile.provider != "gemini"
             or self.profile.family != "generate_content"
-            or request.model not in {"gemini-2.5-flash-image"}
+            or request.model.split("/")[-1] not in _MODELS
         ):
             raise ProviderFailure("unsupported_capability")
         if (
-            self.profile.base_url.rstrip("/")
-            != "https://generativelanguage.googleapis.com/v1beta"
+            not _trusted_endpoint(self.profile.base_url)
             or request.profile_identity != self.profile.id
             or request.profile_revision != self.profile.revision
             or not request.model_revision
@@ -163,7 +178,7 @@ class GeminiAdapter:
         self._attempted.add(request.job_id)
         try:
             with httpx.Client(
-                transport=self.transport or httpx.HTTPTransport(retries=0),
+                transport=self.transport or httpx.HTTPTransport(retries=0, trust_env=False),
                 trust_env=False, follow_redirects=False,
                 timeout=httpx.Timeout(60, connect=10),
             ) as client:

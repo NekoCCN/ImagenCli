@@ -2,19 +2,29 @@
 
 import re
 import sqlite3
-import tomllib
 from typing import Any
 
-from imagen_cli.application.profile_service import ProfileService
-from imagen_cli.cli.input_readers import read_text
 from imagen_cli.storage.repositories import Repositories
 
 
 def read_config(path: str, identity: str) -> dict[str, Any]:
-    data = tomllib.loads(read_text(path))
-    profile = ProfileService().load(data)
-    if profile.id != identity:
-        raise ValueError("profile identity mismatch")
+    from imagen_cli.storage.config import load_profile
+
+    return load_profile(path, identity)
+
+
+def build_set(parameters: dict[str, Any]) -> dict[str, Any]:
+    from imagen_cli.application.profile_service import ProfileService
+
+    profile = ProfileService().build(
+        identity=parameters["profile"],
+        provider=parameters["provider"],
+        family=parameters["family"],
+        base_url=parameters["base_url"],
+        model_default=parameters["model_default"],
+        credential_ref=parameters["credential_ref"],
+        revision=parameters.get("revision", 1),
+    )
     return profile.model_dump(mode="json")
 
 
@@ -51,6 +61,24 @@ def execute(
             except sqlite3.IntegrityError:
                 return "conflict", {}
             row = data
+        elif command == "profile set":
+            if data is None:
+                raise ValueError("profile configuration required")
+            if existing is None:
+                if data["revision"] != 1:
+                    raise ValueError("new profile revision must be one")
+                try:
+                    repositories.insert("profiles", data)
+                except sqlite3.IntegrityError:
+                    return "conflict", {}
+                row = data
+            else:
+                if data["revision"] != existing["revision"]:
+                    return "conflict", {}
+                row = repositories.update("profiles", profile, {
+                    **{key: value for key, value in data.items() if key != "id"},
+                    "revision": existing["revision"] + 1,
+                })
         else:
             if existing is None:
                 return "not_found", {}

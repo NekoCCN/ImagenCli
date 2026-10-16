@@ -24,6 +24,7 @@ class OpenAIImagesAdapter:
         max_response_bytes: int = 384 * 1024 * 1024,
         max_image_bytes: int = 64 * 1024 * 1024,
         max_pixels: int = 100_000_000,
+        read_timeout: float = 60.0,
     ) -> None:
         self.profile = profile.model_copy(deep=True)
         self.resolve_credential = resolve_credential
@@ -31,6 +32,7 @@ class OpenAIImagesAdapter:
         self.max_response_bytes = max_response_bytes
         self.max_image_bytes = min(max_image_bytes, 64 * 1024 * 1024)
         self.max_pixels = min(max_pixels, 100_000_000)
+        self.read_timeout = read_timeout
 
     def _validate(self, request: ValidatedRequest) -> None:
         if not request.authorized:
@@ -42,7 +44,10 @@ class OpenAIImagesAdapter:
             or request.profile_revision != self.profile.revision
         ):
             raise ProviderFailure("validation_error")
-        if request.model != "gpt-image-1" or request.native_context is not None:
+        if (
+            request.model not in {"gpt-image-1", self.profile.model_default}
+            or request.native_context is not None
+        ):
             raise ProviderFailure("unsupported_capability")
         if not request.prompt.strip():
             raise ProviderFailure("validation_error")
@@ -113,7 +118,7 @@ class OpenAIImagesAdapter:
             transport=transport,
             follow_redirects=False,
             trust_env=False,
-            timeout=httpx.Timeout(60.0, connect=10.0),
+            timeout=httpx.Timeout(60.0, connect=10.0, read=self.read_timeout),
         ) as client:
             if request.operation == "generate":
                 outgoing = client.build_request("POST", url, headers=headers, json=params)

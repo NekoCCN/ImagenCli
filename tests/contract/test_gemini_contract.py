@@ -259,3 +259,13 @@ def test_response_and_image_limits(setup: Any, png_bytes: bytes) -> None:
         with pytest.raises(module.ProviderFailure) as caught:
             build(lambda _: httpx.Response(200, json=response(png_bytes)), **limits).create(request)
         assert caught.value.accepted_maybe
+
+
+def test_endpoint_trust_is_official_https_or_loopback_only():
+    from imagen_cli.providers.gemini import _trusted_endpoint
+
+    assert _trusted_endpoint("https://generativelanguage.googleapis.com/v1beta")
+    assert _trusted_endpoint("http://127.0.0.1:3000/v1beta")
+    for url in ("http://evil.example/v1beta", "https://evil.example/v1beta",
+                "https://generativelanguage.googleapis.com/v1"):
+        assert not _trusted_endpoint(url)
