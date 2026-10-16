@@ -128,7 +128,7 @@ class ExecutionService:
                 "parent_turn_id": session.get("current_turn_id"),
                 "expected_session_version": session["version"],
             }
-            now = datetime.now(UTC).isoformat()
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             turn_id, job_id = new_id("trn"), new_id("job")
             turn = {
                 "id": turn_id, "session_id": plan["session_id"],

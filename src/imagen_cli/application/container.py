@@ -89,6 +89,41 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command == "plan execute":
+            from imagen_cli.application.artifact_service import ArtifactService
+            from imagen_cli.application.execution_service import ExecutionService
+            from imagen_cli.application.outcome_service import OutcomeService
+            from imagen_cli.capabilities.catalog import CapabilityCatalog
+            from imagen_cli.capabilities.validator import CapabilityValidator
+            from imagen_cli.execution.configured import ConfiguredAdapter
+            from imagen_cli.execution.foreground import ForegroundExecutor
+
+            row = self.repositories.get("plans", args["plan_id"], include_private=True)
+            if row is None:
+                return "not_found", {}
+            records: list[dict[str, Any]] = []
+            while True:
+                page = self.repositories.list("capabilities", limit=1000, offset=len(records))
+                records.extend(page)
+                if len(page) < 1000:
+                    break
+            executor = ForegroundExecutor(
+                self.repositories, ConfiguredAdapter(self.repositories),
+                ArtifactService(self.repositories, self.artifact_store),
+                OutcomeService(self.repositories), self.private_state_store,
+            )
+            facts = ExecutionService(
+                self.repositories, CapabilityValidator(CapabilityCatalog(records)),
+                self.artifact_store, executor,
+            ).execute_approved(
+                row["id"], row["plan_digest"],
+                model_revision=row["target_snapshot"]["model_revision"],
+                input_artifact_ids=tuple(row["portable_context"].get("input_artifact_ids", [])),
+                mask_artifact_id=row["portable_context"].get("mask_artifact_id"),
+            )
+            return facts["status"], {
+                key: facts[key] for key in ("job", "turn", "artifacts")
+            }
         if command in {"plan show", "plan approve"}:
             from imagen_cli.cli.commands import plan
 

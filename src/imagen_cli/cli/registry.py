@@ -40,6 +40,7 @@ COMMANDS = {
                 ("edit", "冻结输入并生成本地编辑计划；尚不发送供应商请求"),
                 ("plan show", "查看持久执行计划；不发送请求"),
                 ("plan approve", "显式批准计划摘要；不发送请求"),
+                ("plan execute", "执行已批准计划；最多发送一次供应商创建请求"),
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
                 ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
@@ -69,7 +70,6 @@ COMMANDS = {
                 "batch submit",
                 "batch get",
                 "batch wait",
-                "plan execute",
                 "worker start",
                 "worker status",
                 "worker recover",
@@ -204,6 +204,11 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name == "plan execute":
+        return _object({
+            "job": {"type": "object"}, "turn": {"type": "object"},
+            "artifacts": {"type": "array", "items": {"type": "object"}},
+        }, ("job", "turn", "artifacts"))
     if command.name in {"generate", "edit"}:
         return _object({"plan": {"type": "object"}}, ("plan",))
     if command.name == "plan show":
