@@ -21,12 +21,10 @@ def delete_session(repositories: Repositories, session_id: str) -> dict[str, Any
 
 
 def _all(repositories: Repositories, table: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    while True:
-        page = repositories.list(table, limit=1000, offset=len(rows))
-        rows.extend(page)
-        if len(page) < 1000:
-            return rows
+    from imagen_cli.storage.queries import iter_all
+
+    # staging_relpath is a private field; without it GC never unlinks staging files.
+    return iter_all(repositories, table, include_private=table == "artifacts")
 
 
 def _referenced(repositories: Repositories) -> set[str]:
