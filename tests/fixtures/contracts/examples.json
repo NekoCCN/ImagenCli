@@ -1,0 +1,24 @@
+{
+  "creation_inputs": [
+    {"schema_version": 1, "operation": "generate", "session": "launch", "profile": "openai", "model": "verified-model", "prompt": "深蓝色海报", "count": 1},
+    {"schema_version": 1, "operation": "edit", "session": "launch", "prompt": "仅修改背景", "inputs": ["artifact:art_11111111111141118111111111111111"]}
+  ],
+  "results": [
+    {"schema_version": 1, "ok": true, "status": "succeeded", "data": {"artifacts": [{"id": "art_11111111111141118111111111111111", "path": "/example/workspace/assets/art_11111111111141118111111111111111.png", "media_type": "image/png", "width": 1024, "height": 1024, "byte_size": 4096, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}, "error": null},
+    {"schema_version": 1, "ok": true, "status": "accepted", "data": {"job": {"id": "job_22222222222242228222222222222222", "state": "running", "dispatch_state": "intent_recorded", "remote_state": "unknown", "local_save_state": "not_started"}}, "error": null},
+    {"schema_version": 1, "ok": false, "status": "unknown", "data": {"job": {"id": "job_22222222222242228222222222222222", "state": "unknown", "dispatch_state": "intent_recorded", "remote_state": "unknown", "local_save_state": "not_started"}}, "error": {"type": "outcome_unknown", "message": "请求可能已被接受，不自动重新创建。", "retryable": false, "accepted_maybe": true, "next_actions": [{"command": "imagen job get job_22222222222242228222222222222222", "creates_paid_request": false}]}},
+    {"schema_version": 1, "ok": false, "status": "partial_success", "data": {"complete_success_count": 1, "saved_artifact_count": 1, "children": [{"state": "succeeded"}, {"state": "unknown"}]}, "error": {"type": "partial_failure", "message": "一个子任务成功，另一个结果未知。", "retryable": false, "accepted_maybe": true, "next_actions": []}},
+    {"schema_version": 1, "ok": false, "status": "unsupported_capability", "data": {}, "error": {"type": "unsupported_capability", "message": "能力声明不足，未上传或创建。", "retryable": false, "accepted_maybe": false, "next_actions": []}}
+  ],
+  "jsonl_invocations": [[
+    {"schema_version": 1, "seq": 1, "event": "started", "timestamp": "2026-10-23T00:00:00Z", "job_id": null, "data": {"command": "capabilities"}},
+    {"schema_version": 1, "seq": 2, "event": "terminal", "timestamp": "2026-10-23T00:00:01Z", "job_id": null, "data": {}, "result": {"schema_version": 1, "ok": true, "status": "succeeded", "data": {"records": []}, "error": null}}
+  ]],
+  "invalid_creation_inputs": [
+    {"schema_version": 1, "operation": "generate", "session": "launch", "prompt": "x", "count": true},
+    {"schema_version": 1, "operation": "edit", "session": "launch", "prompt": "x", "inputs": []},
+    {"schema_version": 1, "operation": "generate", "session": "launch", "prompt": "   "},
+    {"schema_version": 1, "operation": "generate", "session": "launch", "prompt": "x", "extra": 1},
+    {"schema_version": 1, "operation": "generate", "session": "launch", "prompt": "x", "retry_of_job_id": "job_22222222222242228222222222222222"}
+  ]
+}

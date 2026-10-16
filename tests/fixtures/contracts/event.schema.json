@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://imagen-cli.invalid/contracts/event.schema.json",
+  "title": "ImagenCli Invocation Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "seq", "event", "timestamp", "job_id", "data"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "seq": {"type": "integer", "minimum": 1},
+    "event": {"enum": ["started", "progress", "job_updated", "artifact_saved", "terminal"]},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "job_id": {"type": ["string", "null"], "pattern": "^job_[0-9a-f]{32}$"},
+    "data": {"type": "object"},
+    "result": {"$ref": "result.schema.json"}
+  },
+  "allOf": [
+    {"if": {"properties": {"event": {"const": "terminal"}}}, "then": {"required": ["result"]}, "else": {"not": {"required": ["result"]}}},
+    {"if": {"properties": {"event": {"enum": ["job_updated", "artifact_saved"]}}}, "then": {"properties": {"job_id": {"type": "string"}}}}
+  ]
+}

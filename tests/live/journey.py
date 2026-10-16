@@ -81,6 +81,47 @@ def redact(message: str, limit: int = 2000) -> str:
     return text[:limit]
 
 
+def seed_capabilities(workspace: Path, journey: Journey, model: str) -> None:
+    """Register intent-only records so planning can run before any live call."""
+    from imagen_cli.application.container import Container
+    from imagen_cli.domain.models import CapabilityRecord
+
+    with Container(workspace=str(workspace)) as container:
+        for operation in journey.operations:
+            value = {
+                "id": f"journey-{journey.name}-{operation}",
+                "provider": journey.provider, "family": journey.family,
+                "model": model, "model_revision": "journey-live",
+                "operation": operation, "support_status": "I",
+                "parameter_schema": {
+                    "type": "object",
+                    "properties": {
+                        "count": {"const": 1},
+                        "quality": {"const": "high"},
+                        "size": {"const": "1024x1024"},
+                    },
+                    "additionalProperties": False,
+                },
+                "semantic_mapping": {"prompt": "prompt", "count": "n"},
+                "input_limits": {"max_count": 1}, "transport_kind": "sync",
+                "continuation_strategy": (
+                    "explicit_images" if operation == "edit" else "none"
+                ),
+                "idempotency_contract": {}, "cancel_contract": {},
+                "sources": [{"url": os.environ.get(journey.base_url_env, ""),
+                             "date": "2026-10-24",
+                             "locator": "live journey runtime endpoint"}],
+                "checked_at": "2026-10-24T00:00:00Z",
+                "offline_evidence": [], "live_evidence": [],
+            }
+            value["digest"] = hashlib.sha256(
+                json.dumps(value, sort_keys=True).encode()
+            ).hexdigest()
+            container.repositories.insert(
+                "capabilities", CapabilityRecord.model_validate(value).model_dump(mode="json"),
+            )
+
+
 def _stamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -172,9 +213,10 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
         assertions.append({"name": name, "passed": bool(passed)})
 
     try:
+        seed_capabilities(workspace, journey, journey.resolved_model())
         profile = "live-" + run_id
         cli(
-            "profile", "set", "--profile", profile, "--provider", journey.provider,
+            "profile", "set", profile, "--provider", journey.provider,
             "--family", journey.family, "--base-url", base_url,
             "--model-default", journey.resolved_model(), "--credential-ref",
             f"env:{journey.credential_env}", "--revision", "1",
@@ -193,7 +235,7 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
         check("one create only", job.get("accepted_maybe") is not True)
         again = cli("plan", "execute", pending["id"])
         check("repeat execute reuses the job", again["job"]["id"] == job["id"])
-        facts = cli("job", "get", "--job-id", job["id"])["job"]
+        facts = cli("job", "get", job["id"])["job"]
         check("job succeeded", facts["state"] == "succeeded")
         check("remote succeeded", facts["remote_state"] == "succeeded")
         check("local save succeeded", facts["local_save_state"] == "saved")
@@ -209,8 +251,8 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
         first = executed["artifacts"][0]
         if "edit" in journey.operations:
             edit_plan = cli(
-                "edit", "--session", session, "--reference", first["id"],
-                "--prompt-file", str(prompt_file), expected=6,
+                "edit", "--session", session, "--input", "artifact:" + first["id"],
+                "--prompt-file", str(prompt_file), "--size", "1024x1024", expected=6,
             )["plan"]
             cli("plan", "approve", edit_plan["id"], "--digest", edit_plan["plan_digest"])
             edited = cli("plan", "execute", edit_plan["id"])
@@ -220,7 +262,7 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
                 "edit reuses the same session",
                 edited["job"]["turn_id"] != job["turn_id"],
             )
-            facts = cli("session", "show", "--session", session)
+            facts = cli("session", "show", session)
             check("session version advanced", facts["session"]["version"] >= 1)
         exported = directory / "session.zip"
         export = cli("session", "export", session, "--to", str(exported))

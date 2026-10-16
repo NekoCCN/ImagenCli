@@ -24,3 +24,7 @@ live-results/
 .agents/
 .specify/
 .codegraph/
+
+# Local-only design and spec documents
+docs/
+specs/

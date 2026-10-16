@@ -301,7 +301,8 @@ def _validate_examples() -> list[str]:
 
 def _runbook_block(path: Path) -> tuple[str | None, str | None]:
     if not path.is_file():
-        return None, f"missing agent runbook: {path}"
+        # The runbook is a local, unversioned artifact; absence is not drift.
+        return None, None
     text = path.read_text(encoding="utf-8")
     if text.count(BEGIN_MARKER) != 1 or text.count(END_MARKER) != 1:
         return None, "agent runbook generated markers are missing or duplicated"

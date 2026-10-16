@@ -11,24 +11,24 @@ from typing import Any, Protocol
 import httpx
 from PIL import Image
 
-# Upstream publishes .pth checkpoints, not ONNX. No URL is claimed here: users
-# supply an ONNX export and its digest is recorded on first use (trust on first use).
+# The x2/x4 entries are pinned exports of the canonical Real-ESRGAN weights; the
+# anime entry has no maintained ONNX release, so users place it themselves.
 MANIFEST: dict[str, dict[str, Any]] = {
     "realesrgan-x4plus": {
-        "url": None, "scale": 4, "license": "BSD-3-Clause",
-        "source": "https://github.com/xinntao/Real-ESRGAN",
+        "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x4.onnx",
+        "sha256": "5c586662929cbc686c1a5c38d9c060dbdb4ea5863a1f7672b8c0761e6b89c033",
+        "scale": 4, "license": "BSD-3-Clause",
+        "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
+    },
+    "realesrgan-x2plus": {
+        "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x2.onnx",
+        "sha256": "7115ba92e8a1bfa63d68558ef006ef3d91273a068d321b1439f8bb1c9179002c",
+        "scale": 2, "license": "BSD-3-Clause",
+        "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
     },
     "realesrgan-x4plus-anime": {
-        "url": None, "scale": 4, "license": "BSD-3-Clause",
+        "url": None, "sha256": None, "scale": 4, "license": "BSD-3-Clause",
         "source": "https://github.com/xinntao/Real-ESRGAN",
-    },
-    "realesrgan-x4v3": {
-        "url": None, "scale": 4, "license": "BSD-3-Clause",
-        "source": "https://github.com/xinntao/Real-ESRGAN",
-    },
-    "span-x4": {
-        "url": None, "scale": 4, "license": "Apache-2.0",
-        "source": "https://github.com/hongyuanyu/SPAN",
     },
 }
 
@@ -105,6 +105,15 @@ def digest_path(model: str, suffix: str = ".onnx") -> Path:
     return weights_path(model, suffix).with_suffix(".sha256")
 
 
+def _recorded_digest(model: str, suffix: str) -> str | None:
+    path = digest_path(model, suffix)
+    return path.read_text().strip() if path.exists() else None
+
+
+def _record_digest(model: str, suffix: str, digest: str) -> None:
+    digest_path(model, suffix).write_text(digest)
+
+
 def _download(url: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".part")
@@ -129,20 +138,20 @@ def _download(url: str, target: Path) -> None:
 def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
                    download: Callable[[str, Path], None] | None = None) -> Path:
     path = weights_path(model, suffix)
+    pinned = MANIFEST[model].get("sha256") if suffix == ".onnx" else None
     if path.exists():
-        recorded = digest_path(model)
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if recorded.exists():
-            if recorded.read_text().strip() != actual:
-                raise ValueError("weights digest mismatch")
-        else:
-            recorded.write_text(actual)
+        expected = pinned or _recorded_digest(model, suffix)
+        if expected is not None and expected != actual:
+            raise ValueError("weights digest mismatch")
+        if expected is None:
+            _record_digest(model, suffix, actual)
         return path
     url = MANIFEST[model].get("url")
     if url is None:
         raise ValueError(
             f"weights are missing; place {path.name} in {path.parent} "
-            "(no upstream ONNX release is claimed)"
+            "(no maintained ONNX release is claimed)"
         )
     if not accept:
         raise ValueError(
@@ -150,7 +159,10 @@ def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
         )
     (download or _download)(str(url), path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    digest_path(model, suffix).write_text(digest)
+    if pinned is not None and digest != pinned:
+        path.unlink(missing_ok=True)
+        raise ValueError("downloaded weights do not match the pinned digest")
+    _record_digest(model, suffix, digest)
     return path
 
 

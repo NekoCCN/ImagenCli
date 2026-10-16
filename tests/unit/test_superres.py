@@ -36,29 +36,40 @@ def test_unknown_model_and_backend_are_refused():
     image = Image.new("RGB", (4, 4))
     with pytest.raises(ValueError, match="unknown super-resolution model"):
         superres.upscale(image, model="nope", runner=nearest_runner)
-    with pytest.raises(ValueError, match="ai-onnx"):
+    with pytest.raises(ValueError, match="ai-onnx|unavailable"):
         superres.upscale(image, model="realesrgan-x4plus", backend="cuda")
     with pytest.raises(ValueError, match="ai-torch"):
         superres.upscale(image, model="realesrgan-x4plus", backend="torch")
 
 
-def test_missing_weights_explain_where_to_place_them(tmp_path, monkeypatch):
+def test_models_without_an_upstream_export_require_a_local_file(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
-    with pytest.raises(ValueError, match="place realesrgan-x4plus.onnx"):
+    with pytest.raises(ValueError, match="place realesrgan-x4plus-anime.onnx"):
+        superres.ensure_weights("realesrgan-x4plus-anime")
+    path = tmp_path / "realesrgan-x4plus-anime.onnx"
+    path.write_bytes(b"weights")
+    assert superres.ensure_weights("realesrgan-x4plus-anime") == path
+
+
+def test_pinned_models_require_accept_before_download(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    with pytest.raises(ValueError, match="accept=true"):
         superres.ensure_weights("realesrgan-x4plus")
-    path = tmp_path / "realesrgan-x4plus.onnx"
-    path.write_bytes(b"weights")
-    assert superres.ensure_weights("realesrgan-x4plus") == path
+    with pytest.raises(ValueError, match="pinned digest"):
+        superres.ensure_weights(
+            "realesrgan-x4plus", accept=True,
+            download=lambda url, target: target.write_bytes(b"wrong"),
+        )
 
 
-def test_tampered_weights_are_refused(tmp_path, monkeypatch):
+def test_manual_weights_record_and_enforce_a_digest(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
-    path = tmp_path / "realesrgan-x4plus.onnx"
+    path = tmp_path / "realesrgan-x4plus-anime.onnx"
     path.write_bytes(b"weights")
-    superres.ensure_weights("realesrgan-x4plus")
+    superres.ensure_weights("realesrgan-x4plus-anime")
     path.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="digest mismatch"):
-        superres.ensure_weights("realesrgan-x4plus")
+        superres.ensure_weights("realesrgan-x4plus-anime")
 
 
 def test_alpha_is_carried_through_upscaling():

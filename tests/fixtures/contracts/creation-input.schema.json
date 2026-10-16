@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://imagen-cli.invalid/contracts/creation-input.schema.json",
+  "title": "ImagenCli Creation Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "session", "prompt"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "operation": {"enum": ["generate", "edit"]},
+    "session": {"type": "string", "minLength": 1},
+    "profile": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "prompt": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "inputs": {"type": "array", "items": {"$ref": "#/$defs/asset"}, "maxItems": 100},
+    "mask": {"$ref": "#/$defs/asset"},
+    "references": {"type": "array", "items": {"$ref": "#/$defs/asset"}, "maxItems": 100},
+    "count": {"type": "integer", "minimum": 1, "maximum": 100, "default": 1},
+    "size": {"type": "string", "minLength": 1},
+    "provider_params": {"type": "object"},
+    "retry_of_job_id": {"type": "string", "pattern": "^job_[0-9a-f]{32}$"},
+    "ack_duplicate_cost": {"type": "boolean"}
+  },
+  "$defs": {
+    "asset": {"type": "string", "pattern": "^(artifact:art_[0-9a-f]{32}|file:.+)$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"operation": {"const": "edit"}}}, "then": {"required": ["inputs"], "properties": {"inputs": {"minItems": 1}}}},
+    {"if": {"required": ["retry_of_job_id"]}, "then": {"required": ["ack_duplicate_cost"], "properties": {"ack_duplicate_cost": {"const": true}}}},
+    {"if": {"required": ["ack_duplicate_cost"]}, "then": {"required": ["retry_of_job_id"]}}
+  ]
+}

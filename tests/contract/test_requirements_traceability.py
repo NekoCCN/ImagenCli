@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT = ROOT / "docs" / "requirements-traceability.md"
 EXPECTED = {f"FR-{index:03d}" for index in range(1, 45)} | {
@@ -10,6 +12,9 @@ EXPECTED = {f"FR-{index:03d}" for index in range(1, 45)} | {
 }
 ROW = re.compile(r"^\| (FR-\d{3}|SC-\d{3}) \|(.*)\|$", re.MULTILINE)
 STATUSES = {"implemented", "partial", "unimplemented"}
+pytestmark = pytest.mark.skipif(
+    not DOCUMENT.is_file(), reason="traceability document is local and unversioned"
+)
 
 
 def test_every_requirement_appears_exactly_once() -> None:

@@ -9,7 +9,7 @@ import pytest
 from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTRACTS = ROOT / "specs/001-image-workbench/contracts"
+CONTRACTS = ROOT / "tests" / "fixtures" / "contracts"
 EXAMPLES = json.loads((CONTRACTS / "examples.json").read_text())
 
 

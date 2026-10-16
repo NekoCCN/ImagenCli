@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://imagen-cli.invalid/contracts/result.schema.json",
+  "title": "ImagenCli Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ok", "status", "data", "error"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "ok": {"type": "boolean"},
+    "status": {"enum": ["succeeded", "accepted", "approved", "planned", "internal_error", "validation_error", "unsupported_capability", "authentication_error", "permission_denied", "not_found", "conflict", "wait_timeout", "unknown", "approval_required", "failed", "save_failed", "canceled", "safety_refusal", "partial_success"]},
+    "data": {"type": "object"},
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "message", "retryable", "accepted_maybe", "next_actions"],
+          "properties": {
+            "type": {"enum": ["validation_error", "unsupported_capability", "authentication_error", "permission_denied", "not_found", "conflict", "wait_timeout", "outcome_unknown", "approval_required", "provider_error", "transport_error", "save_failed", "canceled", "safety_refusal", "partial_failure", "internal_error"]},
+            "message": {"type": "string", "minLength": 1},
+            "retryable": {"type": "boolean"},
+            "accepted_maybe": {"type": "boolean"},
+            "next_actions": {
+              "type": "array", "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["command", "creates_paid_request"],
+                "properties": {"command": {"type": "string", "minLength": 1}, "creates_paid_request": {"type": "boolean"}}
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [{
+    "if": {"properties": {"ok": {"const": true}}},
+    "then": {"properties": {"status": {"enum": ["succeeded", "accepted", "approved", "planned"]}, "error": {"type": "null"}}},
+    "else": {"properties": {"status": {"not": {"enum": ["succeeded", "accepted", "approved", "planned"]}}, "error": {"type": "object"}}}
+  }]
+}

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS = ROOT / "specs" / "001-image-workbench" / "contracts"
+CONTRACTS = ROOT / "tests" / "fixtures" / "contracts"
 DOC_DIRS = (ROOT / "specs" / "001-image-workbench", ROOT / "docs")
 LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
@@ -57,7 +57,9 @@ def main() -> int:
         checks += 1
 
     missing: list[dict[str, str]] = []
-    for path in (item for directory in DOC_DIRS for item in directory.rglob("*.md")):
+    for path in (
+        item for directory in DOC_DIRS if directory.is_dir() for item in directory.rglob("*.md")
+    ):
         for target in LINK.findall(path.read_text(encoding="utf-8")):
             if "://" in target or target.startswith("#"):
                 continue

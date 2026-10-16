@@ -22,7 +22,7 @@ jobs:
         with:
           version: '0.13.1'
           python-version: ${{ matrix.python }}
-      - run: uv sync --locked --all-extras
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run pytest -m "not live and not performance"
