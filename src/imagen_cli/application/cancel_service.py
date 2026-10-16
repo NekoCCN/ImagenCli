@@ -2,19 +2,70 @@
 
 import os
 import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 from imagen_cli.storage.repositories import Repositories
 
 
-def process_start(pid: int) -> str | None:
+def _linux_start(pid: int) -> str | None:
     try:
         text = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
         return None
     fields = text[text.rindex(")") + 2:].split()
     return fields[19] if len(fields) > 19 else None
+
+
+def _darwin_start(pid: int) -> str | None:
+    try:
+        done = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = done.stdout.strip()
+    return value or None if done.returncode == 0 else None
+
+
+def _windows_start(pid: int) -> str | None:
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(
+        process_query_limited_information, False, pid
+    ) if hasattr(ctypes, "windll") else None
+    if not handle:
+        return None
+    creation, exit_time = wintypes.FILETIME(), wintypes.FILETIME()
+    kernel, user = wintypes.FILETIME(), wintypes.FILETIME()
+    try:
+        ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined]
+            handle, ctypes.byref(creation), ctypes.byref(exit_time),
+            ctypes.byref(kernel), ctypes.byref(user),
+        )
+        if not ok:
+            return None
+        return f"{creation.dwHighDateTime:08x}{creation.dwLowDateTime:08x}"
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+
+
+def process_start(pid: int) -> str | None:
+    """Stable per-process identity on Linux, macOS and Windows."""
+    if type(pid) is not int or pid <= 0:
+        return None
+    if sys.platform.startswith("linux"):
+        return _linux_start(pid)
+    if sys.platform == "darwin":
+        return _darwin_start(pid)
+    if sys.platform.startswith("win"):
+        return _windows_start(pid)
+    return None
 
 
 def executor_id() -> dict[str, Any] | None:

@@ -12,9 +12,16 @@ from imagen_cli.storage.repositories import Repositories
 
 
 def resolve_credential(reference: str) -> str:
-    if re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference) is None:
+    if re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference):
+        value = os.environ.get(reference[4:], "")
+    elif re.fullmatch(r"keyring:[A-Za-z0-9._-]{1,128}", reference):
+        try:
+            import keyring
+        except ImportError as error:
+            raise ValueError("credential backend unavailable") from error
+        value = keyring.get_password(reference[8:], "imagen") or ""
+    else:
         raise ValueError("unsupported credential reference")
-    value = os.environ.get(reference[4:], "")
     if not value.strip() or any(char in value for char in "\r\n\0"):
         raise ValueError("credential unavailable")
     return value

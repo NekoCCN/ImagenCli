@@ -229,7 +229,11 @@ class Container:
             except ImportError as error:  # optional extra
                 raise ValueError("tui extra is not installed") from error
             WorkbenchApp(
-                Deps(self.repositories, self.artifact_store),
+                Deps(
+                    self.repositories, self.artifact_store,
+                    private_store=self.private_state_store,
+                    workspace_root=self.resolved_workspace.root,
+                ),
                 workspace_label=str(self.resolved_workspace.root),
             ).run()
             return "succeeded", {}
@@ -242,6 +246,31 @@ class Container:
             return postprocess.transform_(
                 self.repositories, self.artifact_store, args["artifact"],
                 pipeline=args.get("pipeline"), op=args.get("op"), session=args.get("session"),
+            )
+        if command == "ops":
+            from imagen_cli.application import media_ops
+
+            return "succeeded", {"operations": sorted(media_ops.OPS)}
+        if command == "sheet":
+            from jsonschema import validate
+
+            from imagen_cli.application.sheet_service import build as build_sheet
+
+            validate(args, discover(command)["input_schema"])
+            sources = [item.strip() for item in args["artifacts"].split(",") if item.strip()]
+            return "succeeded", build_sheet(
+                self.repositories, self.artifact_store, sources,
+                session=args.get("session"),
+                columns=int(args.get("columns", 3)), cell=int(args.get("cell", 256)),
+            )
+        if command == "compare":
+            from jsonschema import validate
+
+            from imagen_cli.application.quality_service import compare
+
+            validate(args, discover(command)["input_schema"])
+            return "succeeded", compare(
+                self.repositories, self.artifact_store, args["first"], args["second"]
             )
         if command.startswith("models "):
             from jsonschema import validate
@@ -324,10 +353,13 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             if command == "cache audit":
-                return "succeeded", cache.audit_(self.repositories, self.artifact_store)
+                return "succeeded", cache.audit_(
+                    self.repositories, self.artifact_store, self.private_state_store,
+                )
             return "succeeded", cache.purge_(
                 self.repositories, self.artifact_store,
                 plan=args.get("plan"), yes=args.get("yes") is True,
+                private_store=self.private_state_store,
             )
         if command not in {
             "session create", "session list", "session show", "session resume",

@@ -36,7 +36,7 @@ class LeaseError(ValueError):
 
 def detached_supported() -> bool:
     """Detached startup is only claimed where process identity can be verified."""
-    return sys.platform.startswith("linux") and Path("/proc/self/stat").exists()
+    return process_start(os.getpid()) is not None
 
 
 def _timestamp(value: datetime) -> str:
@@ -319,7 +319,11 @@ def spawn_worker(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        start_new_session=os.name != "nt",
+        creationflags=(
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        ) if os.name == "nt" else 0,
         close_fds=True,
         env=environment,
     )

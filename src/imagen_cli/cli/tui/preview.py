@@ -32,8 +32,12 @@ def describe(row: dict[str, Any], path: Path | None) -> str:
 def ansi_blocks(path: Path, *, cols: int = 40, rows: int = 20) -> str:
     """Two vertical pixels per character cell, using the upper half block."""
     with Image.open(path) as image:
-        target = (max(1, cols), max(1, rows * 2))
-        scaled = image.convert("RGB").resize(target, Image.Resampling.LANCZOS)
+        return ansi_image(image, cols=cols, rows=rows)
+
+
+def ansi_image(image: Image.Image, *, cols: int = 40, rows: int = 20) -> str:
+    target = (max(1, cols), max(1, rows * 2))
+    scaled = image.convert("RGB").resize(target, Image.Resampling.LANCZOS)
     lines = []
     for y in range(0, scaled.height - 1, 2):
         parts = []

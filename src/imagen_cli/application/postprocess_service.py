@@ -16,6 +16,7 @@ from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.repositories import Repositories
 
 MAX_STEPS = 20
+NONDETERMINISTIC_OPS = {"superres"}
 
 
 def _engine() -> dict[str, str]:
@@ -32,11 +33,14 @@ def validate(pipeline: Any) -> list[dict[str, Any]]:
     if len(pipeline) > MAX_STEPS:
         raise ValueError("pipeline exceeds the step limit")
     steps: list[dict[str, Any]] = []
-    for step in pipeline:
+    for index, step in enumerate(pipeline):
         if not isinstance(step, dict) or not isinstance(step.get("op"), str):
             raise ValueError("each step needs an op")
         name = step["op"]
-        if name not in media_ops.OPS:
+        if name == "encode":
+            if index != len(pipeline) - 1:
+                raise ValueError("encode must be the final step")
+        elif name not in media_ops.OPS:
             raise ValueError(f"unknown operation: {name}")
         params = step.get("params", {})
         if not isinstance(params, dict):
@@ -81,21 +85,28 @@ def apply(
     with Image.open(path) as opened:
         opened.load()
         current = opened.convert("RGBA" if "A" in opened.getbands() else "RGB")
+    recorded = [dict(step) for step in steps]
+    options: dict[str, Any] = {}
+    if steps[-1]["op"] == "encode":
+        options = steps.pop()["params"]
     for step in steps:
         operation = media_ops.OPS[step["op"]]
         try:
             current = operation(current, **step["params"])
         except TypeError as error:
             raise ValueError(f"invalid parameters for {step['op']}") from error
-    data = media_ops.encode(current)
+    try:
+        data = media_ops.encode(current, **options)
+    except TypeError as error:
+        raise ValueError("invalid encode parameters") from error
     identity = new_id("art")
     manifest = {
         "kind": "postprocess",
         "source_artifact": source,
         "source_sha256": row["sha256"],
-        "pipeline": steps,
+        "pipeline": recorded,
         "engine": _engine(),
-        "deterministic": True,
+        "deterministic": not any(step["op"] in NONDETERMINISTIC_OPS for step in recorded),
         "seed": None,
     }
     store.stage(identity, data, origin_manifest=manifest)

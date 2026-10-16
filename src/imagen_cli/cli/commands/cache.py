@@ -7,6 +7,7 @@ from typing import Any
 
 from imagen_cli.application import cache_service
 from imagen_cli.storage.artifacts import ArtifactStore
+from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 
@@ -26,10 +27,17 @@ def _limits() -> tuple[int, int]:
     )
 
 
-def audit_(repositories: Repositories, store: ArtifactStore) -> dict[str, Any]:
+def audit_(
+    repositories: Repositories,
+    store: ArtifactStore,
+    private_store: PrivateStateStore | None = None,
+) -> dict[str, Any]:
     staging, deleted = _limits()
     return cache_service.report(
-        cache_service.audit(repositories, store, staging_days=staging, deleted_days=deleted)
+        cache_service.audit(
+            repositories, store, staging_days=staging, deleted_days=deleted,
+            private_store=private_store,
+        )
     )
 
 
@@ -39,11 +47,13 @@ def purge_(
     *,
     plan: str | None = None,
     yes: bool = False,
+    private_store: PrivateStateStore | None = None,
 ) -> dict[str, Any]:
     staging, deleted = _limits()
     if plan is None or not yes:
-        return {"dry_run": True, **audit_(repositories, store)}
+        return {"dry_run": True, **audit_(repositories, store, private_store)}
     result = cache_service.purge(
-        repositories, store, plan, staging_days=staging, deleted_days=deleted
+        repositories, store, plan, staging_days=staging, deleted_days=deleted,
+        private_store=private_store,
     )
     return {"dry_run": False, "plan_digest": plan, **result}

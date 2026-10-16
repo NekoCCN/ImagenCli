@@ -51,6 +51,14 @@ def live_references(repositories: Repositories) -> set[str]:
     }
 
 
+def invalidate_models(repositories: Repositories, profile_id: str) -> int:
+    """Endpoint changes invalidate every declared model for that profile."""
+    cursor = repositories.connection.execute(
+        'DELETE FROM "provider_models" WHERE profile_id=?', (profile_id,)
+    )
+    return cursor.rowcount
+
+
 def delete_references(repositories: Repositories, artifact_id: str) -> int:
     """Remove every ownership row for one artifact; both tables are required."""
     removed = 0

@@ -12,7 +12,9 @@ class ProfileService:
 
     _FORBIDDEN = {"api_key", "access_token", "secret", "password", "token"}
 
-    _ENV_REFERENCE = re.compile(r"env:[A-Za-z_][A-Za-z0-9_]*\Z")
+    _REFERENCE = re.compile(
+        r"(env:[A-Za-z_][A-Za-z0-9_]*|keyring:[A-Za-z0-9._-]{1,128})\Z"
+    )
 
     def build(
         self,
@@ -27,8 +29,8 @@ class ProfileService:
         name: str | None = None,
     ) -> ProviderProfile:
         """Non-interactive profile construction; only env references are accepted."""
-        if self._ENV_REFERENCE.fullmatch(credential_ref) is None:
-            raise ValueError("credential_ref must be env:NAME")
+        if self._REFERENCE.fullmatch(credential_ref) is None:
+            raise ValueError("credential_ref must be env:NAME or keyring:SERVICE")
         return ProviderProfile.model_validate({
             "id": identity,
             "name": name or identity,

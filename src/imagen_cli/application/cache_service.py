@@ -12,6 +12,7 @@ from typing import Any
 
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore
+from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 from imagen_cli.storage.safety import safe_path
 
@@ -63,6 +64,7 @@ def audit(
     now: datetime | None = None,
     staging_days: int = 7,
     deleted_days: int = 30,
+    private_store: PrivateStateStore | None = None,
 ) -> list[Entry]:
     """Classify reclaimable rows; kinds are mutually exclusive by save_state."""
     moment = (now or datetime.now(UTC)).astimezone(UTC)
@@ -122,6 +124,33 @@ def audit(
             continue
         entries.append(Entry("expired_plan", row["id"], 0, {}))
 
+    if private_store is not None:
+        turns = {
+            row["id"]: row for row in queries.iter_all(repositories, "turns")
+        }
+        claimed: set[str] = set()
+        for row in queries.iter_all(repositories, "native_contexts", include_private=True):
+            relpath = row.get("private_relpath")
+            if not isinstance(relpath, str):
+                continue
+            claimed.add(relpath)
+            expires = _parse(row.get("expires_at"))
+            source = row.get("source_turn_id")
+            turn = turns.get(source) if isinstance(source, str) else None
+            session_id = turn.get("session_id") if turn else None
+            orphaned = bool(
+                session_id and sessions.get(session_id, {}).get("deleted_at")
+            )
+            if not ((expires is not None and expires < moment) or (expires is None and orphaned)):
+                continue
+            size = _size(safe_path(private_store.root, relpath))
+            entries.append(Entry("expired_native_context", row["id"], size, {}))
+        for identity in private_store.identities():
+            if identity in jobs or identity + ".bin" in claimed:
+                continue
+            size = _size(safe_path(private_store.root, identity + ".bin"))
+            entries.append(Entry("orphan_job_payload", identity, size, {}))
+
     return sorted(entries, key=lambda item: (item.kind, item.identity))
 
 
@@ -149,6 +178,8 @@ def purge(
     clock: Callable[[], datetime] | None = None,
     staging_days: int = 7,
     deleted_days: int = 30,
+    private_store: PrivateStateStore | None = None,
+    max_entries: int = 2000,
 ) -> dict[str, Any]:
     """Delete exactly the confirmed plan; any audit drift refuses the whole run."""
     now = (clock or (lambda: datetime.now(UTC)))().astimezone(UTC)
@@ -156,7 +187,10 @@ def purge(
         entries = audit(
             repositories, store, now=now,
             staging_days=staging_days, deleted_days=deleted_days,
+            private_store=private_store,
         )
+        if len(entries) > max_entries:
+            raise ValueError("cache plan exceeds the per-run entry limit")
         if digest(entries) != plan_digest:
             raise ValueError("cache plan digest mismatch")
         results: list[dict[str, Any]] = []
@@ -166,6 +200,23 @@ def purge(
             if entry.kind in ROW_ONLY_KINDS:
                 table = "approvals" if entry.kind == "expired_approval" else "plans"
                 repositories.delete(table, entry.identity)
+                results.append({"id": entry.identity, "kind": entry.kind, "result": "deleted"})
+                continue
+            if entry.kind == "expired_native_context":
+                row = repositories.get("native_contexts", entry.identity, include_private=True)
+                if row is None or private_store is None:
+                    results.append({"id": entry.identity, "kind": entry.kind,
+                                    "result": "already_missing"})
+                    continue
+                private_store.delete(row["private_relpath"])
+                repositories.delete("native_contexts", entry.identity)
+                freed += entry.bytes
+                results.append({"id": entry.identity, "kind": entry.kind, "result": "deleted"})
+                continue
+            if entry.kind == "orphan_job_payload":
+                if private_store is not None:
+                    private_store.delete(entry.identity + ".bin")
+                freed += entry.bytes
                 results.append({"id": entry.identity, "kind": entry.kind, "result": "deleted"})
                 continue
             row = repositories.get("artifacts", entry.identity, include_private=True)

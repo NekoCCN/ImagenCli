@@ -82,3 +82,20 @@ def test_missing_owner_requires_explicit_session(workspace, tmp_path):
         repositories, store, "art_" + "a" * 32, [{"op": "grayscale"}], session_id="ses_b",
     )
     assert Image.open(store.get(result["id"])).mode == "RGB"
+
+
+def test_encode_step_sets_the_media_type_and_is_recorded(workspace):
+    repositories, store = workspace
+    pipeline = [{"op": "resize", "params": {"scale": 2}},
+                {"op": "encode", "params": {"format": "jpeg", "quality": 80}}]
+    result = postprocess_service.apply(repositories, store, "art_" + "a" * 32, pipeline)
+    assert result["media_type"] == "image/jpeg"
+    assert result["origin_manifest"]["pipeline"] == pipeline
+
+
+def test_encode_must_be_the_final_step(workspace):
+    repositories, store = workspace
+    with pytest.raises(ValueError, match="final step"):
+        postprocess_service.validate(
+            [{"op": "encode", "params": {"format": "png"}}, {"op": "grayscale"}]
+        )

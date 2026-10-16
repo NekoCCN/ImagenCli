@@ -35,7 +35,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "count", "size", "provider-params-file", "digest", "scope", "concurrency",
                 "to", "from-turn", "artifact", "name", "plan",
                 "provider", "family", "base-url", "model-default", "credential-ref",
-                "revision", "pipeline", "op", "send-credential", "id",
+                "revision", "pipeline", "op", "send-credential", "id", "first", "second",
+                "artifacts", "columns", "cell",
             }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")

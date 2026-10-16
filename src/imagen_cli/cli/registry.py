@@ -48,7 +48,7 @@ COMMANDS = {
                 ("profile list", "列出本地 profile"),
                 ("profile show", "查看本地 profile"),
                 ("profile update", "创建新的 profile revision"),
-                ("profile set", "以命令行参数创建或更新 profile；只接受 env: 引用"),
+                ("profile set", "以命令行参数创建或更新 profile；接受 env: 或 keyring: 引用"),
                 ("session create", "创建本地创作会话"),
                 ("session list", "分页列出本地会话"),
                 ("session show", "查看本地会话历史"),
@@ -75,6 +75,9 @@ COMMANDS = {
                 ("models add", "手工声明一个模型，evidence=manual"),
                 ("models list", "列出 profile 的已声明模型"),
                 ("transform", "对产物应用确定性变换并生成新产物；不覆盖源文件"),
+                ("compare", "计算两个产物的 PSNR 与 SSIM；只读，不创建新产物"),
+                ("sheet", "把多个产物拼成联系表并生成新产物"),
+                ("ops", "列出可用的确定性变换操作"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
         ),
@@ -221,6 +224,23 @@ def _input_schema(name: str) -> dict[str, Any]:
             "session": text,
         }
         required = ("artifact",)
+    elif name == "sheet":
+        properties = {
+            "artifacts": {"type": "string", "minLength": 1},
+            "session": text,
+            "columns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3},
+            "cell": {"type": "integer", "minimum": 32, "maximum": 2048, "default": 256},
+        }
+        required = ("artifacts",)
+    elif name == "ops":
+        properties = {}
+        required = ()
+    elif name == "compare":
+        properties = {
+            "first": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "second": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+        }
+        required = ("first", "second")
     elif name == "asset show":
         properties = {"artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}}
         required = ("artifact",)
@@ -241,6 +261,21 @@ def _data_schema(command: Command) -> dict[str, Any]:
         return _object({})
     if command.name == "transform":
         return _object({"artifact": {"type": "object"}, "source": {"type": "string"}})
+    if command.name == "sheet":
+        return _object({
+            "artifact": {"type": "object"},
+            "sources": {"type": "array", "items": {"type": "object"}},
+        }, ("artifact", "sources"))
+    if command.name == "ops":
+        return _object({"operations": {"type": "array", "items": {"type": "string"}}},
+                       ("operations",))
+    if command.name == "compare":
+        return _object({
+            "first": {"type": "string"}, "second": {"type": "string"},
+            "width": {"type": "integer"}, "height": {"type": "integer"},
+            "identical": {"type": "boolean"}, "psnr": {"type": ["number", "null"]},
+            "ssim": {"type": "number"},
+        }, ("first", "second", "identical", "psnr", "ssim"))
     if command.name.startswith("models "):
         return _object({
             "models": {"type": "array", "items": {"type": "object"}},

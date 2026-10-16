@@ -114,6 +114,18 @@ class PrivateStateStore:
             raise ValueError("private response must be an object")
         return value
 
+    def delete(self, relpath: str) -> None:
+        with self._directory():
+            safe_path(self.root, relpath).unlink(missing_ok=True)
+
+    def identities(self) -> list[str]:
+        with self._directory():
+            return sorted(
+                path.name.removesuffix(".bin")
+                for path in self.root.iterdir()
+                if path.name.endswith(".bin") and path.is_file()
+            )
+
     def read(self, identity: str, expected_sha256: str) -> bytes:
         with self._directory():
             path = safe_path(self.root, storage_id(identity) + ".bin")

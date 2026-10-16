@@ -4,6 +4,7 @@ import re
 import sqlite3
 from typing import Any
 
+from imagen_cli.storage import queries
 from imagen_cli.storage.repositories import Repositories
 
 
@@ -75,10 +76,16 @@ def execute(
             else:
                 if data["revision"] != existing["revision"]:
                     return "conflict", {}
+                endpoint_changed = (
+                    data.get("base_url") != existing.get("base_url")
+                    or data.get("family") != existing.get("family")
+                )
                 row = repositories.update("profiles", profile, {
                     **{key: value for key, value in data.items() if key != "id"},
                     "revision": existing["revision"] + 1,
                 })
+                if endpoint_changed:
+                    queries.invalidate_models(repositories, profile)
         else:
             if existing is None:
                 return "not_found", {}

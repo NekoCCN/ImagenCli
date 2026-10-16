@@ -17,9 +17,18 @@ vertex = ["google-auth>=2"]
 tui = [
     "textual>=0.80",
 ]
+postprocess = ["numpy>=2"]
+keyring = ["keyring>=25"]
+ai-onnx = ["onnxruntime>=1.20", "numpy>=2"]
+ai-onnx-gpu = ["onnxruntime-gpu>=1.20", "numpy>=2"]
+ai-openvino = ["onnxruntime-openvino>=1.20", "numpy>=2"]
+ai-torch = ["torch>=2.4", "numpy>=2"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.11", "mypy>=1.15", "jsonschema>=4.23", "types-jsonschema>=4"]
+dev = [
+    "pytest>=8", "ruff>=0.11", "mypy>=1.15", "jsonschema>=4.23", "types-jsonschema>=4",
+    "numpy>=2", "textual>=0.80",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/imagen_cli"]
@@ -46,3 +55,7 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["onnxruntime", "onnxruntime.*", "torch", "torch.*"]
+ignore_missing_imports = true

@@ -82,6 +82,8 @@ def refresh(
     )
     try:
         response = http.get(url, headers=_headers(str(profile["family"]), credential))
+    except httpx.TimeoutException as error:
+        raise ValueError("catalog request timed out") from error
     except httpx.HTTPError as error:
         raise ValueError("catalog request failed") from error
     finally:
@@ -89,6 +91,10 @@ def refresh(
             http.close()
     if response.status_code in {401, 403}:
         raise ValueError("catalog authentication failed")
+    if response.status_code == 429:
+        raise ValueError("catalog rate limited")
+    if 500 <= response.status_code < 600:
+        raise ValueError("catalog endpoint failed")
     if response.status_code == 404:
         raise ValueError("catalog endpoint not found")
     if response.status_code != 200:

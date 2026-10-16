@@ -8,6 +8,7 @@ import pytest
 from imagen_cli.application import cache_service
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.database import connect
+from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 NOW = datetime(2026, 10, 24, tzinfo=UTC)
@@ -141,3 +142,74 @@ def test_concurrent_reference_blocks_purge(store):
     with pytest.raises(ValueError, match="digest"):
         cache_service.purge(repositories, artifacts, digest, clock=lambda: NOW)
     assert repositories.get("artifacts", identity) is not None
+
+
+def private(tmp_path: Path) -> PrivateStateStore:
+    return PrivateStateStore(tmp_path / "private")
+
+
+def test_expired_native_context_is_reclaimed_with_its_file(store, tmp_path):
+    repositories, artifacts, _ = store
+    private_store = private(tmp_path)
+    saved = private_store.write("job_ctx", b"native context")
+    repositories.insert(
+        "native_contexts",
+        {"id": "ctx_a", "source_turn_id": None, "private_relpath": saved["private_relpath"],
+         "sha256": saved["sha256"], "expires_at": OLD},
+    )
+
+    entries = cache_service.audit(
+        repositories, artifacts, now=NOW, private_store=private_store
+    )
+    assert [entry.kind for entry in entries] == ["expired_native_context"]
+    assert entries[0].bytes == len(b"native context")
+
+    plan = cache_service.report(entries)["plan_digest"]
+    cache_service.purge(
+        repositories, artifacts, plan, clock=lambda: NOW, private_store=private_store
+    )
+    assert repositories.get("native_contexts", "ctx_a") is None
+    assert private_store.identities() == []
+
+
+def test_native_context_without_expiry_stays(store, tmp_path):
+    repositories, artifacts, _ = store
+    private_store = private(tmp_path)
+    private_store.write("job_ctx", b"native context")
+    repositories.insert(
+        "native_contexts",
+        {"id": "ctx_a", "source_turn_id": None, "private_relpath": "job_ctx.bin",
+         "sha256": "a" * 64},
+    )
+    assert cache_service.audit(
+        repositories, artifacts, now=NOW, private_store=private_store
+    ) == []
+
+
+def test_orphan_job_payload_is_reclaimed(store, tmp_path):
+    repositories, artifacts, _ = store
+    private_store = private(tmp_path)
+    private_store.write("job_orphan", b"stale response")
+
+    entries = cache_service.audit(
+        repositories, artifacts, now=NOW, private_store=private_store
+    )
+    assert [entry.kind for entry in entries] == ["orphan_job_payload"]
+    plan = cache_service.report(entries)["plan_digest"]
+    cache_service.purge(
+        repositories, artifacts, plan, clock=lambda: NOW, private_store=private_store
+    )
+    assert private_store.identities() == []
+
+
+def test_purge_refuses_plans_over_the_entry_limit(store):
+    repositories, artifacts, data = store
+    for seed in range(10, 13):
+        publish(artifacts, seed, data)
+    entries = cache_service.audit(repositories, artifacts, now=NOW)
+    plan = cache_service.report(entries)["plan_digest"]
+    with pytest.raises(ValueError, match="entry limit"):
+        cache_service.purge(
+            repositories, artifacts, plan, clock=lambda: NOW, max_entries=2
+        )
+    assert len(repositories.list("artifacts", limit=10)) == 3

@@ -145,3 +145,93 @@ def test_preview_describes_the_artifact(deps):
     row = repositories.get("artifacts", identity)
     text = preview.describe(row, store.get(identity))
     assert "4x4" in text
+
+
+def _publish_output(deps_value, node: int = 0) -> str:
+    import io
+
+    stream = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(stream, format="PNG")
+    identity = "art_" + f"{node:032x}"
+    deps_value.store.stage(identity, stream.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": f"ses_{node:032x}", "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    return identity
+
+
+def test_transform_preview_writes_only_on_enter(deps):
+    deps_value, _ = deps
+    calls = []
+
+    def transform(artifact, pipeline, session):
+        calls.append((artifact, pipeline, session))
+        return {}
+
+    deps_value.transform = transform
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            assert calls == []
+            await pilot.press("enter")
+            await pilot.pause()
+
+    _publish_output(deps_value)
+    asyncio.run(run())
+    assert len(calls) == 1
+
+
+def test_providers_refresh_models_uses_the_selection(deps):
+    deps_value, _ = deps
+    deps_value.repositories.insert("profiles", {
+        "id": "p1", "name": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "m1",
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    refreshed = []
+
+    def refresh(profile):
+        refreshed.append(profile)
+        return "succeeded", {"models": []}
+
+    deps_value.models_refresh = refresh
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert refreshed == ["p1"]
+
+
+def test_export_asks_for_a_destination(deps):
+    deps_value, _ = deps
+    exported = []
+
+    def export(session, destination):
+        exported.append((session, destination))
+        return "succeeded", {"artifacts": 0}
+
+    deps_value.export = export
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("e")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert exported and exported[0][0] == "ses_" + "0" * 32

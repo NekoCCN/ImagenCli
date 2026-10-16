@@ -11,11 +11,14 @@ from imagen_cli.storage.database import connect
 from imagen_cli.storage.repositories import Repositories
 
 
-def set_profile(workspace: Path, model: str = "m1", revision: int | None = None):
+def set_profile(
+    workspace: Path, model: str = "m1", revision: int | None = None,
+    base_url: str = "https://gateway.example/v1",
+):
     with Container(workspace=str(workspace)) as container:
         return container.execute("profile set", {
             "profile": "demo", "provider": "openai", "family": "images",
-            "base_url": "https://gateway.example/v1", "model_default": model,
+            "base_url": base_url, "model_default": model,
             "credential_ref": "env:DEMO_KEY", "revision": revision or 1,
         })
 
@@ -92,4 +95,44 @@ def test_auth_failure_is_reported(repositories):
             client=httpx.Client(transport=httpx.MockTransport(
                 lambda request: httpx.Response(401)
             )),
+        )
+
+
+def test_endpoint_change_invalidates_declared_models(tmp_path):
+    set_profile(tmp_path)
+    connection = connect(tmp_path / "state.sqlite3")
+    repositories = Repositories(connection)
+    repositories.insert("provider_models", {
+        "id": "demo:gpt-image-2.5", "profile_id": "demo", "model_id": "gpt-image-2.5",
+        "display_name": "gpt-image-2.5", "fetched_at": "2026-10-24T00:00:00Z",
+        "source_url": "https://gateway.example/v1/models", "evidence": "discovered",
+    })
+    connection.close()
+    same_host = set_profile(tmp_path, "m2", revision=1)
+    assert same_host[0] == "succeeded"
+    connection = connect(tmp_path / "state.sqlite3")
+    assert Repositories(connection).list("provider_models", limit=10)
+    connection.close()
+    moved = set_profile(tmp_path, "m3", revision=2, base_url="https://other.example/v1")
+    assert moved[0] == "succeeded"
+    connection = connect(tmp_path / "state.sqlite3")
+    assert Repositories(connection).list("provider_models", limit=10) == []
+    connection.close()
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (lambda request: (_ for _ in ()).throw(httpx.ReadTimeout("slow")), "timed out"),
+        (lambda request: httpx.Response(429), "rate limited"),
+        (lambda request: httpx.Response(503), "endpoint failed"),
+        (lambda request: httpx.Response(404), "not found"),
+    ],
+)
+def test_catalog_failures_are_mapped(repositories, failure, message):
+    profile = repositories.get("profiles", "p1", include_private=True)
+    with pytest.raises(ValueError, match=message):
+        model_catalog_service.refresh(
+            repositories, profile,
+            client=httpx.Client(transport=httpx.MockTransport(failure)),
         )
