@@ -80,7 +80,9 @@ def creation(**overrides):
 
 def test_creation_examples_and_result_examples_match_contracts():
     c = domain("contracts")
-    examples = json.loads((ROOT / "tests/fixtures/contracts/examples.json").read_text())
+    examples = json.loads((ROOT / "tests/fixtures/contracts/examples.json").read_text(
+        encoding="utf-8"
+    ))
     for value in examples["creation_inputs"]:
         assert c.CreationInput.model_validate(value).model_dump(exclude_unset=True) == value
     for value in examples["invalid_creation_inputs"]:

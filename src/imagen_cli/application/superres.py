@@ -107,7 +107,7 @@ def digest_path(model: str, suffix: str = ".onnx") -> Path:
 
 def _recorded_digest(model: str, suffix: str) -> str | None:
     path = digest_path(model, suffix)
-    return path.read_text().strip() if path.exists() else None
+    return path.read_text(encoding="ascii").strip() if path.exists() else None
 
 
 def _record_digest(model: str, suffix: str, digest: str) -> None:

@@ -150,6 +150,8 @@ class Cli:
         except json.JSONDecodeError:
             value = {"status": "invalid_response", "data": {}}
         operation = arguments[0] if arguments else "unknown"
+        if len(arguments) > 1 and not arguments[1].startswith("-"):
+            operation += " " + arguments[1]
         self.calls.append(
             {"operation": operation, "duration_ms": duration, "outcome": outcome}
         )
@@ -190,7 +192,7 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
     workspace = directory / "workspace"
     workspace.mkdir()
     prompt_file = directory / "prompt.txt"
-    prompt_file.write_text(prompt)
+    prompt_file.write_text(prompt, encoding="utf-8")
     base_url = os.environ.get(journey.base_url_env, "")
     env = os.environ.copy()
     env.pop("IMAGEN_CACHE_STAGING_DAYS", None)
@@ -258,6 +260,17 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
             edited = cli("plan", "execute", edit_plan["id"])
             dossier["parameters"]["edit_requested"] = True
             check("edit produced a second artifact", len(edited["artifacts"]) == 1)
+            for artifact in edited["artifacts"]:
+                path = Path(artifact["path"])
+                artifacts.append({
+                    "sha256": artifact["sha256"], "width": artifact["width"],
+                    "height": artifact["height"], "byte_size": artifact["byte_size"],
+                })
+                check(
+                    "edited bytes match",
+                    path.exists() and _sha(path) == artifact["sha256"],
+                )
+                (directory / f"{artifact['id']}.png").write_bytes(path.read_bytes())
             check(
                 "edit reuses the same session",
                 edited["job"]["turn_id"] != job["turn_id"],
@@ -293,7 +306,8 @@ def run(journey: Journey, root: Path, *, prompt: str = PROMPT) -> dict[str, Any]
     dossier["calls"] = cli.calls
     dossier["finished_at"] = _stamp()
     (directory / "dossier.json").write_text(
-        json.dumps(dossier, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dumps(dossier, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
     )
     return dossier
 

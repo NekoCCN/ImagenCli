@@ -10,13 +10,16 @@ from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "tests" / "fixtures" / "contracts"
-EXAMPLES = json.loads((CONTRACTS / "examples.json").read_text())
+EXAMPLES = json.loads((CONTRACTS / "examples.json").read_text(encoding="utf-8"))
 
 
 def validator(name):
-    schemas = [json.loads(p.read_text()) for p in CONTRACTS.glob("*.schema.json")]
+    schemas = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in CONTRACTS.glob("*.schema.json")
+    ]
     registry = Registry().with_resources((s["$id"], Resource.from_contents(s)) for s in schemas)
-    schema = json.loads((CONTRACTS / name).read_text())
+    schema = json.loads((CONTRACTS / name).read_text(encoding="utf-8"))
     return jsonschema.Draft202012Validator(
         schema, registry=registry, format_checker=jsonschema.FormatChecker()
     )
