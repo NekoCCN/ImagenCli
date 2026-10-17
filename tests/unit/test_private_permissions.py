@@ -1,3 +1,4 @@
+import hashlib
 import os
 import stat
 
@@ -103,6 +104,9 @@ def test_windows_directory_verification_failure_closes_handle(tmp_path, monkeypa
     closed = []
 
     class Security:
+        def tighten(self, path):
+            return None
+
         def open(self, path):
             return 123
 
@@ -120,14 +124,15 @@ def test_windows_directory_verification_failure_closes_handle(tmp_path, monkeypa
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires real Windows ACL APIs and filesystem")
-def test_windows_real_private_acl_roundtrip_and_unsafe_existing_directory(tmp_path):
+def test_windows_real_private_acl_roundtrip_and_existing_directory_is_tightened(tmp_path):
     root = tmp_path / "private"
     store = private_state.PrivateStateStore(root)
     saved = store.write("ctx_a", b"test-only-opaque")
     assert store.read("ctx_a", saved["sha256"]) == b"test-only-opaque"
     with pytest.raises(FileExistsError):
         store.write("ctx_a", b"replacement")
-    unsafe = tmp_path / "inherited"
-    unsafe.mkdir()
-    with pytest.raises(PermissionError):
-        private_state.PrivateStateStore(unsafe)
+    inherited = tmp_path / "inherited"
+    inherited.mkdir()
+    tightened = private_state.PrivateStateStore(inherited)
+    tightened.write("ctx_b", b"test-only-opaque")
+    assert tightened.read("ctx_b", hashlib.sha256(b"test-only-opaque").hexdigest())
