@@ -146,12 +146,17 @@ def validate_zip(
 _WINDOWS = os.name == "nt"
 
 
+_BUILTIN_ADMINISTRATORS = "S-1-5-32-544"
+
+
 def _validate_windows_acl(
     owner: str, user: str, control: int, entries: list[tuple[int, int, int, str]]
 ) -> None:
     # Only our exact protected, single-user ACL is accepted; unknown ACEs fail closed.
+    # Elevated processes are owned by BUILTIN\Administrators even though the DACL
+    # stays user-only; ownership adds no read right beyond that DACL.
     if (
-        owner != user
+        owner not in {user, _BUILTIN_ADMINISTRATORS}
         or not control & 0x1000  # SE_DACL_PROTECTED
         or len(entries) != 1
         or entries[0] not in [(0, 0, 0x1F01FF, user), (0, 3, 0x1F01FF, user)]
