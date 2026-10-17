@@ -83,9 +83,16 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             lines.append(
                 f"  {entry.get('kind')} · {entry.get('id')} · {entry.get('bytes')} 字节"
             )
+    commands = _rows(data, "commands")
+    for row in commands:
+        state = "可用" if row.get("available") else "未交付"
+        lines.append(f"{row.get('name')} · {state} · {row.get('summary')}")
     operations = data.get("operations")
     if isinstance(operations, list) and operations:
         lines.append("操作：" + "、".join(str(item) for item in operations))
+    manual = data.get("manual")
+    if isinstance(manual, str) and manual:
+        lines.append(manual)
     turns = _rows(data, "turns")
     if turns:
         lines.append(f"轮次 {len(turns)}")
@@ -214,9 +221,24 @@ def _rich(value: dict[str, Any], width: int) -> str:
         for entry in entries[:_MAX_ROWS]:
             table.add_row(str(entry.get("kind")), str(entry.get("id")), str(entry.get("bytes")))
         console.print(table)
+    commands = _rows(data, "commands")
+    if commands:
+        table = Table(title="命令", header_style="bold")
+        for column in ("命令", "状态", "说明"):
+            table.add_column(column, overflow="fold")
+        for row in commands:
+            table.add_row(
+                str(row.get("name")),
+                "可用" if row.get("available") else "未交付",
+                str(row.get("summary")),
+            )
+        console.print(table)
     operations = data.get("operations")
     if isinstance(operations, list) and operations:
         console.print(Panel("、".join(str(item) for item in operations), title="操作"))
+    manual = data.get("manual")
+    if isinstance(manual, str) and manual:
+        console.print(Panel(manual, title="调用规则"))
     turns = _rows(data, "turns")
     if turns:
         table = Table(title="轮次", header_style="bold")
@@ -237,7 +259,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
             table.add_row(str(index), str(artifact["path"]))
         console.print(table)
     if not any((plan, job, session, sessions, profiles, models, capabilities, entries,
-                operations, turns, artifacts)):
+                commands, operations, turns, artifacts)):
         console.print(json.dumps(data, ensure_ascii=False))
     return buffer.getvalue()
 
