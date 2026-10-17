@@ -26,6 +26,23 @@ def _rows(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
+def _schema_rows(data: dict[str, Any]) -> list[tuple[str, str, str]]:
+    schema = data.get("input_schema") or {}
+    properties = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    rows = []
+    for name in sorted(properties):
+        spec = properties[name] if isinstance(properties[name], dict) else {}
+        kind = str(spec.get("type") or ("enum" if "enum" in spec else "any"))
+        if "enum" in spec:
+            kind = " | ".join(str(item) for item in spec["enum"])
+        detail = "必填" if name in required else "可选"
+        if "default" in spec:
+            detail += f" · 默认 {spec['default']}"
+        rows.append((name, kind, detail))
+    return rows
+
+
 def _cost_line(cost: dict[str, Any]) -> str:
     amount = cost.get("actual") if cost.get("actual") is not None else cost.get("estimate")
     if amount is None:
@@ -87,6 +104,9 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
     for row in commands:
         state = "可用" if row.get("available") else "未交付"
         lines.append(f"{row.get('name')} · {state} · {row.get('summary')}")
+    parameters = _schema_rows(data)
+    for name, kind, detail in parameters:
+        lines.append(f"  参数 {name} · {kind} · {detail}")
     operations = data.get("operations")
     if isinstance(operations, list) and operations:
         lines.append("操作：" + "、".join(str(item) for item in operations))
@@ -221,6 +241,14 @@ def _rich(value: dict[str, Any], width: int) -> str:
         for entry in entries[:_MAX_ROWS]:
             table.add_row(str(entry.get("kind")), str(entry.get("id")), str(entry.get("bytes")))
         console.print(table)
+    parameters = _schema_rows(data)
+    if parameters:
+        table = Table(title="参数", header_style="bold")
+        for column in ("名称", "类型", "说明"):
+            table.add_column(column, overflow="fold")
+        for name, kind, detail in parameters:
+            table.add_row(name, kind, detail)
+        console.print(table)
     commands = _rows(data, "commands")
     if commands:
         table = Table(title="命令", header_style="bold")
@@ -259,7 +287,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
             table.add_row(str(index), str(artifact["path"]))
         console.print(table)
     if not any((plan, job, session, sessions, profiles, models, capabilities, entries,
-                commands, operations, turns, artifacts)):
+                commands, operations, turns, artifacts, parameters)):
         console.print(json.dumps(data, ensure_ascii=False))
     return buffer.getvalue()
 
