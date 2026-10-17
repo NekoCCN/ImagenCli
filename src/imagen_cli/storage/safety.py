@@ -220,6 +220,12 @@ class _WindowsSecurity:
             ),
             (
                 self.advapi,
+                "SetFileSecurityW",
+                [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID],
+                wintypes.BOOL,
+            ),
+            (
+                self.advapi,
                 "ConvertStringSecurityDescriptorToSecurityDescriptorW",
                 [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID],
                 wintypes.BOOL,
@@ -309,6 +315,21 @@ class _WindowsSecurity:
         finally:
             self.kernel.LocalFree(descriptor)
 
+    def tighten(self, path: Path) -> None:
+        """Replace an inherited DACL on a pre-existing directory with the protected one."""
+        descriptor = wintypes.LPVOID()
+        sddl = f"O:{self.user}D:P(A;OICI;FA;;;{self.user})"
+        self._ok(
+            self.advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl, 1, ctypes.byref(descriptor), None
+            )
+        )
+        try:
+            # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+            self._ok(self.advapi.SetFileSecurityW(str(path), 0x80000004, descriptor))
+        finally:
+            self.kernel.LocalFree(descriptor)
+
     def open(self, path: Path) -> int:
         handle = self.kernel.CreateFileW(
             str(path), 0x80020000, 1, None, 3, 0x02200000, None
@@ -388,6 +409,9 @@ def secure_directory(path: Path) -> Path:
         while not parent.exists():
             missing.append(parent)
             parent = parent.parent
+        if not missing:
+            # A pre-existing workspace keeps its inherited ACL until we replace it.
+            security.tighten(path)
         for parent in reversed(missing):
             security.create(parent, directory=True)
         handle = security.open(path)
