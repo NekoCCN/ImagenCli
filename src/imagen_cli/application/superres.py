@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-import httpx
 from PIL import Image
 
 # The x2/x4 entries are pinned exports of the canonical Real-ESRGAN weights; the
@@ -27,8 +27,25 @@ MANIFEST: dict[str, dict[str, Any]] = {
         "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
     },
     "realesrgan-x4plus-anime": {
-        "url": None, "sha256": None, "scale": 4, "license": "BSD-3-Clause",
-        "source": "https://github.com/xinntao/Real-ESRGAN",
+        "url": "https://huggingface.co/xiongjie/lightweight-real-ESRGAN-anime/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx",
+        "sha256": "2208c7ae8db793330abf1248fbce15585ad317e921c456265572836b92926c9a",
+        "scale": 4, "license": "BSD-3-Clause (upstream weights)",
+        "source": "https://huggingface.co/xiongjie/lightweight-real-ESRGAN-anime",
+        "note": "community ONNX export of RealESRGAN_x4plus_anime_6B",
+    },
+    "swinir-s-x2": {
+        "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/002_lightweightSR_DIV2K_s64w8_SwinIR-S_x2.onnx",
+        "sha256": "33706e22f983dfe2a16d10482392a957b22e342d106adf1a7886ef161903540a",
+        "scale": 2, "license": "Apache-2.0 (upstream); export repo tagged other",
+        "source": "https://huggingface.co/notaneimu/onnx-image-models",
+        "multiple": 8, "fixed_input": 64,
+    },
+    "swinir-s-x4": {
+        "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/002_lightweightSR_DIV2K_s64w8_SwinIR-S_x4.onnx",
+        "sha256": "052d17a1ba08fa625f64305c9bf7e9ea5cf738e8fcd3a4e0b8160bce1c4ee7c2",
+        "scale": 4, "license": "Apache-2.0 (upstream); export repo tagged other",
+        "source": "https://huggingface.co/notaneimu/onnx-image-models",
+        "multiple": 8, "fixed_input": 64,
     },
 }
 
@@ -115,6 +132,8 @@ def _record_digest(model: str, suffix: str, digest: str) -> None:
 
 
 def _download(url: str, target: Path) -> None:
+    import httpx
+
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".part")
     if target.exists():
@@ -214,16 +233,33 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
     if len(inputs) != 1:
         raise ValueError("super-resolution model must take one input")
     name = inputs[0].name
+    shape = list(inputs[0].shape)
+    fixed_height = shape[2] if len(shape) == 4 and isinstance(shape[2], int) else None
+    fixed_width = shape[3] if len(shape) == 4 and isinstance(shape[3], int) else None
+    fixed_input = MANIFEST[model].get("fixed_input")
+    fixed_height = fixed_height or fixed_input
+    fixed_width = fixed_width or fixed_input
+    multiple = int(MANIFEST[model].get("multiple", 1))
 
     def run(tile: Any) -> Any:
-        array = numpy.asarray(tile, dtype=numpy.float32) / 255.0
-        chw = numpy.transpose(array, (2, 0, 1))[None]
+        array = numpy.asarray(tile, dtype=numpy.float32)
+        height, width = array.shape[:2]
+        target_height = fixed_height or _round_up(height, multiple)
+        target_width = fixed_width or _round_up(width, multiple)
+        if (target_height, target_width) != (height, width):
+            array = numpy.pad(
+                array,
+                ((0, target_height - height), (0, target_width - width), (0, 0)),
+                mode="edge",
+            )
+        chw = numpy.transpose(array / 255.0, (2, 0, 1))[None]
         output = session.run(  # type: ignore[no-untyped-call, unused-ignore]
             None, {name: chw}
         )[0]
         result = numpy.squeeze(output, axis=0)
         result = numpy.transpose(result, (1, 2, 0))
-        return numpy.clip(result, 0, 1) * 255
+        scale = int(MANIFEST[model]["scale"])
+        return numpy.clip(result, 0, 1)[: height * scale, : width * scale] * 255
 
     engine = {
         "backend": backend or providers[0].replace("ExecutionProvider", "").lower(),
@@ -233,6 +269,12 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
         "weights_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
     return run, engine
+
+
+def _round_up(value: int, multiple: int) -> int:
+    if multiple <= 1:
+        return value
+    return ((value + multiple - 1) // multiple) * multiple
 
 
 def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
@@ -275,6 +317,10 @@ def upscale(image: Image.Image, *, model: str = "realesrgan-x4plus",
     if model not in MANIFEST:
         raise ValueError("unknown super-resolution model")
     scale = int(MANIFEST[model]["scale"])
+    fixed_input = MANIFEST[model].get("fixed_input")
+    if fixed_input:
+        # Some exports only accept one square size; overlap would exceed it.
+        tile, overlap = int(fixed_input), 0
     engine: dict[str, Any] = {}
     if runner is None:
         runner, engine = _make_runner(model, backend=backend, device=device, accept=accept)
@@ -302,12 +348,101 @@ def op(image: Image.Image, *, model: str = "realesrgan-x4plus",
     )[0]
 
 
+def catalog() -> dict[str, Any]:
+    models = []
+    for name, entry in sorted(MANIFEST.items()):
+        path = weights_path(name)
+        models.append({
+            "model": name,
+            "scale": entry["scale"],
+            "license": entry["license"],
+            "source": entry["source"],
+            "note": entry.get("note"),
+            "downloadable": entry.get("url") is not None,
+            "downloaded": path.exists(),
+            "bytes": path.stat().st_size if path.exists() else None,
+            "sha256": entry.get("sha256"),
+            "multiple": entry.get("multiple", 1),
+        })
+    return {**backend_report(), "models": models}
+
+
+def fetch(model: str, *, accept: bool = False) -> dict[str, Any]:
+    path = ensure_weights(model, accept=accept)
+    return {
+        "model": model,
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def benchmark(
+    repositories: Any,
+    store: Any,
+    artifact: str,
+    models: list[str],
+    *,
+    backend: str | None = None,
+    tile: int = 256,
+    overlap: int = 16,
+) -> dict[str, Any]:
+    """Self-consistency check: downscale, upscale back, compare with the original."""
+    from imagen_cli.application import filters_numpy
+
+    if not 1 <= len(models) <= 8 or len(set(models)) != len(models):
+        raise ValueError("benchmark needs one to eight distinct models")
+    for model in models:
+        if model not in MANIFEST:
+            raise ValueError("unknown super-resolution model")
+    row = repositories.get("artifacts", artifact)
+    if row is None or row["save_state"] != "published":
+        raise ValueError("artifact must be published")
+    path = store.get(artifact)
+    if path is None:
+        raise ValueError("artifact bytes are unavailable")
+    with Image.open(path) as opened:
+        opened.load()
+        reference = opened.convert("RGB")
+    results = []
+    for model in models:
+        scale = int(MANIFEST[model]["scale"])
+        small = reference.resize(
+            (max(1, reference.width // scale), max(1, reference.height // scale)),
+            Image.Resampling.LANCZOS,
+        )
+        started = time.perf_counter()
+        output, engine = upscale(
+            small, model=model, backend=backend, tile=tile, overlap=overlap,
+        )
+        elapsed = round((time.perf_counter() - started) * 1000)
+        measured = output
+        if output.size != reference.size:
+            measured = output.resize(reference.size, Image.Resampling.LANCZOS)
+        results.append({
+            "model": model,
+            "scale": scale,
+            "width": output.width,
+            "height": output.height,
+            "input": [small.width, small.height],
+            "psnr": round(filters_numpy.psnr(reference, measured), 4),
+            "ssim": round(filters_numpy.ssim(reference, measured), 6),
+            "duration_ms": elapsed,
+            "engine": engine,
+        })
+    return {
+        "artifact": artifact,
+        "reference": [reference.width, reference.height],
+        "results": results,
+    }
+
+
 def backend_report() -> dict[str, Any]:
     providers = available_providers()
     return {
         "onnxruntime": bool(providers),
         "providers": providers,
-        "models": sorted(MANIFEST),
+        "model_names": sorted(MANIFEST),
         "model_dir": str(weights_directory()),
     }
 

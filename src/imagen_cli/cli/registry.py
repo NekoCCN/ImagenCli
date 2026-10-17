@@ -78,6 +78,9 @@ COMMANDS = {
                 ("compare", "计算两个产物的 PSNR 与 SSIM；只读，不创建新产物"),
                 ("sheet", "把多个产物拼成联系表并生成新产物"),
                 ("ops", "列出可用的确定性变换操作"),
+                ("superres models", "列出超分模型、许可、下载与安装状态"),
+                ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
+                ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
         ),
@@ -235,6 +238,21 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "ops":
         properties = {}
         required = ()
+    elif name == "superres models":
+        properties = {}
+        required = ()
+    elif name == "superres fetch":
+        properties = {"model": text, "accept": {"const": True}}
+        required = ("model", "accept")
+    elif name == "superres benchmark":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "model": {"type": "string", "minLength": 1},
+            "backend": text,
+            "tile": {"type": "integer", "minimum": 32, "maximum": 2048, "default": 256},
+            "overlap": {"type": "integer", "minimum": 0, "maximum": 256, "default": 16},
+        }
+        required = ("artifact", "model")
     elif name == "compare":
         properties = {
             "first": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
@@ -266,6 +284,20 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "artifact": {"type": "object"},
             "sources": {"type": "array", "items": {"type": "object"}},
         }, ("artifact", "sources"))
+    if command.name == "superres models":
+        return _object({"models": {"type": "array", "items": {"type": "object"}},
+                        "providers": {"type": "array", "items": {"type": "string"}},
+                        "model_dir": {"type": "string"}},
+                       ("models", "providers", "model_dir"))
+    if command.name == "superres fetch":
+        return _object({"model": {"type": "string"}, "path": {"type": "string"},
+                        "bytes": {"type": "integer"}, "sha256": {"type": "string"}},
+                       ("model", "path", "bytes", "sha256"))
+    if command.name == "superres benchmark":
+        return _object({"artifact": {"type": "string"},
+                        "reference": {"type": "array"},
+                        "results": {"type": "array", "items": {"type": "object"}}},
+                       ("artifact", "reference", "results"))
     if command.name == "ops":
         return _object({"operations": {"type": "array", "items": {"type": "string"}}},
                        ("operations",))

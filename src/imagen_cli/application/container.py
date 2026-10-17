@@ -247,6 +247,26 @@ class Container:
                 self.repositories, self.artifact_store, args["artifact"],
                 pipeline=args.get("pipeline"), op=args.get("op"), session=args.get("session"),
             )
+        if command.startswith("superres "):
+            from jsonschema import validate
+
+            from imagen_cli.application import superres
+
+            validate(args, discover(command)["input_schema"])
+            if command == "superres models":
+                return "succeeded", superres.catalog()
+            if command == "superres fetch":
+                return "succeeded", superres.fetch(
+                    args["model"], accept=args.get("accept") is True,
+                )
+            selected = [
+                item.strip() for item in args["model"].split(",") if item.strip()
+            ]
+            return "succeeded", superres.benchmark(
+                self.repositories, self.artifact_store, args["artifact"], selected,
+                backend=args.get("backend"),
+                tile=int(args.get("tile", 256)), overlap=int(args.get("overlap", 16)),
+            )
         if command == "ops":
             from imagen_cli.application import media_ops
 

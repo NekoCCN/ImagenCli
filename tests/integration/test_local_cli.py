@@ -187,3 +187,17 @@ def test_network_creation_routes_remain_unsupported(tmp_path: Path, command: str
     assert code == 2
     assert value["status"] == "unsupported_capability"
     assert not workspace.exists()
+
+
+def test_ops_and_superres_catalog_are_offline(tmp_path: Path):
+    workspace = tmp_path / "ws"
+    code, result = invoke(workspace, "ops", "--output", "json", "--no-interactive")
+    assert code == 0 and result["status"] == "succeeded"
+    assert "superres" in result["data"]["operations"]
+    code, result = invoke(
+        workspace, "superres", "models", "--output", "json", "--no-interactive"
+    )
+    assert code == 0 and result["status"] == "succeeded"
+    names = {item["model"] for item in result["data"]["models"]}
+    assert {"realesrgan-x4plus", "realesrgan-x4plus-anime", "swinir-s-x4"} <= names
+    assert all("downloaded" in item for item in result["data"]["models"])

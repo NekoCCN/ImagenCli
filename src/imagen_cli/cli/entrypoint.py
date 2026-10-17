@@ -48,7 +48,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "to", "from-turn", "artifact", "name", "plan",
                 "provider", "family", "base-url", "model-default", "credential-ref",
                 "revision", "pipeline", "op", "send-credential", "id", "first", "second",
-                "artifacts", "columns", "cell",
+                "artifacts", "columns", "cell", "backend", "tile", "overlap", "accept",
             }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
@@ -61,7 +61,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 raise ValueError("duplicate option")
             value: Any = raw_value
             boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
-                "send-credential",
+                "send-credential", "accept",
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
@@ -76,7 +76,9 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     ):
                         raise ValueError("option needs value")
                     value = argv[index]
-                if name in {"limit", "timeout", "count", "concurrency", "revision"}:
+                if name in {
+                    "limit", "timeout", "count", "concurrency", "revision", "tile", "overlap",
+                }:
                     value = int(value)
                 elif not value or "\0" in value:
                     raise ValueError("option needs text")
@@ -227,6 +229,15 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters["yes"] = True
         validate(parameters, schema)
         return command, parameters, options
+    if command in {"ops", "superres models"}:
+        if words or parameters:
+            raise ValueError("unexpected arguments")
+        return command, {}, options
+    if command in {"compare", "sheet", "superres fetch", "superres benchmark"}:
+        if words:
+            raise ValueError("unexpected positional arguments")
+        validate(parameters, discover(command)["input_schema"])
+        return command, parameters, options
     if command == "asset gc":
         if words:
             raise ValueError("unexpected positional arguments")
@@ -255,7 +266,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
 
     if words or parameters:
         raise ValueError("unexpected arguments")
-    return command, [], options
+    return command, {}, options
 
 
 def main(
