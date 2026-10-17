@@ -12,6 +12,18 @@ from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
 
 
+def _utf8_stdio() -> None:
+    """Machine output stays UTF-8 even when the Windows locale is not."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+
+
 def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOptions]:
     controls: dict[str, Any] = {}
     parameters: dict[str, Any] = {}
@@ -249,6 +261,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
 def main(
     argv: list[str] | None = None, *, stdout: TextIO | None = None, stderr: TextIO | None = None
 ) -> int:
+    if stdout is None and stderr is None:
+        _utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr

@@ -107,7 +107,8 @@ class ArtifactStore:
 
     def _finish(self, row: dict[str, Any], target: Path) -> Any:
         self._verified_bytes(row, target)
-        with target.open("rb") as output:
+        # Windows rejects fsync on a read-only handle; open for update instead.
+        with target.open("rb+") as output:
             os.fsync(output.fileno())
         fsync_directory(self.root)
         with self.repositories.transaction():
