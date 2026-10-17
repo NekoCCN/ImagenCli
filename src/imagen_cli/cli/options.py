@@ -27,7 +27,8 @@ class SharedOptions(BaseModel):
 
 OPTION_METADATA: dict[str, dict[str, Any]] = {
     "workspace": {"type": "string", "default": None},
-    "output": {"enum": ["human", "json", "jsonl"], "default": "auto"},
+    "output": {"enum": ["human", "json", "jsonl"], "default": "human"},
+    "agent": {"type": "boolean", "default": False},
     "no-interactive": {"type": "boolean", "default": False},
     "dry-run": {"type": "boolean", "default": False},
     "timeout": {"type": "integer", "default": 300, "minimum": 1, "maximum": 86400},

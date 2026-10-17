@@ -235,3 +235,92 @@ def test_export_asks_for_a_destination(deps):
 
     asyncio.run(run())
     assert exported and exported[0][0] == "ses_" + "0" * 32
+
+
+def test_new_session_form_creates_and_selects(deps):
+    deps_value, _ = deps
+    created = []
+
+    def create(name, intent="", profile=None, model=None):
+        created.append((name, intent, profile, model))
+        return {"id": "ses_" + "f" * 32, "name": name, "version": 0}
+
+    deps_value.create_session = create
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("n")
+            await pilot.pause()
+            await pilot.press(*"new-session")
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert created == [("new-session", "", None, None)]
+
+
+def test_generate_plan_requires_approval_before_execution(deps):
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        if command == "generate":
+            return "approval_required", {"plan": {
+                "id": "pln_" + "1" * 32, "plan_digest": "a" * 64,
+                "operation": "generate", "model": "m",
+            }}
+        if command == "plan approve":
+            return "approved", {}
+        return "succeeded", {"job": {"id": "job_" + "1" * 32, "state": "succeeded"}}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("g")
+            await pilot.pause()
+            await pilot.press(*"a cat")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [call[0] for call in calls] == ["generate"]
+            await pilot.press("a")
+            await pilot.pause()
+            assert [call[0] for call in calls] == ["generate", "plan approve"]
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert [call[0] for call in calls] == ["generate", "plan approve", "plan execute"]
+    assert calls[0][1]["prompt"] == "a cat"
+
+
+def test_provider_form_creates_a_profile(deps):
+    deps_value, _ = deps
+    saved = []
+
+    def profile_set(parameters):
+        saved.append(parameters)
+        return "succeeded", {"profile": {"id": parameters["profile"], "revision": 1}}
+
+    deps_value.profile_set = profile_set
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.press(*"demo")
+            await pilot.press("tab", "tab", "tab")
+            await pilot.press(*"https://gateway.example/v1")
+            await pilot.press("tab")
+            await pilot.press(*"image-model")
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert saved and saved[0]["profile"] == "demo"
+    assert saved[0]["base_url"] == "https://gateway.example/v1"

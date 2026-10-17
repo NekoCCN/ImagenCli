@@ -116,12 +116,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise ValueError("unexpected option")
         if target_command is not None and target_command not in COMMANDS:
             raise ValueError("unknown help target")
-        if agent and command != "help":
-            raise ValueError("agent is a help option")
         args = ([target_command] if target_command else []) + (["--agent"] if agent else [])
         return command, args, options
-    if agent:
-        raise ValueError("agent is a help option")
     extra_controls = {
         "providers": {"limit", "cursor"},
         "models": {"limit", "cursor"},

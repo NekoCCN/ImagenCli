@@ -231,6 +231,7 @@ class Container:
             WorkbenchApp(
                 Deps(
                     self.repositories, self.artifact_store,
+                    execute=self.execute,
                     private_store=self.private_state_store,
                     workspace_root=self.resolved_workspace.root,
                 ),

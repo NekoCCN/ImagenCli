@@ -30,8 +30,14 @@ def invoke(workspace: Path, *args: str) -> tuple[int, dict[str, Any]]:
         "socket.getaddrinfo=socket.socket; "
         "from imagen_cli.cli.entrypoint import main; sys.exit(main())"
     )
+    machine = not any(
+        item == "--agent" or item.startswith("--output") for item in args
+    )
+    command = [sys.executable, "-c", script, "--workspace", str(workspace), *args]
+    if machine:
+        command += ["--output", "json"]
     proc = subprocess.run(
-        [sys.executable, "-c", script, "--workspace", str(workspace), *args],
+        command,
         input=b"",
         env=env,
         capture_output=True,
@@ -159,7 +165,6 @@ def test_missing_job_is_not_found(tmp_path: Path, operation: str) -> None:
         ("schema", "session", "create", "extra"),
         ("help", "session", "create", "extra"),
         ("session", "list", "-x"),
-        ("session", "list", "--agent"),
     ],
 )
 def test_invalid_inputs_are_strict_and_do_not_create_workspace(tmp_path: Path, args: tuple) -> None:

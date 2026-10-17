@@ -93,6 +93,7 @@ COMMANDS = {
 
 
 def select_output(argv: list[str], *, is_tty: bool = False) -> str:
+    """Humans get rich output by default; --output/--agent opt into machine modes."""
     for index, token in enumerate(argv):
         if token.startswith("--output="):
             value = token.partition("=")[2]
@@ -102,7 +103,9 @@ def select_output(argv: list[str], *, is_tty: bool = False) -> str:
             continue
         if value in {"human", "json", "jsonl"}:
             return value
-    return "human" if is_tty else "json"
+    if "--agent" in argv:
+        return "json"
+    return "human"
 
 
 def _object(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str, Any]:

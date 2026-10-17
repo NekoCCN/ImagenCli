@@ -31,10 +31,10 @@ def invoke(args):
 @pytest.mark.parametrize(
     "args",
     [
-        ["--help"],
+        ["--help", "--agent"],
         ["help", "--agent"],
-        ["schema"],
-        ["schema", "generate"],
+        ["schema", "--agent"],
+        ["schema", "generate", "--agent"],
         ["schema", "--output", "jsonl"],
     ],
 )
@@ -53,7 +53,7 @@ def test_help_and_schema_offline_with_closed_stdin(args):
         (["--output", "json", "--output", "jsonl"], "json"),
         (["--output", "jsonl", "--output", "json"], "jsonl"),
         (["--output=jsonl", "--unknown=secret-value"], "jsonl"),
-        (["--unknown=secret-value"], "json"),
+        (["--agent", "--unknown=secret-value"], "json"),
     ],
 )
 def test_errors_keep_first_output_mode_and_never_echo_values(args, mode):
@@ -67,7 +67,7 @@ def test_errors_keep_first_output_mode_and_never_echo_values(args, mode):
 
 
 def test_undelivered_operation_is_explicit():
-    proc = invoke(["generate"])
+    proc = invoke(["--agent", "generate"])
     assert proc.returncode == 2
     assert json.loads(proc.stdout)["status"] == "unsupported_capability"
 

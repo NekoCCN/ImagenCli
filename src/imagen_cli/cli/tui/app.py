@@ -48,6 +48,8 @@ class Deps:
     profile_set: Callable[[dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     models_refresh: Callable[[str], tuple[str, dict[str, Any]]] | None = None
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
+    create_session: Callable[..., dict[str, Any]] | None = None
+    execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     private_store: PrivateStateStore | None = None
     workspace_root: Path | None = None
 
@@ -68,6 +70,8 @@ class Deps:
             self.models_refresh = self._models_refresh
         if self.models_add is None:
             self.models_add = self._models_add
+        if self.create_session is None:
+            self.create_session = self._create_session
 
     def _fork(
         self, session_id: str, *, turn_id: str, name: str, artifact_ids: tuple[str, ...],
@@ -115,6 +119,17 @@ class Deps:
 
         return models.add_(self.repositories, profile, model)
 
+    def _create_session(
+        self, name: str, intent: str = "", profile: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        from imagen_cli.application.session_service import SessionService
+
+        row = SessionService(self.repositories, self.store).create_session(
+            name, intent=intent, default_profile_id=profile, default_model=model,
+        )
+        return row.model_dump(mode="json")
+
 
 def _sanitize(value: object) -> str:
     return "".join(char for char in str(value) if char.isprintable())
@@ -145,10 +160,12 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
 
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
-    def __init__(self, title: str, fields: list[tuple[str, str, str]]) -> None:
+    def __init__(self, title: str, fields: list[tuple[str, str, str]],
+                 optional: set[str] | None = None) -> None:
         super().__init__()
         self.heading = title
         self.fields = fields
+        self.optional = optional or set()
         self.inputs = [Input(value=default, placeholder=placeholder, id=name)
                        for name, placeholder, default in fields]
 
@@ -168,10 +185,16 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         values = {str(field.id): field.value.strip() for field in self.inputs}
-        if any(not value for value in values.values()):
-            self.query_one(Static).update(self.heading + " · 所有字段必填")
+        missing = [
+            name for name, value in values.items()
+            if not value and name not in self.optional
+        ]
+        if missing:
+            self.query_one(Static).update(
+                self.heading + " · 必填：" + "、".join(missing)
+            )
             return
-        self.dismiss(values)
+        self.dismiss({name: value for name, value in values.items() if value})
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -338,7 +361,10 @@ class ProvidersScreen(ModalScreen[bool]):
         self.detail = Static("")
 
     def compose(self) -> ComposeResult:
-        yield Vertical(Static("Providers"), self.table, self.detail, self.status, id="providers")
+        yield Vertical(
+            Static("Providers · a 新增 · u 更新 · m 刷新模型 · n 添加模型 · enter 查看"),
+            self.table, self.detail, self.status, id="providers",
+        )
 
     def on_mount(self) -> None:
         self.table.add_columns("id", "provider", "family", "model", "revision")
@@ -451,16 +477,85 @@ class ProvidersScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class PlanScreen(ModalScreen[bool]):
+    """Show a frozen plan; approval and execution are separate keys."""
+
+    BINDINGS = [
+        Binding("a", "approve", "批准"),
+        Binding("enter", "execute", "执行"),
+        Binding("escape", "cancel", "取消"),
+    ]
+
+    def __init__(self, deps: Deps, plan: dict[str, Any]) -> None:
+        super().__init__()
+        self.deps = deps
+        self.plan = plan
+        self.approved = False
+        self.status = Static("")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(
+                f"计划 {self.plan.get('id')}\n"
+                f"操作 {self.plan.get('operation')} · 模型 {self.plan.get('model')}\n"
+                f"摘要 {self.plan.get('plan_digest')}"
+            ),
+            self.status,
+            Static("a 批准 · enter 执行 · esc 取消"),
+            id="plan",
+        )
+
+    def on_mount(self) -> None:
+        self.status.update("尚未批准")
+
+    def action_approve(self) -> None:
+        if self.deps.execute is None:
+            self.status.update("执行器不可用")
+            return
+        status, _ = self.deps.execute(
+            "plan approve",
+            {"plan_id": self.plan["id"], "digest": self.plan["plan_digest"]},
+        )
+        if status in {"approved", "succeeded"}:
+            self.approved = True
+            self.status.update("已批准 · enter 执行")
+        else:
+            self.status.update(f"批准失败：{status}")
+
+    def action_execute(self) -> None:
+        if not self.approved:
+            self.status.update("先按 a 批准")
+            return
+        if self.deps.execute is None:
+            self.status.update("执行器不可用")
+            return
+        status, data = self.deps.execute("plan execute", {"plan_id": self.plan["id"]})
+        job = data.get("job") or {}
+        if status in {"succeeded", "accepted", "partial_success"}:
+            self.status.update(f"执行完成：{job.get('state')} · {job.get('id')}")
+            self.dismiss(True)
+        else:
+            self.status.update(f"执行结果：{status}")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class WorkbenchApp(App[None]):
     CSS = """
     #sessions { width: 40%; }
     #detail { width: 60%; }
-    #preview { height: 60%; }
+    #preview { height: 55%; }
+    #hint { height: auto; color: $text-muted; }
     """
     BINDINGS = [
         Binding("q", "quit", "退出"),
         Binding("c", "cache", "缓存"),
         Binding("v", "providers", "Providers"),
+        Binding("p", "providers", "Providers"),
+        Binding("n", "new_session", "新建会话"),
+        Binding("g", "generate", "生成"),
+        Binding("m", "edit", "编辑"),
         Binding("x", "delete", "删除会话"),
         Binding("f", "fork", "分支会话"),
         Binding("e", "export", "导出会话"),
@@ -476,6 +571,11 @@ class WorkbenchApp(App[None]):
         self.sessions: DataTable[Any] = DataTable(id="sessions")
         self.detail = Static(id="detail")
         self.preview = Static(id="preview")
+        self.hint = Static(
+            "g 生成 · m 编辑 · n 新建会话 · t 变换 · f 分支 · e 导出\n"
+            "v 或 p 管理 providers · c 缓存 · x 删除 · r 刷新 · q 退出",
+            id="hint",
+        )
         self.current: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -485,6 +585,7 @@ class WorkbenchApp(App[None]):
             with Vertical(id="detail"):
                 yield self.detail
                 yield self.preview
+                yield self.hint
         yield Footer()
 
     def on_mount(self) -> None:
@@ -513,11 +614,27 @@ class WorkbenchApp(App[None]):
     def _current_artifact(self) -> tuple[str, Path] | None:
         if self.current is None:
             return None
-        links = queries.iter_all(self.deps.repositories, "artifact_links", session_id=self.current)
-        for link in reversed(links):
-            path = self.deps.store.get(link["artifact_id"])
+        identities: list[str] = []
+        turns = sorted(
+            queries.iter_all(self.deps.repositories, "turns", session_id=self.current),
+            key=lambda row: (row.get("created_at", ""), row["id"]),
+        )
+        for turn in turns:
+            identities.extend(
+                row["artifact_id"] for row in queries.iter_all(
+                    self.deps.repositories, "artifact_references", turn_id=turn["id"]
+                )
+                if row.get("role") == "output"
+            )
+        identities.extend(
+            row["artifact_id"] for row in queries.iter_all(
+                self.deps.repositories, "artifact_links", session_id=self.current
+            )
+        )
+        for identity in reversed(identities):
+            path = self.deps.store.get(identity)
             if path is not None:
-                return link["artifact_id"], path
+                return identity, path
         return None
 
     def show_detail(self) -> None:
@@ -540,6 +657,134 @@ class WorkbenchApp(App[None]):
             self.preview.update(Text.from_ansi(preview.ansi_blocks(path, cols=40, rows=12)))
         else:
             self.preview.update(preview.describe(artifact, path))
+
+    def _push_plan(self, status: str, data: dict[str, Any]) -> None:
+        plan = data.get("plan") or {}
+        if status not in {"approval_required", "planned"} or not plan.get("id"):
+            self.detail.update(f"生成：{status}")
+            return
+
+        def finished(changed: bool | None) -> None:
+            if changed:
+                self.refresh_rows()
+                self.show_detail()
+
+        self.push_screen(PlanScreen(self.deps, plan), finished)
+
+    def action_new_session(self) -> None:
+        if self.deps.create_session is None:
+            return
+
+        def done(values: dict[str, str] | None) -> None:
+            if not values or self.deps.create_session is None:
+                return
+            try:
+                row = self.deps.create_session(
+                    values["name"], values.get("intent", ""),
+                    values.get("profile"), values.get("model"),
+                )
+            except Exception as error:  # noqa: BLE001 - surfaced in the panel
+                self.detail.update("新建失败：" + _sanitize(error))
+                return
+            self.current = str(row["id"])
+            self.refresh_rows()
+            self.show_detail()
+
+        self.push_screen(
+            FormScreen(
+                "新建会话",
+                [("name", "会话名", ""), ("intent", "意图（可留空）", ""),
+                 ("profile", "profile（可留空）", ""), ("model", "model（可留空）", "")],
+                optional={"intent", "profile", "model"},
+            ),
+            done,
+        )
+
+    def action_generate(self) -> None:
+        if self.current is None:
+            self.detail.update("先选择一个会话")
+            return
+        session = self.deps.repositories.get("sessions", self.current)
+        if session is None:
+            return
+        if self.deps.execute is None:
+            self.detail.update("执行器不可用")
+            return
+
+        def done(values: dict[str, str] | None) -> None:
+            if not values or self.deps.execute is None:
+                return
+            arguments: dict[str, Any] = {
+                "schema_version": 1, "operation": "generate",
+                "session": session["name"], "prompt": values["prompt"],
+                "count": int(values.get("count", "1")),
+                "size": values.get("size", "1024x1024"),
+            }
+            if values.get("profile"):
+                arguments["profile"] = values["profile"]
+            if values.get("model"):
+                arguments["model"] = values["model"]
+            try:
+                status, data = self.deps.execute("generate", arguments)
+            except Exception as error:  # noqa: BLE001
+                self.detail.update("生成失败：" + _sanitize(error))
+                return
+            self._push_plan(status, data)
+
+        self.push_screen(
+            FormScreen(
+                "生成图片",
+                [("prompt", "提示词", ""),
+                 ("profile", "profile（可留空）", str(session.get("default_profile_id") or "")),
+                 ("model", "model（可留空）", str(session.get("default_model") or "")),
+                 ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
+                optional={"profile", "model"},
+            ),
+            done,
+        )
+
+    def action_edit(self) -> None:
+        found = self._current_artifact()
+        if found is None or self.current is None:
+            self.detail.update("没有可编辑的产物")
+            return
+        identity, _ = found
+        session = self.deps.repositories.get("sessions", self.current)
+        if session is None or self.deps.execute is None:
+            return
+
+        def done(values: dict[str, str] | None) -> None:
+            if not values or self.deps.execute is None:
+                return
+            arguments: dict[str, Any] = {
+                "schema_version": 1, "operation": "edit",
+                "session": session["name"], "prompt": values["prompt"],
+                "inputs": ["artifact:" + identity],
+                "count": int(values.get("count", "1")),
+                "size": values.get("size", "1024x1024"),
+            }
+            if values.get("profile"):
+                arguments["profile"] = values["profile"]
+            if values.get("model"):
+                arguments["model"] = values["model"]
+            try:
+                status, data = self.deps.execute("edit", arguments)
+            except Exception as error:  # noqa: BLE001
+                self.detail.update("编辑失败：" + _sanitize(error))
+                return
+            self._push_plan(status, data)
+
+        self.push_screen(
+            FormScreen(
+                f"编辑 {identity}",
+                [("prompt", "提示词", ""),
+                 ("profile", "profile（可留空）", str(session.get("default_profile_id") or "")),
+                 ("model", "model（可留空）", str(session.get("default_model") or "")),
+                 ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
+                optional={"profile", "model"},
+            ),
+            done,
+        )
 
     def action_cache(self) -> None:
         self.push_screen(CacheScreen(self.deps))

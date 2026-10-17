@@ -83,7 +83,7 @@ def test_cli_executes_approved_plan_once_with_real_adapter(tmp_path, png_bytes, 
 
     def run():
         out = io.StringIO()
-        code = main(["--workspace", str(workspace), "plan", "execute", plan.id],
+        code = main(["--workspace", str(workspace), "--output", "json", "plan", "execute", plan.id],
                     stdout=out, stderr=io.StringIO())
         return code, json.loads(out.getvalue())
 
@@ -135,7 +135,7 @@ def test_cli_generate_resume_and_edit_preserves_history(tmp_path, png_bytes, mon
 
     def execute(plan_id):
         out = io.StringIO()
-        code = main(["--workspace", str(workspace), "plan", "execute", plan_id],
+        code = main(["--workspace", str(workspace), "--output", "json", "plan", "execute", plan_id],
                     stdout=out, stderr=io.StringIO())
         return code, json.loads(out.getvalue())
 

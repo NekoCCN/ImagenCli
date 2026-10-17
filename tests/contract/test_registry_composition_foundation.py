@@ -106,7 +106,7 @@ def test_discovery_is_a_fresh_snapshot() -> None:
 def test_catalog_and_machine_results_validate_the_advertised_data(tmp_path: Path) -> None:
     for name in (None, *COMMANDS):
         out = io.StringIO()
-        args = ["schema", *([] if name is None else name.split())]
+        args = ["schema", *([] if name is None else name.split()), "--agent"]
         assert main(args, stdout=out, stderr=io.StringIO()) == 0
         response = json.loads(out.getvalue())
         assert len(response["data"]["commands"]) == (len(COMMANDS) if name is None else 1)

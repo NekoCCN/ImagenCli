@@ -177,6 +177,6 @@ def test_discovery_schema_remains_usable_after_rendering():
     from imagen_cli.cli.entrypoint import main
 
     out = io.StringIO()
-    assert main(["schema", "generate"], stdout=out, stderr=io.StringIO()) == 0
+    assert main(["schema", "generate", "--agent"], stdout=out, stderr=io.StringIO()) == 0
     schema = json.loads(out.getvalue())["data"]["input_schema"]
     jsonschema.Draft202012Validator.check_schema(schema)
