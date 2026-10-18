@@ -57,7 +57,31 @@ def test_profile_build_accepts_keyring():
         )
 
 
-def test_private_store_credentials_resolve(tmp_path):
+def test_models_refresh_resolves_private_credentials(tmp_path, monkeypatch):
+    from imagen_cli.application import model_catalog_service
+    from imagen_cli.application.container import Container
+
+    seen = []
+
+    def fake_refresh(repositories, profile, *, resolve_credential, send_credential):
+        seen.append(resolve_credential(profile["credential_ref"]))
+        return {"profile": profile["id"], "models": []}
+
+    monkeypatch.setattr(model_catalog_service, "refresh", fake_refresh)
+
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        reference = container.private_state_store.write_credential("demo", "sk-private")
+        container.repositories.insert("profiles", {
+            "id": "demo", "name": "demo", "provider": "openai", "family": "images",
+            "base_url": "https://gateway.example/v1", "model_default": "m",
+            "credential_ref": reference, "trust_policy": {}, "revision": 1,
+        })
+        status, _ = container.execute(
+            "models refresh", {"profile": "demo", "send_credential": True}
+        )
+    assert status == "succeeded"
+    assert seen == ["sk-private"]
+
     from imagen_cli.application.container import Container
     from imagen_cli.execution.configured import resolve_credential
 

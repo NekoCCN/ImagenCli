@@ -111,12 +111,16 @@ class Deps:
         )
 
     def _models_refresh(self, profile: str) -> tuple[str, dict[str, Any]]:
+        from functools import partial
+
         from imagen_cli.cli.commands import models
         from imagen_cli.execution.configured import resolve_credential
 
         return models.refresh_(
             self.repositories, profile, send_credential=True,
-            resolve_credential=resolve_credential,
+            resolve_credential=partial(
+                resolve_credential, private_store=self.private_store
+            ),
         )
 
     def _models_add(self, profile: str, model: str) -> tuple[str, dict[str, Any]]:

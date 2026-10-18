@@ -1,7 +1,7 @@
 """Dependency composition root; offline commands have no provider or storage side effects."""
 
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, partial
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
@@ -305,7 +305,9 @@ class Container:
                 return models.refresh_(
                     self.repositories, identity,
                     send_credential=args.get("send_credential") is True,
-                    resolve_credential=resolve_credential,
+                    resolve_credential=partial(
+                        resolve_credential, private_store=self.private_state_store
+                    ),
                 )
             if command == "models add":
                 return models.add_(self.repositories, identity, args["id"])
