@@ -62,11 +62,13 @@ def test_private_store_credentials_resolve(tmp_path):
     from imagen_cli.execution.configured import resolve_credential
 
     with Container(workspace=str(tmp_path / "ws")) as container:
-        reference = container.private_state_store.write_credential("demo", "sk-private")
+        store = container.private_state_store
+        reference = store.write_credential("demo", "sk-private")
         assert reference.startswith("private:")
-        assert resolve_credential(
-            reference, private_store=container.private_state_store
-        ) == "sk-private"
+        assert resolve_credential(reference, private_store=store) == "sk-private"
+        again = store.write_credential("demo", "sk-rotated")
+        assert again == reference
+        assert resolve_credential(reference, private_store=store) == "sk-rotated"
         with pytest.raises(ValueError, match="backend unavailable"):
             resolve_credential(reference)
         with pytest.raises(ValueError, match="unavailable"):

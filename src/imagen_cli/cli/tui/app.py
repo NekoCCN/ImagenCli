@@ -435,7 +435,7 @@ class ProvidersScreen(ModalScreen[bool]):
                 status, data = self.deps.profile_set(
                     {**parameters, "revision": int(values.get("revision", "1"))}
                 )
-            except ValueError as error:
+            except (ValueError, OSError) as error:
                 self.status.update(_sanitize(error))
                 return
             self.status.update(f"{status}: {_sanitize(data.get('profile', {}).get('id', ''))}")
@@ -467,7 +467,7 @@ class ProvidersScreen(ModalScreen[bool]):
                 status, data = self.deps.profile_set(
                     {**parameters, "revision": int(profile["revision"])}
                 )
-            except ValueError as error:
+            except (ValueError, OSError) as error:
                 self.status.update(_sanitize(error))
                 return
             self.status.update(f"{status}: revision {data.get('profile', {}).get('revision', '')}")

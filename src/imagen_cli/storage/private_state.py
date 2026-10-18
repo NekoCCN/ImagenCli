@@ -121,10 +121,29 @@ class PrivateStateStore:
         return value
 
     def write_credential(self, profile_id: str, value: str) -> str:
-        """Store an API key under a derived name and return its private: reference."""
+        """Store or replace an API key and return its private: reference."""
         name = credential_name(profile_id)
-        self.write(name, value.encode("utf-8"))
+        self.write_secret(name, value.encode("utf-8"))
         return "private:" + name
+
+    def write_secret(self, identity: str, data: bytes) -> None:
+        """Atomically replace a secret without the create-only contract of write()."""
+        with self._directory():
+            name = storage_id(identity) + ".bin"
+            path = safe_path(self.root, name)
+            temporary = safe_path(self.root, name + ".tmp")
+            temporary.unlink(missing_ok=True)
+            fd = self._open(temporary, create=True)
+            try:
+                with os.fdopen(fd, "wb") as target:
+                    target.write(data)
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(temporary, path)
+                fsync_directory(self.root)
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
 
     def read_secret(self, identity: str) -> str:
         with self._directory():
