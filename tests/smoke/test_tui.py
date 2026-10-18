@@ -347,6 +347,38 @@ def test_command_palette_runs_commands_without_fields(deps):
     assert calls == [("ops", {})]
 
 
+def test_update_form_prefills_the_selected_profile(deps):
+    deps_value, _ = deps
+    deps_value.repositories.insert("profiles", {
+        "id": "p1", "name": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "m1",
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 3,
+    })
+    saved = []
+
+    def profile_set(parameters):
+        saved.append(parameters)
+        return "succeeded", {"profile": {"id": "p1", "revision": 4}}
+
+    deps_value.profile_set = profile_set
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert saved == [{
+        "profile": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "m1",
+        "credential_ref": "env:KEY", "revision": 3,
+    }]
+
+
 def test_provider_form_accepts_a_direct_api_key(deps):
     deps_value, _ = deps
     saved = []

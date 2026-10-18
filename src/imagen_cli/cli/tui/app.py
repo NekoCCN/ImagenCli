@@ -455,7 +455,8 @@ class ProvidersScreen(ModalScreen[bool]):
             self.status.update("没有选中 profile")
             return
         defaults = [
-            (name, placeholder, _sanitize(profile.get(name, value)))
+            (name, placeholder,
+             _sanitize(profile["id"] if name == "profile" else profile.get(name, value)))
             for name, placeholder, value in self.FIELDS
         ]
 
