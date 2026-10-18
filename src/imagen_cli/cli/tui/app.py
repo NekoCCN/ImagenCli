@@ -610,7 +610,14 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
         elif kind == "boolean":
             arguments[name] = raw.lower() in {"1", "true", "yes", "on"}
         elif kind == "array":
-            arguments[name] = [item.strip() for item in raw.split(",") if item.strip()]
+            if raw.lstrip().startswith("["):
+                import json
+
+                arguments[name] = json.loads(raw)
+            else:
+                arguments[name] = [
+                    item.strip() for item in raw.split(",") if item.strip()
+                ]
         elif kind == "object":
             import json
 
