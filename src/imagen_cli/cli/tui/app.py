@@ -863,16 +863,23 @@ class WorkbenchApp(App[None]):
 
     def refresh_rows(self) -> None:
         self.sessions.clear()
-        sessions = queries.iter_all(self.deps.repositories, "sessions")
+        sessions = [
+            row for row in queries.iter_all(self.deps.repositories, "sessions")
+            if row.get("deleted_at") is None
+        ]
         for row in sessions:
-            if row.get("deleted_at") is not None:
-                continue
             turns = len(queries.iter_all(self.deps.repositories, "turns", session_id=row["id"]))
             self.sessions.add_row(
                 _sanitize(row["name"]), str(turns), str(row["version"]), key=row["id"],
             )
-        if sessions:
-            self.detail.update(f"{len(sessions)} 个会话")
+        identities = [str(row["id"]) for row in sessions]
+        if self.current not in identities:
+            self.current = identities[0] if identities else None
+        if not identities:
+            self.detail.update("尚无会话；按 n 新建，v 选择模型")
+            return
+        self.sessions.move_cursor(row=identities.index(str(self.current)))
+        self.show_detail()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self.current = str(event.row_key.value)
@@ -1010,9 +1017,20 @@ class WorkbenchApp(App[None]):
             done,
         )
 
+    def _creation_defaults(self, session: dict[str, Any]) -> tuple[str, str]:
+        """Session defaults first; a single profile stands in when the session has none."""
+        identity = str(session.get("default_profile_id") or "")
+        if not identity:
+            profiles = queries.iter_all(self.deps.repositories, "profiles")
+            if len(profiles) == 1:
+                identity = str(profiles[0]["id"])
+        row = self.deps.repositories.get("profiles", identity) if identity else None
+        model = str(session.get("default_model") or (row or {}).get("model_default") or "")
+        return identity, model
+
     def action_generate(self) -> None:
         if self.current is None:
-            self.detail.update("先选择一个会话")
+            self.detail.update("尚无会话；按 n 新建后再生成")
             return
         session = self.deps.repositories.get("sessions", self.current)
         if session is None:
@@ -1041,12 +1059,13 @@ class WorkbenchApp(App[None]):
                 return
             self._push_plan(status, data)
 
+        profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
             FormScreen(
                 "生成图片",
                 [("prompt", "提示词", ""),
-                 ("profile", "profile（可留空）", str(session.get("default_profile_id") or "")),
-                 ("model", "model（可留空）", str(session.get("default_model") or "")),
+                 ("profile", "profile（可留空）", profile_default),
+                 ("model", "model（可留空）", model_default),
                  ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
                 optional={"profile", "model"},
             ),
@@ -1084,12 +1103,13 @@ class WorkbenchApp(App[None]):
                 return
             self._push_plan(status, data)
 
+        profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
             FormScreen(
                 f"编辑 {identity}",
                 [("prompt", "提示词", ""),
-                 ("profile", "profile（可留空）", str(session.get("default_profile_id") or "")),
-                 ("model", "model（可留空）", str(session.get("default_model") or "")),
+                 ("profile", "profile（可留空）", profile_default),
+                 ("model", "model（可留空）", model_default),
                  ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
                 optional={"profile", "model"},
             ),

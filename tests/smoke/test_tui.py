@@ -250,6 +250,47 @@ def test_model_picker_sets_the_selected_default(deps):
     assert used == [("p1", "m-b")]
 
 
+def test_first_session_is_selected_on_mount(deps):
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            visible = app.sessions.coordinate_to_cell_key(
+                app.sessions.cursor_coordinate
+            ).row_key.value
+            assert app.current is not None
+            assert app.current == visible
+
+    asyncio.run(run())
+
+
+def test_generate_defaults_to_the_only_profile(deps):
+    deps_value, _ = deps
+    from textual.widgets import Input
+
+    deps_value.repositories.insert("profiles", {
+        "id": "p1", "name": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "picked-model",
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    values = {}
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("g")
+            await pilot.pause()
+            values.update({field.id: field.value for field in app.screen.query(Input)})
+
+    asyncio.run(run())
+    assert values["profile"] == "p1"
+    assert values["model"] == "picked-model"
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []
