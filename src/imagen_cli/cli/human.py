@@ -92,6 +92,8 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         detail = row.get("evidence") or row.get("license") or ""
         scale = f" · x{row['scale']}" if row.get("scale") else ""
         lines.append(f"模型 {ident}{scale}{(' · ' + str(detail)) if detail else ''}")
+    if len(models) > _MAX_ROWS:
+        lines.append(f"…还有 {len(models) - _MAX_ROWS} 个模型；--output json 查看全部")
     capabilities = _rows(data, "capabilities")
     for row in capabilities[:_MAX_ROWS]:
         lines.append(

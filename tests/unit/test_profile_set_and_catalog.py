@@ -34,6 +34,23 @@ def test_profile_set_creates_then_bumps_revision(tmp_path):
     assert stale[0] == "conflict"
 
 
+def test_models_use_declares_and_selects_the_default(tmp_path):
+    set_profile(tmp_path, model="m1")
+    with Container(workspace=str(tmp_path)) as container:
+        status, data = container.execute(
+            "models use", {"profile": "demo", "id": "gpt-image-2.5"}
+        )
+        assert status == "succeeded"
+        assert data["profile"]["model_default"] == "gpt-image-2.5"
+        assert data["profile"]["revision"] == 2
+        declared = container.repositories.get("provider_models", "demo:gpt-image-2.5")
+        assert declared["evidence"] == "manual"
+        again = container.execute(
+            "models use", {"profile": "demo", "id": "gpt-image-2.5"}
+        )
+        assert again[1]["profile"]["revision"] == 2
+
+
 @pytest.fixture
 def repositories(tmp_path):
     connection = connect(tmp_path / "state.sqlite3")

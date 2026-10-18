@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import ipaddress
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-import httpx
-
 from imagen_cli.storage.repositories import Repositories
+
+if TYPE_CHECKING:
+    import httpx
 
 TIMEOUT = 30.0
 TTL = timedelta(hours=24)
@@ -66,6 +67,8 @@ def refresh(
     client: httpx.Client | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    import httpx
+
     base_url = str(profile["base_url"])
     if not _trusted(base_url):
         raise ValueError("model catalog requires https or a loopback http endpoint")

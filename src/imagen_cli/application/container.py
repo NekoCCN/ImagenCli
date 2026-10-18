@@ -297,11 +297,12 @@ class Container:
             from jsonschema import validate
 
             from imagen_cli.cli.commands import models
-            from imagen_cli.execution.configured import resolve_credential
 
             validate(args, discover(command)["input_schema"])
             identity = args["profile"]
             if command == "models refresh":
+                from imagen_cli.execution.configured import resolve_credential
+
                 return models.refresh_(
                     self.repositories, identity,
                     send_credential=args.get("send_credential") is True,
@@ -311,6 +312,8 @@ class Container:
                 )
             if command == "models add":
                 return models.add_(self.repositories, identity, args["id"])
+            if command == "models use":
+                return models.use_(self.repositories, identity, args["id"])
             return models.list_(self.repositories, identity)
         if command.startswith("profile "):
             from jsonschema import validate

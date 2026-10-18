@@ -208,6 +208,22 @@ def test_ops_and_superres_catalog_are_offline(tmp_path: Path):
     assert all("downloaded" in item for item in result["data"]["models"])
 
 
+def test_models_use_selects_a_default_from_the_cli(tmp_path: Path):
+    workspace = tmp_path / "work"
+    code, _ = invoke(
+        workspace, "profile", "set", "demo", "--provider", "openai", "--family", "images",
+        "--base-url", "https://gateway.example/v1", "--model-default", "m1",
+        "--credential-ref", "env:KEY",
+    )
+    assert code == 0
+    code, value = invoke(workspace, "models", "use", "demo", "--id", "gpt-image-2.5")
+    assert code == 0, value
+    assert value["data"]["profile"]["model_default"] == "gpt-image-2.5"
+    code, value = invoke(workspace, "models", "list", "demo")
+    assert code == 0
+    assert [row["model_id"] for row in value["data"]["models"]] == ["gpt-image-2.5"]
+
+
 def test_profile_secret_stores_a_key_without_echoing_it(tmp_path: Path):
     workspace = tmp_path / "work"
     profile = tmp_path / "profile.toml"

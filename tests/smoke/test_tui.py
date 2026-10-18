@@ -214,6 +214,42 @@ def test_providers_refresh_models_uses_the_selection(deps):
     assert refreshed == ["p1"]
 
 
+def test_model_picker_sets_the_selected_default(deps):
+    deps_value, _ = deps
+    deps_value.repositories.insert("profiles", {
+        "id": "p1", "name": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "m-a",
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    for model in ("m-a", "m-b"):
+        deps_value.repositories.insert("provider_models", {
+            "id": f"p1:{model}", "profile_id": "p1", "model_id": model,
+            "display_name": model, "fetched_at": "2026-10-24T00:00:00Z",
+            "source_url": "https://gateway.example/v1/models", "evidence": "discovered",
+        })
+    used = []
+
+    def use(profile, model):
+        used.append((profile, model))
+        return "succeeded", {"profile": {"id": profile, "revision": 2}}
+
+    deps_value.models_use = use
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press(*"m-b")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert used == [("p1", "m-b")]
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []

@@ -50,6 +50,7 @@ class Deps:
     profile_set: Callable[[dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     models_refresh: Callable[[str], tuple[str, dict[str, Any]]] | None = None
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
+    models_use: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     create_session: Callable[..., dict[str, Any]] | None = None
     execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     secret_ref: Callable[[str, str], str] | None = None
@@ -73,6 +74,8 @@ class Deps:
             self.models_refresh = self._models_refresh
         if self.models_add is None:
             self.models_add = self._models_add
+        if self.models_use is None:
+            self.models_use = self._models_use
         if self.create_session is None:
             self.create_session = self._create_session
         if self.secret_ref is None:
@@ -127,6 +130,11 @@ class Deps:
         from imagen_cli.cli.commands import models
 
         return models.add_(self.repositories, profile, model)
+
+    def _models_use(self, profile: str, model: str) -> tuple[str, dict[str, Any]]:
+        from imagen_cli.cli.commands import models
+
+        return models.use_(self.repositories, profile, model)
 
     def _secret_ref(self, profile: str, key: str) -> str:
         if self.private_store is None:
@@ -353,13 +361,60 @@ class TransformScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ModelPickerScreen(ModalScreen[str | None]):
+    """Pick the default model from the declared catalog, with a text filter."""
+
+    BINDINGS = [Binding("escape", "cancel", "关闭")]
+
+    def __init__(self, models: list[dict[str, Any]], current: str) -> None:
+        super().__init__()
+        self.models = sorted(models, key=lambda row: str(row["model_id"]))
+        self.current = current
+        self.filter: Input = Input(placeholder="过滤 model id", id="model-filter")
+        self.table: DataTable[Any] = DataTable(id="model-table")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("选择默认模型 · 输入过滤 · Enter 选定 · Esc 取消"),
+            self.filter, self.table,
+        )
+
+    def on_mount(self) -> None:
+        self.table.cursor_type = "row"
+        self.table.add_column("model")
+        self._populate()
+        self.filter.focus()
+
+    def _populate(self) -> None:
+        needle = self.filter.value.strip().lower()
+        self.table.clear()
+        for row in self.models:
+            model = str(row["model_id"])
+            if needle and needle not in model.lower():
+                continue
+            self.table.add_row(("● " if model == self.current else "  ") + model, key=model)
+
+    def on_input_changed(self, _: Input.Changed) -> None:
+        self._populate()
+
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        if self.table.row_count:
+            key = self.table.coordinate_to_cell_key(self.table.cursor_coordinate).row_key
+            self.dismiss(str(key.value) if key.value else None)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.dismiss(str(event.row_key.value) if event.row_key.value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ProvidersScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("a", "add", "新增"),
         Binding("u", "update", "更新"),
         Binding("m", "refresh_models", "刷新模型"),
         Binding("n", "add_model", "添加模型"),
-        Binding("enter", "show_models", "查看模型"),
         Binding("escape", "dismiss_screen", "关闭"),
     ]
     FIELDS = (
@@ -381,18 +436,18 @@ class ProvidersScreen(ModalScreen[bool]):
         self.deps = deps
         self.table: DataTable[Any] = DataTable()
         self.status = Static("")
-        self.detail = Static("")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(
-                "Providers · a 新增 · u 更新 · m 刷新模型 · n 添加模型 · enter 查看\n"
+                "Providers · a 新增 · u 更新 · m 刷新模型 · n 手输模型 · enter 选择默认模型\n"
                 "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空"
             ),
-            self.table, self.detail, self.status, id="providers",
+            self.table, self.status, id="providers",
         )
 
     def on_mount(self) -> None:
+        self.table.cursor_type = "row"
         self.table.add_columns("id", "provider", "family", "model", "revision")
         self.refresh_rows()
 
@@ -518,15 +573,34 @@ class ProvidersScreen(ModalScreen[bool]):
             FormScreen("添加模型", [("model", "model id", "")]), done
         )
 
-    def action_show_models(self) -> None:
+    def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
+        self.action_choose_model()
+
+    def action_choose_model(self) -> None:
         profile = self._selected()
         if profile is None:
+            self.status.update("没有选中 profile")
             return
         rows = queries.iter_all(
             self.deps.repositories, "provider_models", profile_id=str(profile["id"])
         )
-        self.detail.update(
-            " · ".join(_sanitize(row["model_id"]) for row in rows) or "(尚未声明模型)"
+        if not rows:
+            self.status.update("尚未声明模型；按 m 刷新，或按 n 手输 model id")
+            return
+
+        def done(model: str | None) -> None:
+            if not model or self.deps.models_use is None:
+                return
+            try:
+                status, _ = self.deps.models_use(str(profile["id"]), model)
+            except (ValueError, OSError) as error:
+                self.status.update(_sanitize(error))
+                return
+            self.status.update(f"{status}: default {_sanitize(model)}")
+            self.refresh_rows()
+
+        self.app.push_screen(
+            ModelPickerScreen(rows, str(profile.get("model_default") or "")), done
         )
 
     def action_dismiss_screen(self) -> None:

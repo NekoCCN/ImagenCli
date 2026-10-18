@@ -74,6 +74,7 @@ COMMANDS = {
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
                 ("models refresh", "从 profile 端点拉取模型列表；只写 provider_models"),
                 ("models add", "手工声明一个模型，evidence=manual"),
+                ("models use", "把一个模型设为 profile 默认；未声明时按 manual 登记"),
                 ("models list", "列出 profile 的已声明模型"),
                 ("transform", "对产物应用确定性变换并生成新产物；不覆盖源文件"),
                 ("compare", "计算两个产物的 PSNR 与 SSIM；只读，不创建新产物"),
@@ -158,7 +159,7 @@ def _input_schema(name: str) -> dict[str, Any]:
         required = ("profile",)
         if name == "models refresh":
             properties["send_credential"] = {"type": "boolean", "default": False}
-        elif name == "models add":
+        elif name in {"models add", "models use"}:
             properties["id"] = text
             required += ("id",)
     elif name.split()[0] in {"providers", "models", "capabilities"}:

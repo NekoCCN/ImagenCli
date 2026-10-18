@@ -215,8 +215,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("models "):
-        if words:
+        # Positional profile is shorthand for --profile, e.g. `models use demo --id m`.
+        if len(words) > 1:
             raise ValueError("unexpected positional arguments")
+        if words:
+            if "profile" in parameters:
+                raise ValueError("duplicate option")
+            parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("cache "):

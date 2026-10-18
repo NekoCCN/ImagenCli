@@ -46,6 +46,24 @@ def add_(repositories: Repositories, identity: str, model_id: str) -> tuple[str,
     return "succeeded", {"model": row}
 
 
+def use_(repositories: Repositories, identity: str, model_id: str) -> tuple[str, dict[str, Any]]:
+    """Set the profile default; an undeclared model is registered as manual."""
+    profile = _profile(repositories, identity)
+    if repositories.get("provider_models", f"{profile['id']}:{model_id}") is None:
+        model_catalog_service.add(repositories, profile, model_id)
+    if profile["model_default"] == model_id:
+        return "succeeded", {"profile": _public_profile(profile)}
+    with repositories.transaction():
+        updated = repositories.update("profiles", str(profile["id"]), {
+            "model_default": model_id, "revision": int(profile["revision"]) + 1,
+        })
+    return "succeeded", {"profile": _public_profile(updated)}
+
+
+def _public_profile(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if key != "credential_ref"}
+
+
 def list_(repositories: Repositories, identity: str) -> tuple[str, dict[str, Any]]:
     profile = _profile(repositories, identity)
     return "succeeded", {"models": model_catalog_service.listing(repositories, profile)}
