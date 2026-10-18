@@ -316,6 +316,11 @@ class Container:
             from imagen_cli.cli.commands import profile
 
             validate(args, discover(command)["input_schema"])
+            if command == "profile secret":
+                return profile.secret(
+                    self.repositories, self.private_state_store,
+                    args["profile"], args["key_file"],
+                )
             if "config_file" in args:
                 data = profile.read_config(args["config_file"], args["profile"])
             elif command == "profile set":

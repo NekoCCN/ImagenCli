@@ -68,6 +68,12 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             f"（远端 {job.get('remote_state')}，本地 {job.get('local_save_state')}）"
         )
         lines.append(_cost_line(job.get("cost") or {}))
+    profile = data.get("profile") or {}
+    if profile and profile.get("id"):
+        lines.append(
+            f"Profile {profile.get('id')} · {profile.get('provider')}/{profile.get('family')}"
+            f" · {profile.get('model_default')} · revision {profile.get('revision')}"
+        )
     session = data.get("session") or {}
     if session and session.get("name"):
         lines.append(
@@ -180,6 +186,20 @@ def _rich(value: dict[str, Any], width: int) -> str:
             title="任务", border_style=style,
         ))
         console.print(_cost_line(job.get("cost") or {}))
+    profile = data.get("profile") or {}
+    if profile and profile.get("id"):
+        lines.append(
+            f"Profile {profile.get('id')} · {profile.get('provider')}/{profile.get('family')}"
+            f" · {profile.get('model_default')} · revision {profile.get('revision')}"
+        )
+    profile = data.get("profile") or {}
+    if profile and profile.get("id"):
+        console.print(Panel(
+            f"[bold]{profile.get('id')}[/bold] · "
+            f"{profile.get('provider')}/{profile.get('family')}\n"
+            f"{profile.get('model_default')} · revision {profile.get('revision')}",
+            title="Profile", border_style="green",
+        ))
     session = data.get("session") or {}
     if session and session.get("name"):
         console.print(Panel(
@@ -286,7 +306,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
         for index, artifact in enumerate(artifacts, start=1):
             table.add_row(str(index), str(artifact["path"]))
         console.print(table)
-    if not any((plan, job, session, sessions, profiles, models, capabilities, entries,
+    if not any((plan, job, profile, session, sessions, profiles, models, capabilities, entries,
                 commands, operations, turns, artifacts, parameters)):
         console.print(json.dumps(data, ensure_ascii=False))
     return buffer.getvalue()

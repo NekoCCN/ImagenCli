@@ -17,6 +17,8 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from imagen_cli.application import cache_service, media_ops
+from imagen_cli.cli.human import render as human_render
+from imagen_cli.cli.registry import COMMANDS, discover
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.private_state import PrivateStateStore
@@ -50,6 +52,7 @@ class Deps:
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     create_session: Callable[..., dict[str, Any]] | None = None
     execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
+    secret_ref: Callable[[str, str], str] | None = None
     private_store: PrivateStateStore | None = None
     workspace_root: Path | None = None
 
@@ -72,6 +75,8 @@ class Deps:
             self.models_add = self._models_add
         if self.create_session is None:
             self.create_session = self._create_session
+        if self.secret_ref is None:
+            self.secret_ref = self._secret_ref
 
     def _fork(
         self, session_id: str, *, turn_id: str, name: str, artifact_ids: tuple[str, ...],
@@ -119,6 +124,11 @@ class Deps:
 
         return models.add_(self.repositories, profile, model)
 
+    def _secret_ref(self, profile: str, key: str) -> str:
+        if self.private_store is None:
+            raise ValueError("private credential storage is unavailable")
+        return self.private_store.write_credential(profile, key)
+
     def _create_session(
         self, name: str, intent: str = "", profile: str | None = None,
         model: str | None = None,
@@ -161,13 +171,18 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def __init__(self, title: str, fields: list[tuple[str, str, str]],
-                 optional: set[str] | None = None) -> None:
+                 optional: set[str] | None = None,
+                 secrets: set[str] | None = None) -> None:
         super().__init__()
         self.heading = title
         self.fields = fields
         self.optional = optional or set()
-        self.inputs = [Input(value=default, placeholder=placeholder, id=name)
-                       for name, placeholder, default in fields]
+        self.secrets = secrets or set()
+        self.inputs = [
+            Input(value=default, placeholder=placeholder, id=name,
+                  password=name in self.secrets)
+            for name, placeholder, default in fields
+        ]
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -349,9 +364,13 @@ class ProvidersScreen(ModalScreen[bool]):
         ("family", "images / generate_content", "images"),
         ("base_url", "https://…", ""),
         ("model_default", "model id", ""),
-        ("credential_ref", "env:NAME 或 keyring:SERVICE", "env:IMAGEN_KEY"),
+        ("credential_ref", "env:NAME / keyring:SERVICE / private:NAME（可留空）",
+         "env:IMAGEN_KEY"),
+        ("api_key", "直接填 API key（写入私有存储，不回显）", ""),
         ("revision", "1", "1"),
     )
+    OPTIONAL = {"credential_ref", "api_key"}
+    SECRETS = {"api_key"}
 
     def __init__(self, deps: Deps) -> None:
         super().__init__()
@@ -362,7 +381,10 @@ class ProvidersScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("Providers · a 新增 · u 更新 · m 刷新模型 · n 添加模型 · enter 查看"),
+            Static(
+                "Providers · a 新增 · u 更新 · m 刷新模型 · n 添加模型 · enter 查看\n"
+                "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空"
+            ),
             self.table, self.detail, self.status, id="providers",
         )
 
@@ -389,13 +411,29 @@ class ProvidersScreen(ModalScreen[bool]):
             self.deps.repositories.get("profiles", str(key.value), include_private=True),
         )
 
+    def _with_secret(self, values: dict[str, str]) -> dict[str, Any]:
+        parameters: dict[str, Any] = {
+            key: value for key, value in values.items() if key != "api_key"
+        }
+        secret = values.get("api_key", "")
+        if secret:
+            if self.deps.secret_ref is None:
+                raise ValueError("private credential storage is unavailable")
+            parameters["credential_ref"] = self.deps.secret_ref(
+                str(values["profile"]), secret
+            )
+        elif not parameters.get("credential_ref"):
+            raise ValueError("填写 API key，或提供 env:/keyring:/private: 引用")
+        return parameters
+
     def action_add(self) -> None:
         def done(values: dict[str, str] | None) -> None:
             if not values or self.deps.profile_set is None:
                 return
             try:
+                parameters = self._with_secret(values)
                 status, data = self.deps.profile_set(
-                    {**values, "revision": int(values.get("revision", "1"))}
+                    {**parameters, "revision": int(values.get("revision", "1"))}
                 )
             except ValueError as error:
                 self.status.update(_sanitize(error))
@@ -403,7 +441,13 @@ class ProvidersScreen(ModalScreen[bool]):
             self.status.update(f"{status}: {_sanitize(data.get('profile', {}).get('id', ''))}")
             self.refresh_rows()
 
-        self.app.push_screen(FormScreen("新增 profile", list(self.FIELDS)), done)
+        self.app.push_screen(
+            FormScreen(
+                "新增 profile", list(self.FIELDS),
+                optional=self.OPTIONAL, secrets=self.SECRETS,
+            ),
+            done,
+        )
 
     def action_update(self) -> None:
         profile = self._selected()
@@ -419,8 +463,9 @@ class ProvidersScreen(ModalScreen[bool]):
             if not values or self.deps.profile_set is None:
                 return
             try:
+                parameters = self._with_secret(values)
                 status, data = self.deps.profile_set(
-                    {**values, "revision": int(profile["revision"])}
+                    {**parameters, "revision": int(profile["revision"])}
                 )
             except ValueError as error:
                 self.status.update(_sanitize(error))
@@ -428,7 +473,13 @@ class ProvidersScreen(ModalScreen[bool]):
             self.status.update(f"{status}: revision {data.get('profile', {}).get('revision', '')}")
             self.refresh_rows()
 
-        self.app.push_screen(FormScreen("更新 profile", defaults), done)
+        self.app.push_screen(
+            FormScreen(
+                "更新 profile", defaults,
+                optional=self.OPTIONAL, secrets=self.SECRETS,
+            ),
+            done,
+        )
 
     def action_refresh_models(self) -> None:
         profile = self._selected()
@@ -541,6 +592,135 @@ class PlanScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
+    schema = discover(command)["input_schema"]
+    properties = schema.get("properties") or {}
+    arguments: dict[str, Any] = {}
+    for name, raw in values.items():
+        spec = properties.get(name) or {}
+        kind = spec.get("type")
+        if kind is None and "anyOf" in spec:
+            kind = next(
+                (item.get("type") for item in spec["anyOf"] if item.get("type")), None
+            )
+        if not raw:
+            continue
+        if kind == "integer":
+            arguments[name] = int(raw)
+        elif kind == "boolean":
+            arguments[name] = raw.lower() in {"1", "true", "yes", "on"}
+        elif kind == "array":
+            arguments[name] = [item.strip() for item in raw.split(",") if item.strip()]
+        elif kind == "object":
+            import json
+
+            arguments[name] = json.loads(raw)
+        else:
+            arguments[name] = raw
+    return arguments
+
+
+class ResultScreen(ModalScreen[None]):
+    BINDINGS = [Binding("escape", "close", "关闭")]
+
+    def __init__(self, command: str, status: str, data: dict[str, Any]) -> None:
+        super().__init__()
+        self.command = command
+        self.status = status
+        self.data = data
+        self.body = Static("")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(Static(f"{self.command} · {self.status}"), self.body, id="result")
+
+    def on_mount(self) -> None:
+        ok = self.status in {"succeeded", "accepted", "approved", "planned"}
+        value = {
+            "ok": ok, "status": self.status, "data": self.data,
+            "error": None if ok else {"message": self.status},
+        }
+        self.body.update(Text.from_ansi(human_render(value, color=True)))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class CommandPaletteScreen(ModalScreen[str | None]):
+    """Every registered CLI command; the form is generated from its schema."""
+
+    BINDINGS = [
+        Binding("up", "cursor_up", "上一个", show=False),
+        Binding("down", "cursor_down", "下一个", show=False),
+        Binding("enter", "select", "打开"),
+        Binding("escape", "close", "关闭"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.names = sorted(
+            name for name, command in COMMANDS.items()
+            if command.available and name not in {"tui", "help", "schema"}
+        )
+        self.table: DataTable[Any] = DataTable()
+        self.status = Static("")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("全部命令 · ↑↓ 选择 · enter 打开 · esc 关闭"),
+            self.table, self.status, id="palette",
+        )
+
+    def on_mount(self) -> None:
+        self.table.add_columns("命令", "说明")
+        for name in self.names:
+            self.table.add_row(_sanitize(name), _sanitize(COMMANDS[name].summary))
+        self.table.can_focus = False
+        self.table.move_cursor(row=0)
+        self.set_focus(None)
+
+    def _move(self, delta: int) -> None:
+        row = min(len(self.names) - 1, max(0, self.table.cursor_row + delta))
+        self.table.move_cursor(row=row)
+
+    def action_cursor_up(self) -> None:
+        self._move(-1)
+
+    def action_cursor_down(self) -> None:
+        self._move(1)
+
+    def action_select(self) -> None:
+        row = self.table.cursor_row
+        if 0 <= row < len(self.names):
+            self.dismiss(self.names[row])
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
+    schema = discover(command)["input_schema"]
+    properties = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    fields = []
+    for name in sorted(properties):
+        spec = properties[name] if isinstance(properties[name], dict) else {}
+        kind = spec.get("type")
+        if kind is None and "anyOf" in spec:
+            kind = next(
+                (item.get("type") for item in spec["anyOf"] if item.get("type")), None
+            )
+        default = spec.get("default", "")
+        if default in {"", None} and spec.get("const") is not None:
+            default = spec["const"]
+        if isinstance(default, bool):
+            default = "true" if default else "false"
+        placeholder = str(kind or "value")
+        if "enum" in spec:
+            placeholder = " | ".join(str(item) for item in spec["enum"])
+        fields.append((name, placeholder, str(default) if default != "" else ""))
+    return fields, set(properties) - required
+
+
 class WorkbenchApp(App[None]):
     CSS = """
     #sessions { width: 40%; }
@@ -561,6 +741,7 @@ class WorkbenchApp(App[None]):
         Binding("e", "export", "导出会话"),
         Binding("t", "transform", "变换"),
         Binding("r", "refresh", "刷新"),
+        Binding("colon", "commands", "全部命令"),
         Binding("?", "help", "帮助"),
     ]
 
@@ -573,7 +754,7 @@ class WorkbenchApp(App[None]):
         self.preview = Static(id="preview")
         self.hint = Static(
             "g 生成 · m 编辑 · n 新建会话 · t 变换 · f 分支 · e 导出\n"
-            "v 或 p 管理 providers · c 缓存 · x 删除 · r 刷新 · q 退出",
+            ": 全部命令 · v/p providers · c 缓存 · x 删除 · r 刷新 · q 退出",
             id="hint",
         )
         self.current: str | None = None
@@ -670,6 +851,49 @@ class WorkbenchApp(App[None]):
                 self.show_detail()
 
         self.push_screen(PlanScreen(self.deps, plan), finished)
+
+    def action_commands(self) -> None:
+        def chosen(command: str | None) -> None:
+            if command is not None:
+                self._open_command(command)
+
+        self.push_screen(CommandPaletteScreen(), chosen)
+
+    def _open_command(self, command: str) -> None:
+        if self.deps.execute is None:
+            self.detail.update("执行器不可用")
+            return
+        fields, optional = command_fields(command)
+        if not fields:
+            self._run_command(command, {})
+            return
+
+        def done(values: dict[str, str] | None) -> None:
+            if values is None:
+                return
+            try:
+                arguments = _convert_arguments(command, values)
+            except (ValueError, TypeError) as error:
+                self.detail.update("参数错误：" + _sanitize(error))
+                return
+            self._run_command(command, arguments)
+
+        self.push_screen(FormScreen(f"命令 {command}", fields, optional=optional), done)
+
+    def _run_command(self, command: str, arguments: dict[str, Any]) -> None:
+        assert self.deps.execute is not None
+        try:
+            status, data = self.deps.execute(command, arguments)
+        except Exception as error:  # noqa: BLE001
+            self.push_screen(ResultScreen(command, "failed", {"message": str(error)}))
+            return
+        if data.get("plan") and status in {"approval_required", "planned"}:
+            self._push_plan(status, data)
+            return
+        self.push_screen(ResultScreen(command, status, data))
+        if command.startswith(("session ", "profile ", "plan ")):
+            self.refresh_rows()
+            self.show_detail()
 
     def action_new_session(self) -> None:
         if self.deps.create_session is None:

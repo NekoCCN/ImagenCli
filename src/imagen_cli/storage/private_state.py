@@ -19,6 +19,12 @@ from imagen_cli.storage.safety import (
     storage_id,
 )
 
+MAX_SECRET_BYTES = 64 * 1024
+
+
+def credential_name(profile_id: str) -> str:
+    return "cred-" + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:24]
+
 
 class PrivateStateStore:
     def __init__(self, root: Path):
@@ -113,6 +119,25 @@ class PrivateStateStore:
         if not isinstance(value, dict):
             raise ValueError("private response must be an object")
         return value
+
+    def write_credential(self, profile_id: str, value: str) -> str:
+        """Store an API key under a derived name and return its private: reference."""
+        name = credential_name(profile_id)
+        self.write(name, value.encode("utf-8"))
+        return "private:" + name
+
+    def read_secret(self, identity: str) -> str:
+        with self._directory():
+            path = safe_path(self.root, storage_id(identity) + ".bin")
+            fd = self._open(path, create=False)
+            with os.fdopen(fd, "rb") as source:
+                data = source.read(MAX_SECRET_BYTES + 1)
+        if len(data) > MAX_SECRET_BYTES:
+            raise ValueError("credential is too large")
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError("credential is not UTF-8") from error
 
     def delete(self, relpath: str) -> None:
         with self._directory():

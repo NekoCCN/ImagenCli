@@ -55,3 +55,19 @@ def test_profile_build_accepts_keyring():
             base_url="https://gateway.example/v1", model_default="m",
             credential_ref="plaintext",
         )
+
+
+def test_private_store_credentials_resolve(tmp_path):
+    from imagen_cli.application.container import Container
+    from imagen_cli.execution.configured import resolve_credential
+
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        reference = container.private_state_store.write_credential("demo", "sk-private")
+        assert reference.startswith("private:")
+        assert resolve_credential(
+            reference, private_store=container.private_state_store
+        ) == "sk-private"
+        with pytest.raises(ValueError, match="backend unavailable"):
+            resolve_credential(reference)
+        with pytest.raises(ValueError, match="unavailable"):
+            resolve_credential("private:missing", private_store=container.private_state_store)

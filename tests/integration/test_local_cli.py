@@ -206,3 +206,24 @@ def test_ops_and_superres_catalog_are_offline(tmp_path: Path):
     names = {item["model"] for item in result["data"]["models"]}
     assert {"realesrgan-x4plus", "realesrgan-x4plus-anime", "swinir-s-x4"} <= names
     assert all("downloaded" in item for item in result["data"]["models"])
+
+
+def test_profile_secret_stores_a_key_without_echoing_it(tmp_path: Path):
+    workspace = tmp_path / "work"
+    profile = tmp_path / "profile.toml"
+    profile.write_text(
+        'id = "demo"\nname = "demo"\nprovider = "openai"\nfamily = "images"\n'
+        'base_url = "https://gateway.example/v1"\nmodel_default = "image-model"\n'
+        'credential_ref = "env:PLACEHOLDER"\nrevision = 1\n[trust_policy]\n',
+        encoding="utf-8",
+    )
+    assert invoke(workspace, "profile", "add", "demo", "--config-file", str(profile))[0] == 0
+    key = tmp_path / "key.txt"
+    key.write_text("sk-local-secret\n", encoding="utf-8")
+    code, value = invoke(workspace, "profile", "secret", "demo", "--key-file", str(key))
+    assert code == 0, value
+    assert "sk-local-secret" not in json.dumps(value)
+    with Container(workspace=str(workspace)) as container:
+        row = container.repositories.get("profiles", "demo", include_private=True)
+        assert row["credential_ref"].startswith("private:")
+        assert row["revision"] == 2

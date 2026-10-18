@@ -48,7 +48,8 @@ COMMANDS = {
                 ("profile list", "列出本地 profile"),
                 ("profile show", "查看本地 profile"),
                 ("profile update", "创建新的 profile revision"),
-                ("profile set", "以命令行参数创建或更新 profile；接受 env: 或 keyring: 引用"),
+                ("profile set", "以命令行参数创建或更新 profile；接受 env:/keyring:/private: 引用"),
+                ("profile secret", "把 --key-file 的密钥写入私有存储并更新 credential_ref；不回显"),
                 ("session create", "创建本地创作会话"),
                 ("session list", "分页列出本地会话"),
                 ("session show", "查看本地会话历史"),
@@ -169,6 +170,9 @@ def _input_schema(name: str) -> dict[str, Any]:
         if name in {"profile add", "profile update"}:
             properties["config_file"] = text
             required += ("config_file",)
+        elif name == "profile secret":
+            properties["key_file"] = text
+            required += ("key_file",)
         elif name == "profile set":
             properties.update(dict.fromkeys(
                 ("provider", "family", "base_url", "model_default", "credential_ref"), text,
@@ -280,6 +284,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name == "profile secret":
+        return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name == "transform":
         return _object({"artifact": {"type": "object"}, "source": {"type": "string"}})
     if command.name == "sheet":

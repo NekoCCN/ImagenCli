@@ -324,3 +324,62 @@ def test_provider_form_creates_a_profile(deps):
     asyncio.run(run())
     assert saved and saved[0]["profile"] == "demo"
     assert saved[0]["base_url"] == "https://gateway.example/v1"
+
+
+def test_command_palette_runs_commands_without_fields(deps):
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        return "succeeded", {"operations": ["pixelate"]}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            app._open_command("ops")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert calls == [("ops", {})]
+
+
+def test_provider_form_accepts_a_direct_api_key(deps):
+    deps_value, _ = deps
+    saved = []
+    secrets = []
+
+    def secret_ref(profile, key):
+        secrets.append((profile, key))
+        return "private:cred-demo"
+
+    def profile_set(parameters):
+        saved.append(parameters)
+        return "succeeded", {"profile": {"id": parameters["profile"], "revision": 1}}
+
+    deps_value.secret_ref = secret_ref
+    deps_value.profile_set = profile_set
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.press(*"demo")
+            await pilot.press("tab", "tab", "tab")
+            await pilot.press(*"https://gateway.example/v1")
+            await pilot.press("tab")
+            await pilot.press(*"image-model")
+            await pilot.press("tab", "tab")
+            await pilot.press(*"sk-direct")
+            await pilot.press("enter")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert secrets == [("demo", "sk-direct")]
+    assert saved and saved[0]["credential_ref"] == "private:cred-demo"
+    assert "api_key" not in saved[0]

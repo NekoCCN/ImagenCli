@@ -2,6 +2,7 @@
 
 import os
 import re
+from typing import Any
 
 from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.providers.base import ImmediateResult, ProviderFailure, ValidatedRequest
@@ -11,9 +12,18 @@ from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 
-def resolve_credential(reference: str) -> str:
+def resolve_credential(
+    reference: str, *, private_store: Any = None,
+) -> str:
     if re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference):
         value = os.environ.get(reference[4:], "")
+    elif re.fullmatch(r"private:[A-Za-z][A-Za-z0-9_-]{0,127}", reference):
+        if private_store is None:
+            raise ValueError("credential backend unavailable")
+        try:
+            value = private_store.read_secret(reference[8:])
+        except (OSError, ValueError) as error:
+            raise ValueError("credential unavailable") from error
     elif re.fullmatch(r"keyring:[A-Za-z0-9._-]{1,128}", reference):
         try:
             import keyring
@@ -39,6 +49,9 @@ class ConfiguredAdapter:
         self.timeout = timeout
         self.private_store = private_store
 
+    def _resolve(self, reference: str) -> str:
+        return resolve_credential(reference, private_store=self.private_store)
+
     def create(self, request: ValidatedRequest) -> ImmediateResult:
         row = self.repositories.get("profiles", request.profile_identity, include_private=True)
         if row is None:
@@ -50,10 +63,10 @@ class ConfiguredAdapter:
             return GeminiAdapter(
                 profile,
                 private_store=self.private_store,
-                resolve_credential=resolve_credential,
+                resolve_credential=self._resolve,
             ).create(request)
         if (profile.provider, profile.family) != ("openai", "images"):
             raise ProviderFailure("unsupported_capability")
         return OpenAIImagesAdapter(
-            profile, resolve_credential=resolve_credential, read_timeout=self.timeout,
+            profile, resolve_credential=self._resolve, read_timeout=self.timeout,
         ).create(request)
