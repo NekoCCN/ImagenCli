@@ -69,6 +69,7 @@ COMMANDS = {
                 ("batch get", "查看批次汇总与全部子任务事实；不改变子任务"),
                 ("batch wait", "有界等待批次汇总；不重试子任务"),
                 ("asset gc", "dry-run 列出未被引用的受管产物；--plan --yes 仅确认该清单"),
+                ("asset open", "用系统默认程序打开产物图片，或 --folder 打开所在目录"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
                 ("models refresh", "从 profile 端点拉取模型列表；只写 provider_models"),
@@ -269,6 +270,12 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "asset show":
         properties = {"artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}}
         required = ("artifact",)
+    elif name == "asset open":
+        properties = {
+            "artifact_id": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "folder": {"type": "boolean", "default": False},
+        }
+        required = ("artifact_id",)
     elif name == "asset gc":
         properties = {
             "dry_run": {"type": "boolean", "default": False},
@@ -402,6 +409,11 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "deleted": {"type": "boolean"},
             "exported_files_untouched": {"type": "boolean"},
         }, ("session", "deleted", "exported_files_untouched"))
+    if command.name == "asset open":
+        return _object({
+            "artifact": {"type": "string"}, "path": {"type": "string"},
+            "opened": {"enum": ["image", "folder"]},
+        }, ("artifact", "path", "opened"))
     if command.name == "asset gc":
         return _object({
             "dry_run": {"type": "boolean"},

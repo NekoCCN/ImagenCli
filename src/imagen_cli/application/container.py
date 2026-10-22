@@ -375,6 +375,22 @@ class Container:
                 dry_run=args.get("dry_run") is True, plan=args.get("plan"),
                 yes=args.get("yes") is True,
             )
+        if command == "asset open":
+            from jsonschema import validate
+
+            from imagen_cli.application.opener import open_path
+
+            validate(args, discover(command)["input_schema"])
+            row = self.repositories.get("artifacts", args["artifact_id"])
+            path = self.artifact_store.get(args["artifact_id"])
+            if row is None or path is None:
+                return "not_found", {}
+            folder = args.get("folder") is True
+            open_path(path, folder=folder)
+            return "succeeded", {
+                "artifact": row["id"], "path": str(path.parent if folder else path),
+                "opened": "folder" if folder else "image",
+            }
         if command.startswith("cache "):
             from jsonschema import validate
 

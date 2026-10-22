@@ -391,6 +391,47 @@ def test_retry_key_rebuilds_the_request(deps):
     assert calls == ["plan retry"]
 
 
+def test_open_keys_open_the_current_image_and_folder(deps):
+    deps_value, _ = deps
+    identity = _publish_output(deps_value)
+    opened = []
+
+    def open_artifact(artifact, folder):
+        opened.append((artifact, folder))
+        return "succeeded", {"path": "/tmp/artifact"}
+
+    deps_value.open_artifact = open_artifact
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("o")
+            await pilot.pause()
+            await pilot.press("O")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert opened == [(identity, False), (identity, True)]
+
+
+def test_help_lists_the_delete_and_open_keys(deps):
+    deps_value, _ = deps
+    from textual.widgets import Static
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("?")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "HelpScreen"
+            text = " ".join(str(widget.render()) for widget in app.screen.query(Static))
+            assert "x" in text and "删除会话" in text
+            assert "打开图片" in text and "打开目录" in text
+
+    asyncio.run(run())
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []

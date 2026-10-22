@@ -49,7 +49,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "provider", "family", "base-url", "model-default", "credential-ref",
                 "revision", "pipeline", "op", "send-credential", "id", "first", "second",
                 "artifacts", "columns", "cell", "backend", "tile", "overlap", "accept",
-                "key-file",
+                "key-file", "folder",
             }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
@@ -62,7 +62,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 raise ValueError("duplicate option")
             value: Any = raw_value
             boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
-                "send-credential", "accept",
+                "send-credential", "accept", "folder",
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
@@ -238,6 +238,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         if words:
             raise ValueError("unexpected positional arguments")
         validate(parameters, discover(command)["input_schema"])
+        return command, parameters, options
+    if command == "asset open":
+        if len(words) != 1:
+            raise ValueError("one artifact identity required")
+        parameters["artifact_id"] = words[0]
+        validate(parameters, schema)
         return command, parameters, options
     if command == "asset gc":
         if words:

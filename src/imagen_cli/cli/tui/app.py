@@ -51,6 +51,7 @@ class Deps:
     models_refresh: Callable[[str], tuple[str, dict[str, Any]]] | None = None
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     models_use: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
+    open_artifact: Callable[[str, bool], tuple[str, dict[str, Any]]] | None = None
     create_session: Callable[..., dict[str, Any]] | None = None
     execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     secret_ref: Callable[[str, str], str] | None = None
@@ -76,6 +77,8 @@ class Deps:
             self.models_add = self._models_add
         if self.models_use is None:
             self.models_use = self._models_use
+        if self.open_artifact is None:
+            self.open_artifact = self._open_artifact
         if self.create_session is None:
             self.create_session = self._create_session
         if self.secret_ref is None:
@@ -135,6 +138,18 @@ class Deps:
         from imagen_cli.cli.commands import models
 
         return models.use_(self.repositories, profile, model)
+
+    def _open_artifact(self, artifact: str, folder: bool) -> tuple[str, dict[str, Any]]:
+        from imagen_cli.application.opener import open_path
+
+        path = self.store.get(artifact)
+        if path is None:
+            return "not_found", {}
+        open_path(path, folder=folder)
+        return "succeeded", {
+            "artifact": artifact, "path": str(path.parent if folder else path),
+            "opened": "folder" if folder else "image",
+        }
 
     def _secret_ref(self, profile: str, key: str) -> str:
         if self.private_store is None:
@@ -878,6 +893,27 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
     return fields, set(properties) - required
 
 
+class HelpScreen(ModalScreen[None]):
+    """Every shown binding in one panel; keeps the key bar short."""
+
+    BINDINGS = [Binding("escape", "close", "关闭")]
+
+    def __init__(self, rows: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.rows = rows
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("快捷键", classes="panel-title"),
+            *(Static(f"{key}  {description}") for key, description in self.rows),
+            Static(": 打开全部命令 · esc 关闭", classes="panel-hint"),
+            classes="panel", id="help",
+        )
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class WorkbenchApp(App[None]):
     CSS = """
     Screen {
@@ -942,9 +978,12 @@ class WorkbenchApp(App[None]):
         Binding("f", "fork", "分支会话"),
         Binding("e", "export", "导出会话"),
         Binding("t", "transform", "变换"),
+        Binding("o", "open_image", "打开图片"),
+        Binding("O", "open_folder", "打开目录"),
         Binding("r", "refresh", "刷新"),
         Binding("colon", "commands", "全部命令"),
-        Binding("?", "help", "帮助"),    ]
+        Binding("?", "help", "帮助"),
+    ]
 
     def __init__(self, deps: Deps, *, workspace_label: str = "") -> None:
         super().__init__()
@@ -1249,10 +1288,34 @@ class WorkbenchApp(App[None]):
         self.refresh_rows()
         self.show_detail()
 
+    def _open_current(self, folder: bool) -> None:
+        found = self._current_artifact()
+        if found is None or self.deps.open_artifact is None:
+            self.detail.update("当前会话没有可打开的产物")
+            return
+        identity, path = found
+        try:
+            status, data = self.deps.open_artifact(identity, folder)
+        except (ValueError, OSError) as error:
+            self.detail.update("打开失败：" + _sanitize(error))
+            return
+        if status == "succeeded":
+            self.detail.update(f"已打开：{data.get('path', path)}")
+        else:
+            self.detail.update(f"打开结果：{status}")
+
+    def action_open_image(self) -> None:
+        self._open_current(False)
+
+    def action_open_folder(self) -> None:
+        self._open_current(True)
+
     def action_help(self) -> None:
-        self.detail.update(
-            "enter 打开 · c 缓存 · v providers · x 删除 · f 分支 · e 导出 · t 变换 · q 退出"
-        )
+        self.push_screen(HelpScreen([
+            ({"colon": ":"}.get(binding.key, binding.key), str(binding.description))
+            for binding in self.BINDINGS
+            if isinstance(binding, Binding) and binding.show
+        ]))
 
     def action_delete(self) -> None:
         if self.current is None or self.deps.delete_session is None:
