@@ -51,6 +51,7 @@ class Deps:
     models_refresh: Callable[[str], tuple[str, dict[str, Any]]] | None = None
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     models_use: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
+    capabilities_declare: Callable[[str, str, str], tuple[str, dict[str, Any]]] | None = None
     create_session: Callable[..., dict[str, Any]] | None = None
     execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     secret_ref: Callable[[str, str], str] | None = None
@@ -76,6 +77,8 @@ class Deps:
             self.models_add = self._models_add
         if self.models_use is None:
             self.models_use = self._models_use
+        if self.capabilities_declare is None:
+            self.capabilities_declare = self._capabilities_declare
         if self.create_session is None:
             self.create_session = self._create_session
         if self.secret_ref is None:
@@ -135,6 +138,13 @@ class Deps:
         from imagen_cli.cli.commands import models
 
         return models.use_(self.repositories, profile, model)
+
+    def _capabilities_declare(
+        self, profile: str, model: str, operation: str,
+    ) -> tuple[str, dict[str, Any]]:
+        from imagen_cli.application.capability_service import declare
+
+        return declare(self.repositories, profile, operation, model=model)
 
     def _secret_ref(self, profile: str, key: str) -> str:
         if self.private_store is None:
@@ -1022,7 +1032,10 @@ class WorkbenchApp(App[None]):
     def _push_plan(self, status: str, data: dict[str, Any]) -> None:
         plan = data.get("plan") or {}
         if status not in {"approval_required", "planned"} or not plan.get("id"):
-            self.detail.update(f"生成：{status}")
+            if status == "unsupported_capability":
+                self.detail.update("能力未声明：运行 capabilities declare <profile> 后重试")
+            else:
+                self.detail.update(f"生成：{status}")
             return
 
         def finished(changed: bool | None) -> None:
@@ -1115,6 +1128,26 @@ class WorkbenchApp(App[None]):
         model = str(session.get("default_model") or (row or {}).get("model_default") or "")
         return identity, model
 
+    def _run_creation(self, operation: str, arguments: dict[str, Any], label: str) -> None:
+        """Plan once; declare the missing intent record and retry once."""
+        assert self.deps.execute is not None
+        try:
+            status, data = self.deps.execute(operation, arguments)
+            if (
+                status == "unsupported_capability"
+                and self.deps.capabilities_declare is not None
+                and arguments.get("profile") and arguments.get("model")
+            ):
+                declared, _ = self.deps.capabilities_declare(
+                    str(arguments["profile"]), str(arguments["model"]), operation,
+                )
+                if declared == "succeeded":
+                    status, data = self.deps.execute(operation, arguments)
+        except Exception as error:  # noqa: BLE001 - surfaced in the panel
+            self.detail.update(f"{label}失败：" + _sanitize(error))
+            return
+        self._push_plan(status, data)
+
     def action_generate(self) -> None:
         if self.current is None:
             self.detail.update("尚无会话；按 n 新建后再生成")
@@ -1139,12 +1172,7 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            try:
-                status, data = self.deps.execute("generate", arguments)
-            except Exception as error:  # noqa: BLE001
-                self.detail.update("生成失败：" + _sanitize(error))
-                return
-            self._push_plan(status, data)
+            self._run_creation("generate", arguments, "生成")
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
@@ -1183,12 +1211,7 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            try:
-                status, data = self.deps.execute("edit", arguments)
-            except Exception as error:  # noqa: BLE001
-                self.detail.update("编辑失败：" + _sanitize(error))
-                return
-            self._push_plan(status, data)
+            self._run_creation("edit", arguments, "编辑")
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(

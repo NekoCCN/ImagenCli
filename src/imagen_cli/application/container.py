@@ -336,6 +336,13 @@ class Container:
                 self.repositories, command, profile=args.get("profile"), data=data,
                 limit=self.options.limit, cursor=self.options.cursor,
             )
+        if command == "capabilities declare":
+            from imagen_cli.application.capability_service import declare
+
+            return declare(
+                self.repositories, args["profile"],
+                args.get("operation", "generate"), model=args.get("model"),
+            )
         if command in {"providers", "models", "capabilities"}:
             from jsonschema import validate
 

@@ -44,6 +44,7 @@ COMMANDS = {
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
                 ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
+                ("capabilities declare", "为 profile 的模型写一条 intent 能力声明；不联网"),
                 ("profile add", "新增本地 profile；只保存 credential_ref"),
                 ("profile list", "列出本地 profile"),
                 ("profile show", "查看本地 profile"),
@@ -162,6 +163,12 @@ def _input_schema(name: str) -> dict[str, Any]:
         elif name in {"models add", "models use"}:
             properties["id"] = text
             required += ("id",)
+    elif name == "capabilities declare":
+        properties = {
+            "profile": text, "model": text,
+            "operation": {"enum": ["generate", "edit"], "default": "generate"},
+        }
+        required = ("profile",)
     elif name.split()[0] in {"providers", "models", "capabilities"}:
         properties = dict.fromkeys(("profile", "model", "operation"), text)
     elif name.startswith("profile "):

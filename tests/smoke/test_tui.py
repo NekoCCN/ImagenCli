@@ -291,6 +291,49 @@ def test_generate_defaults_to_the_only_profile(deps):
     assert values["model"] == "picked-model"
 
 
+def test_generate_declares_a_missing_capability_and_retries(deps):
+    deps_value, _ = deps
+    deps_value.repositories.insert("profiles", {
+        "id": "p1", "name": "p1", "provider": "openai", "family": "images",
+        "base_url": "https://gateway.example/v1", "model_default": "picked-model",
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        if calls.count("generate") == 1:
+            return "unsupported_capability", {}
+        return "approval_required", {"plan": {
+            "id": "pln_" + "1" * 32, "plan_digest": "a" * 64,
+            "operation": "generate", "model": "picked-model",
+        }}
+
+    declared = []
+
+    def declare(profile, model, operation):
+        declared.append((profile, model, operation))
+        return "succeeded", {"created": True}
+
+    deps_value.execute = execute
+    deps_value.capabilities_declare = declare
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("g")
+            await pilot.pause()
+            await pilot.press(*"a cat")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "PlanScreen"
+
+    asyncio.run(run())
+    assert declared == [("p1", "picked-model", "generate")]
+    assert calls.count("generate") == 2
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []

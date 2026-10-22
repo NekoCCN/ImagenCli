@@ -224,6 +224,28 @@ def test_models_use_selects_a_default_from_the_cli(tmp_path: Path):
     assert [row["model_id"] for row in value["data"]["models"]] == ["gpt-image-2.5"]
 
 
+def test_declared_capability_unlocks_generate_planning(tmp_path: Path):
+    workspace = tmp_path / "work"
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("a cat", encoding="utf-8")
+    assert invoke(
+        workspace, "profile", "set", "demo", "--provider", "openai", "--family", "images",
+        "--base-url", "https://gateway.example/v1", "--model-default", "custom-model",
+        "--credential-ref", "env:KEY",
+    )[0] == 0
+    assert invoke(
+        workspace, "session", "create", "s", "--profile", "demo", "--model", "custom-model"
+    )[0] == 0
+    args = ("generate", "--session", "s", "--prompt-file", str(prompt), "--size", "1024x1024")
+    assert invoke(workspace, *args)[0] == 2
+    code, value = invoke(workspace, "capabilities", "declare", "demo")
+    assert code == 0, value
+    assert value["data"]["created"] is True
+    code, value = invoke(workspace, *args)
+    assert code == 6
+    assert value["status"] == "approval_required"
+
+
 def test_profile_secret_stores_a_key_without_echoing_it(tmp_path: Path):
     workspace = tmp_path / "work"
     profile = tmp_path / "profile.toml"

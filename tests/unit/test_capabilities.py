@@ -6,6 +6,30 @@ from imagen_cli.capabilities.catalog import CapabilityCatalog
 from imagen_cli.capabilities.validator import CapabilityValidator
 
 
+def test_declare_writes_an_intent_record_from_the_reviewed_template(tmp_path):
+    from imagen_cli.application.capability_service import declare
+    from imagen_cli.application.container import Container
+
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.repositories.insert("profiles", {
+            "id": "demo", "name": "demo", "provider": "openai", "family": "images",
+            "base_url": "http://127.0.0.1:3000/v1", "model_default": "custom-model",
+            "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+        })
+        status, data = declare(container.repositories, "demo", "generate")
+        assert status == "succeeded"
+        record = data["capability"]
+        assert data["created"] is True
+        assert (record["model"], record["model_revision"]) == ("custom-model", "declared")
+        assert record["support_status"] == "I"
+        assert record["parameter_schema"]["properties"]["size"]["type"] == "string"
+        assert record["sources"][0]["locator"] == "capabilities declare"
+        again = declare(container.repositories, "demo", "generate")
+        assert again[1]["created"] is False
+        with pytest.raises(ValueError, match="operation"):
+            declare(container.repositories, "demo", "describe")
+
+
 def capability(**changes):
     value = {
         "id": "openai-images-generate",
