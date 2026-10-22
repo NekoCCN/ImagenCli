@@ -40,6 +40,7 @@ COMMANDS = {
                 ("plan show", "查看持久执行计划；不发送请求"),
                 ("plan approve", "显式批准计划摘要；不发送请求"),
                 ("plan execute", "执行已批准计划；最多发送一次供应商创建请求"),
+                ("plan retry", "按原计划重建一次新请求，生成新的待批准计划"),
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
                 ("profile add", "新增本地 profile；只保存 credential_ref"),

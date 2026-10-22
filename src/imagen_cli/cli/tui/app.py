@@ -638,6 +638,7 @@ class PlanScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("a", "approve", "批准"),
         Binding("enter", "execute", "执行"),
+        Binding("r", "retry", "重试"),
         Binding("escape", "cancel", "取消"),
     ]
 
@@ -657,7 +658,7 @@ class PlanScreen(ModalScreen[bool]):
             ),
             Static(f"摘要 {self.plan.get('plan_digest')}", classes="panel-hint"),
             self.status,
-            Static("a 批准 · enter 执行 · esc 取消", classes="panel-hint"),
+            Static("a 批准 · enter 执行 · r 重试 · esc 取消", classes="panel-hint"),
             classes="panel", id="plan",
         )
 
@@ -713,6 +714,21 @@ class PlanScreen(ModalScreen[bool]):
             self.dismiss(True)
         else:
             self.status.update(f"执行结果：{status}")
+
+    def action_retry(self) -> None:
+        if self.deps.execute is None:
+            self.status.update("执行器不可用")
+            return
+        try:
+            status, data = self.deps.execute("plan retry", {"plan_id": self.plan["id"]})
+        except (ValueError, OSError) as error:
+            self.status.update("重试失败：" + _sanitize(error))
+            return
+        plan = data.get("plan") or {}
+        if plan.get("id"):
+            self.app.push_screen(PlanScreen(self.deps, plan))
+        else:
+            self.status.update(f"重试结果：{status}")
 
     def action_cancel(self) -> None:
         self.dismiss(False)

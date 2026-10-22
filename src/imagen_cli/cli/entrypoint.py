@@ -158,7 +158,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise ValueError("unexpected positional arguments")
         validate(parameters, schema)
         return command, parameters, options
-    if command in {"plan show", "plan approve", "plan execute"}:
+    if command in {"plan show", "plan approve", "plan execute", "plan retry"}:
         if len(words) != 1:
             raise ValueError("one plan identity required")
         parameters["plan_id"] = words[0]

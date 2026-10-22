@@ -180,6 +180,32 @@ class Container:
                     ArtifactService(self.repositories, self.artifact_store), facts["job"]["id"]
                 )[1]["artifacts"],
             }
+        if command == "plan retry":
+            from imagen_cli.application.preflight import plan_creation
+            from imagen_cli.domain.contracts import CreationInput
+
+            row = self.repositories.get("plans", args["plan_id"], include_private=True)
+            if row is None:
+                return "not_found", {}
+            session_row = self.repositories.get("sessions", row["session_id"])
+            if session_row is None:
+                return "not_found", {}
+            context = row.get("portable_context") or {}
+            parameters = dict(row.get("normalized_parameters") or {})
+            count = parameters.pop("count", 1)
+            size = parameters.pop("size", None)
+            creation = CreationInput(
+                schema_version=1, operation=row["operation"], session=session_row["name"],
+                prompt=row["prompt_snapshot"],
+                profile=row["target_snapshot"]["profile_identity"], model=row["model"],
+                inputs=["artifact:" + item for item in context.get("input_artifact_ids", [])],
+                count=count, provider_params=parameters,
+                **({"size": size} if size is not None else {}),
+            )
+            return plan_creation(
+                self.repositories, self.artifact_store, creation,
+                dry_run=self.options.dry_run, asynchronous=self.options.async_,
+            )
         if command in {"plan show", "plan approve"}:
             from imagen_cli.cli.commands import plan
 

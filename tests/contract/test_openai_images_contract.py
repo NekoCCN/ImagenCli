@@ -294,17 +294,16 @@ def test_disconnect_is_unknown_and_not_retried(
     [
         {"data": []},
         {"data": [{"b64_json": "!!!"}]},
-        {"data": [{"url": "http://127.0.0.1/SECRET"}]},
-        {"data": [{"url": "https://attacker.invalid/SECRET"}]},
         {"data": "wrong"},
         {"data": [{"b64_json": ""}]},
         {"data": [None]},
     ],
 )
-def test_malformed_or_url_only_results_never_trigger_downloads(
+def test_malformed_results_are_provider_errors_without_downloads(
     profile: ProviderProfile,
     creation: ValidatedRequest,
     response: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
 
@@ -312,11 +311,58 @@ def test_malformed_or_url_only_results_never_trigger_downloads(
         calls.append(sent)
         return httpx.Response(200, json=response)
 
+    def forbidden(*args: Any, **kwargs: Any) -> bytes:
+        raise AssertionError("unexpected download")
+
+    monkeypatch.setattr("imagen_cli.providers.openai_images.fetch_url", forbidden)
     with pytest.raises(ProviderFailure) as caught:
         adapter(profile, respond).create(creation)
     assert caught.value.type == "provider_error"
     assert caught.value.accepted_maybe
     assert len(calls) == 1
+    assert "SECRET" not in str(caught.value)
+
+
+def test_https_url_results_are_downloaded(
+    profile: ProviderProfile,
+    creation: ValidatedRequest,
+    png_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def download(url: str, *, max_bytes: int) -> bytes:
+        calls.append((url, max_bytes))
+        return png_bytes
+
+    monkeypatch.setattr("imagen_cli.providers.openai_images.fetch_url", download)
+    result = adapter(
+        profile,
+        lambda sent: httpx.Response(200, json={"data": [{"url": "https://cdn.example/x.png"}]}),
+    ).create(creation)
+    assert result.actual_count == 1
+    assert result.artifacts[0].content == png_bytes
+    assert calls == [("https://cdn.example/x.png", 64 * 1024 * 1024)]
+
+
+def test_refused_download_is_a_provider_error(
+    profile: ProviderProfile,
+    creation: ValidatedRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imagen_cli.storage.download import DownloadError
+
+    def refuse(url: str, *, max_bytes: int) -> bytes:
+        raise DownloadError("only https provider URLs are accepted")
+
+    monkeypatch.setattr("imagen_cli.providers.openai_images.fetch_url", refuse)
+    with pytest.raises(ProviderFailure) as caught:
+        adapter(
+            profile,
+            lambda sent: httpx.Response(200, json={"data": [{"url": "http://127.0.0.1/SECRET"}]}),
+        ).create(creation)
+    assert caught.value.type == "provider_error"
+    assert caught.value.accepted_maybe
     assert "SECRET" not in str(caught.value)
 
 

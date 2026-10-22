@@ -1,4 +1,4 @@
-"""OpenAI Images synchronous boundary; no SDK retries or implicit downloads."""
+"""OpenAI Images synchronous boundary; accepts inline base64 or result URLs."""
 
 import base64
 import binascii
@@ -10,8 +10,11 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 from imagen_cli.domain.models import ProviderProfile
+from imagen_cli.storage.download import DownloadError
+from imagen_cli.storage.download import fetch as fetch_url
 
 from .base import ArtifactDescriptor, ImmediateResult, ProviderFailure, ValidatedRequest
+from .common import validate_image_bytes
 
 
 class OpenAIImagesAdapter:
@@ -149,6 +152,15 @@ class OpenAIImagesAdapter:
             finally:
                 response.close()
 
+    def _download(self, url: str) -> tuple[bytes, str]:
+        try:
+            content = fetch_url(url, max_bytes=self.max_image_bytes)
+        except DownloadError as error:
+            raise ProviderFailure("provider_error", accepted_maybe=True) from error
+        return validate_image_bytes(
+            content, max_bytes=self.max_image_bytes, max_pixels=self.max_pixels
+        )
+
     def create(self, request: ValidatedRequest) -> ImmediateResult:
         self._validate(request)
         try:
@@ -186,18 +198,22 @@ class OpenAIImagesAdapter:
             artifacts = []
             for index, row in enumerate(rows):
                 encoded = row.get("b64_json") if isinstance(row, dict) else None
-                if not isinstance(encoded, str) or not encoded:
-                    raise ValueError
-                if len(encoded) > 4 * ((self.max_image_bytes + 2) // 3):
-                    raise ValueError
-                content = base64.b64decode(encoded, validate=True)
-                if len(content) > self.max_image_bytes:
-                    raise ValueError
-                with Image.open(io.BytesIO(content)) as image:
-                    image.verify()
-                    if image.width * image.height > self.max_pixels:
+                if isinstance(encoded, str) and encoded:
+                    if len(encoded) > 4 * ((self.max_image_bytes + 2) // 3):
                         raise ValueError
-                    media_type = Image.MIME.get(image.format or "", "image/png")
+                    content = base64.b64decode(encoded, validate=True)
+                    if len(content) > self.max_image_bytes:
+                        raise ValueError
+                    with Image.open(io.BytesIO(content)) as image:
+                        image.verify()
+                        if image.width * image.height > self.max_pixels:
+                            raise ValueError
+                        media_type = Image.MIME.get(image.format or "", "image/png")
+                else:
+                    url = row.get("url") if isinstance(row, dict) else None
+                    if not isinstance(url, str) or not url:
+                        raise ValueError
+                    content, media_type = self._download(url)
                 artifacts.append(
                     ArtifactDescriptor(
                         id=f"art_{uuid4().hex}", index=index, content=content, media_type=media_type

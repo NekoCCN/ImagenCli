@@ -30,13 +30,18 @@ class TransientDownloadError(DownloadError):
     pass
 
 
+_FAKE_IP = ipaddress.ip_network("198.18.0.0/15")
+
+
 def _public_ip(value: str) -> bool:
     try:
         address = ipaddress.ip_address(value)
     except ValueError:
         return False
+    # Transparent proxies (Clash, sing-box) answer DNS with 198.18/15 fake IPs
+    # and route the connection themselves; loopback and private ranges stay refused.
     # Multicast addresses report is_global for some scopes but are never a peer.
-    return address.is_global and not address.is_multicast
+    return (address.is_global and not address.is_multicast) or address in _FAKE_IP
 
 
 def _resolve(host: str, port: int) -> list[str]:

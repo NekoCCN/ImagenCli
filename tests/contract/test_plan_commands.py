@@ -38,6 +38,25 @@ def test_plan_review_and_approval_are_separate_from_execution(tmp_path):
         assert container.repositories.list("turns") == []
 
 
+def test_plan_retry_rebuilds_a_fresh_request(tmp_path):
+    workspace = tmp_path / "work"
+    prompt = seed(workspace, tmp_path)
+    code, result = invoke(workspace, "generate", "--session", "poster", "--prompt-file",
+                          str(prompt), "--dry-run")
+    assert code == 0
+    original = result["data"]["plan"]
+    code, retried = invoke(workspace, "plan", "retry", original["id"])
+    assert code == 6, retried
+    assert retried["status"] == "approval_required"
+    rebuilt = retried["data"]["plan"]
+    assert rebuilt["id"] != original["id"]
+    assert rebuilt["plan_digest"] != original["plan_digest"]
+    assert rebuilt["prompt_snapshot"] == original["prompt_snapshot"]
+    assert rebuilt["model"] == original["model"]
+    assert rebuilt["normalized_parameters"] == original["normalized_parameters"]
+    assert invoke(workspace, "plan", "retry", "pln_" + "1" * 32)[0] == 4
+
+
 def test_missing_plan_does_not_claim_success(tmp_path):
     assert invoke(tmp_path / "work", "plan", "show", "pln_" + "1" * 32)[0] == 4
 

@@ -360,6 +360,37 @@ def test_approve_error_is_shown_instead_of_raising(deps):
     asyncio.run(run())
 
 
+def test_retry_key_rebuilds_the_request(deps):
+    deps_value, _ = deps
+    from imagen_cli.cli.tui.app import PlanScreen
+
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        return "approval_required", {"plan": {
+            "id": "pln_" + "2" * 32, "plan_digest": "b" * 64,
+            "operation": "generate", "model": "picked-model",
+        }}
+
+    deps_value.execute = execute
+    app = WorkbenchApp(deps_value)
+    plan = {"id": "pln_" + "1" * 32, "plan_digest": "a" * 64,
+            "operation": "generate", "model": "picked-model"}
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.push_screen(PlanScreen(deps_value, plan))
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.pause()
+            assert isinstance(app.screen, PlanScreen)
+            assert app.screen.plan["id"] == "pln_" + "2" * 32
+
+    asyncio.run(run())
+    assert calls == ["plan retry"]
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []
