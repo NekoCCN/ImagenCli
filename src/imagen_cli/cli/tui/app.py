@@ -664,14 +664,31 @@ class PlanScreen(ModalScreen[bool]):
     def on_mount(self) -> None:
         self.status.update("尚未批准")
 
+    def _approval_state(self) -> str | None:
+        rows = self.deps.repositories.list("approvals", plan_id=self.plan["id"])
+        return str(rows[0]["state"]) if rows else None
+
     def action_approve(self) -> None:
         if self.deps.execute is None:
             self.status.update("执行器不可用")
             return
-        status, _ = self.deps.execute(
-            "plan approve",
-            {"plan_id": self.plan["id"], "digest": self.plan["plan_digest"]},
-        )
+        state = self._approval_state()
+        if state == "consumed":
+            # The plan already dispatched once; Enter shows the recorded outcome.
+            self.approved = True
+            self.status.update("该计划已执行 · enter 查看结果")
+            return
+        if state == "expired":
+            self.status.update("该计划已过期 · esc 关闭后重新生成")
+            return
+        try:
+            status, _ = self.deps.execute(
+                "plan approve",
+                {"plan_id": self.plan["id"], "digest": self.plan["plan_digest"]},
+            )
+        except (ValueError, OSError) as error:
+            self.status.update("批准失败：" + _sanitize(error))
+            return
         if status in {"approved", "succeeded"}:
             self.approved = True
             self.status.update("已批准 · enter 执行")
@@ -685,7 +702,11 @@ class PlanScreen(ModalScreen[bool]):
         if self.deps.execute is None:
             self.status.update("执行器不可用")
             return
-        status, data = self.deps.execute("plan execute", {"plan_id": self.plan["id"]})
+        try:
+            status, data = self.deps.execute("plan execute", {"plan_id": self.plan["id"]})
+        except (ValueError, OSError) as error:
+            self.status.update("执行失败：" + _sanitize(error))
+            return
         job = data.get("job") or {}
         if status in {"succeeded", "accepted", "partial_success"}:
             self.status.update(f"执行完成：{job.get('state')} · {job.get('id')}")

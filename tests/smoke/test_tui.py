@@ -291,6 +291,75 @@ def test_generate_defaults_to_the_only_profile(deps):
     assert values["model"] == "picked-model"
 
 
+def test_consumed_plan_shows_its_result_instead_of_crashing(deps):
+    deps_value, _ = deps
+    from imagen_cli.application.planning_service import PlanningService
+    from imagen_cli.cli.tui.app import PlanScreen
+    from imagen_cli.domain.primitive import new_id
+
+    session_id = new_id("ses")
+    deps_value.repositories.insert("sessions", {
+        "id": session_id, "name": "work", "version": 0,
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    plan_row, approval = PlanningService(deps_value.repositories).create_plan(
+        session_id=session_id,
+        target_snapshot={
+            "profile_identity": "offline", "profile_revision": 1,
+            "endpoint_origin": "https://example.test",
+            "allowed_upload_targets": ["https://example.test"],
+            "provider": "openai", "family": "images", "model_revision": "local",
+        },
+        operation="generate", model="picked-model",
+        normalized_parameters={"count": 1}, prompt_snapshot="cat",
+        input_hashes=[], portable_context={"kind": "none"}, capability_digest="a" * 64,
+    )
+    deps_value.repositories.update("approvals", approval.id, {"state": "consumed"})
+    plan = plan_row.model_dump(mode="json")
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        return "succeeded", {"job": {"id": "job_" + "1" * 32, "state": "succeeded"}}
+
+    deps_value.execute = execute
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.push_screen(PlanScreen(deps_value, plan))
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            assert "plan approve" not in calls
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, PlanScreen)
+
+    asyncio.run(run())
+    assert calls == ["plan execute"]
+
+
+def test_approve_error_is_shown_instead_of_raising(deps):
+    deps_value, _ = deps
+    from imagen_cli.cli.tui.app import PlanScreen
+
+    deps_value.execute = lambda command, arguments: (_ for _ in ()).throw(ValueError("boom"))
+    app = WorkbenchApp(deps_value)
+    plan = {"id": "pln_" + "1" * 32, "plan_digest": "a" * 64,
+            "operation": "generate", "model": "picked-model"}
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.push_screen(PlanScreen(deps_value, plan))
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            assert isinstance(app.screen, PlanScreen)
+
+    asyncio.run(run())
+
+
 def test_export_asks_for_a_destination(deps):
     deps_value, _ = deps
     exported = []
