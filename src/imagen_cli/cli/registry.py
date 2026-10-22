@@ -386,6 +386,12 @@ def _data_schema(command: Command) -> dict[str, Any]:
         return _object({"plan": {"type": "object"}}, ("plan",))
     if command.name == "plan approve":
         return _object({"approval": {"type": "object"}}, ("approval",))
+    if command.name == "plan retry":
+        return _object({
+            "plan": {"type": "object"},
+            "job": {"type": "object"},
+            "next_actions": {"type": "array", "items": {"type": "object"}},
+        })
     if command.name.startswith("profile "):
         if command.name == "profile list":
             return _object({

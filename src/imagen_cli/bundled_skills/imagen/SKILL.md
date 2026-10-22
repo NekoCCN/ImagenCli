@@ -51,8 +51,9 @@ imagen plan execute pln_... --timeout 300 --agent
   `imagen job get <job_id> --agent`，
   需要补存结果时 `imagen job reconcile <job_id> --agent`，
   再 `imagen job fetch <job_id> --agent`。
-- 只有确定没有创建请求时才重试：
-  `imagen plan retry <plan_id> --agent` 会重建一个新计划，仍需重新批准。
+- 只有确定没有创建请求时才重试：`imagen plan retry <plan_id> --agent` 只接受
+  确定失败或已取消的任务；已完成、进行中或结果未知时会返回 `conflict`，
+  先核对 `job get` / `job reconcile`。重试会重建一个新计划，仍需重新批准。
 - `error.retryable` 说明是否值得重试；`error.next_actions` 给出可恢复步骤。
 
 ## 常用查询

@@ -129,6 +129,43 @@ def test_approved_execution_commits_once_publishes_and_repeats_read_only(tmp_pat
         assert refs[0]["artifact_id"] == ids[0]
 
 
+def test_stale_second_plan_is_rejected_after_first_publishes(tmp_path, png_bytes):
+    with Container(workspace=str(tmp_path)) as container:
+        plan, _, validator, executor, adapter, _ = setup(container, png_bytes)
+        planning = PlanningService(container.repositories)
+        second, _ = planning.create_plan(
+            session_id=plan.session_id, target_snapshot=plan.target_snapshot,
+            operation=plan.operation, model=plan.model,
+            normalized_parameters=plan.normalized_parameters,
+            prompt_snapshot="second kite", input_hashes=[],
+            portable_context={"kind": "none"},
+            capability_digest=plan.capability_digest,
+        )
+        planning.approve(second.id, second.plan_digest)
+        api = service(container, validator, executor)
+        assert execute(api, plan)["status"] == "succeeded"
+        with pytest.raises(ValueError):
+            execute(api, second)
+        assert len(adapter.requests) == 1
+        assert len(container.repositories.list("artifacts")) == 1
+
+
+def test_plan_retry_refuses_succeeded_and_unknown_jobs(tmp_path, png_bytes):
+    for error, expected in ((None, "succeeded"), (RuntimeError("uncertain"), "unknown")):
+        directory = tmp_path / str(expected)
+        directory.mkdir()
+        with Container(workspace=str(directory)) as container:
+            plan, _, validator, executor, _, _ = setup(
+                container, png_bytes, error=error,
+            )
+            result = execute(service(container, validator, executor), plan)
+            assert result["status"] == expected
+            status, data = container.execute("plan retry", {"plan_id": plan.id})
+            assert status == "conflict"
+            assert data["job"]["state"] == expected
+            assert len(container.repositories.list("plans")) == 1
+
+
 def test_consumed_unknown_returns_facts_even_if_sources_disappear(tmp_path, png_bytes):
     with Container(workspace=str(tmp_path)) as container:
         plan, _, validator, executor, adapter, ids = setup(

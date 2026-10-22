@@ -259,6 +259,8 @@ def _keybar(entries: list[tuple[str, str]]) -> Text:
 class ConfirmScreen(ModalScreen[bool]):
     """Typed confirmation; Enter with the exact word authorizes the action."""
 
+    BINDINGS = [Binding("escape", "cancel", "取消")]
+
     def __init__(self, prompt: str, word: str) -> None:
         super().__init__()
         self.prompt = prompt
@@ -278,6 +280,9 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value == self.word)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class FormScreen(ModalScreen[dict[str, str] | None]):

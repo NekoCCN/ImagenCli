@@ -190,6 +190,22 @@ class Container:
             session_row = self.repositories.get("sessions", row["session_id"])
             if session_row is None:
                 return "not_found", {}
+            jobs = self.repositories.list("jobs", plan_id=row["id"])
+            if jobs and (
+                jobs[0].get("state") not in {"failed", "canceled"}
+                or jobs[0].get("accepted_maybe")
+            ):
+                # A succeeded, unknown or in-flight attempt must not be rebuilt implicitly.
+                existing = jobs[0]
+                return "conflict", {
+                    "job": existing,
+                    "next_actions": [
+                        {"command": f"job get {existing['id']}",
+                         "creates_paid_request": False},
+                        {"command": f"job reconcile {existing['id']}",
+                         "creates_paid_request": False},
+                    ],
+                }
             context = row.get("portable_context") or {}
             parameters = dict(row.get("normalized_parameters") or {})
             count = parameters.pop("count", 1)

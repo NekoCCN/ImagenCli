@@ -125,6 +125,24 @@ def test_delete_requires_the_session_name(deps):
     assert recorder.deleted == ["ses_" + "0" * 32]
 
 
+def test_delete_confirmation_cancels_with_escape(deps):
+    deps_value, recorder = deps
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.current = "ses_" + "0" * 32
+            await pilot.press("x")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await pilot.press("escape")
+            await pilot.pause()
+            assert type(app.screen).__name__ != "ConfirmScreen"
+
+    asyncio.run(run())
+    assert recorder.deleted == []
+
+
 def test_delete_is_hinted_on_screen_and_reported(deps):
     deps_value, recorder = deps
 
