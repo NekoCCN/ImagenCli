@@ -94,12 +94,6 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         lines.append(f"模型 {ident}{scale}{(' · ' + str(detail)) if detail else ''}")
     if len(models) > _MAX_ROWS:
         lines.append(f"…还有 {len(models) - _MAX_ROWS} 个模型；--output json 查看全部")
-    capabilities = _rows(data, "capabilities")
-    for row in capabilities[:_MAX_ROWS]:
-        lines.append(
-            f"能力 {row.get('provider')}/{row.get('model')} · {row.get('operation')}"
-            f" · {row.get('support_status')}"
-        )
     entries = _rows(data, "entries")
     if entries:
         total = data.get("planned_bytes", sum(item.get("bytes", 0) for item in entries))
@@ -240,17 +234,6 @@ def _rich(value: dict[str, Any], width: int) -> str:
                 str(row.get("evidence") or row.get("license") or ""),
             )
         console.print(table)
-    capabilities = _rows(data, "capabilities")
-    if capabilities:
-        table = Table(title="能力", header_style="bold")
-        for column in ("Provider", "模型", "操作", "状态"):
-            table.add_column(column, overflow="fold")
-        for row in capabilities[:_MAX_ROWS]:
-            table.add_row(
-                str(row.get("provider")), str(row.get("model")),
-                str(row.get("operation")), str(row.get("support_status")),
-            )
-        console.print(table)
     entries = _rows(data, "entries")
     if entries:
         console.print(
@@ -308,7 +291,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
         for index, artifact in enumerate(artifacts, start=1):
             table.add_row(str(index), str(artifact["path"]))
         console.print(table)
-    if not any((plan, job, profile, session, sessions, profiles, models, capabilities, entries,
+    if not any((plan, job, profile, session, sessions, profiles, models, entries,
                 commands, operations, turns, artifacts, parameters)):
         console.print(json.dumps(data, ensure_ascii=False))
     return buffer.getvalue()

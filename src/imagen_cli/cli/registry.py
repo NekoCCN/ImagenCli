@@ -25,7 +25,6 @@ COMMANDS = {
         *(
             Command(name, "尚未交付；不会上传或创建请求")
             for name in (
-                "capabilities refresh",
                 "profile add",
                 "profile list",
                 "profile show",
@@ -43,8 +42,6 @@ COMMANDS = {
                 ("plan execute", "执行已批准计划；最多发送一次供应商创建请求"),
                 ("providers", "查询本地 profile 的供应商；不联网探测"),
                 ("models", "查询本地声明的模型与修订；不联网探测"),
-                ("capabilities", "查询本地能力与证据状态；不刷新或升级证据"),
-                ("capabilities declare", "为 profile 的模型写一条 intent 能力声明；不联网"),
                 ("profile add", "新增本地 profile；只保存 credential_ref"),
                 ("profile list", "列出本地 profile"),
                 ("profile show", "查看本地 profile"),
@@ -163,14 +160,8 @@ def _input_schema(name: str) -> dict[str, Any]:
         elif name in {"models add", "models use"}:
             properties["id"] = text
             required += ("id",)
-    elif name == "capabilities declare":
-        properties = {
-            "profile": text, "model": text,
-            "operation": {"enum": ["generate", "edit"], "default": "generate"},
-        }
-        required = ("profile",)
-    elif name.split()[0] in {"providers", "models", "capabilities"}:
-        properties = dict.fromkeys(("profile", "model", "operation"), text)
+    elif name.split()[0] in {"providers", "models"}:
+        properties = dict.fromkeys(("profile", "model"), text)
     elif name.startswith("profile "):
         if name != "profile list":
             properties = {"profile": text}
@@ -283,7 +274,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "plan": text,
             "yes": {"const": True},
         }
-    if name in {"providers", "models", "capabilities", "profile list", "session list"}:
+    if name in {"providers", "models", "profile list", "session list"}:
         properties.update({key: OPTION_METADATA[key] for key in ("limit", "cursor")})
     return _object(properties, required)
 
@@ -376,7 +367,7 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "next_cursor": {"type": ["string", "null"]},
             }, ("profiles", "next_cursor"))
         return _object({"profile": {"type": "object"}}, ("profile",))
-    if command.name in {"providers", "models", "capabilities"}:
+    if command.name in {"providers", "models"}:
         return _object({
             "items": {"type": "array", "items": {"type": "object"}},
             "next_cursor": {"type": ["string", "null"]},

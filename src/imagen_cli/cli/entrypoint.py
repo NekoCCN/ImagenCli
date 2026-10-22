@@ -122,7 +122,6 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     extra_controls = {
         "providers": {"limit", "cursor"},
         "models": {"limit", "cursor"},
-        "capabilities": {"limit", "cursor"},
         "profile list": {"limit", "cursor"},
         "session list": {"limit", "cursor"},
         "job wait": {"timeout"},
@@ -154,7 +153,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
-    if command in {"providers", "models", "capabilities"}:
+    if command in {"providers", "models"}:
         if words:
             raise ValueError("unexpected positional arguments")
         validate(parameters, schema)
@@ -212,15 +211,6 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         parameters["artifact"] = words[0]
         if "pipeline" not in parameters and "op" not in parameters:
             raise ValueError("pipeline or op is required")
-        validate(parameters, schema)
-        return command, parameters, options
-    if command == "capabilities declare":
-        if len(words) > 1:
-            raise ValueError("unexpected positional arguments")
-        if words:
-            if "profile" in parameters:
-                raise ValueError("duplicate option")
-            parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("models "):

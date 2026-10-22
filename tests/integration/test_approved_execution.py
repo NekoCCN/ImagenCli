@@ -10,12 +10,10 @@ from imagen_cli.application.container import Container
 from imagen_cli.application.outcome_service import OutcomeService
 from imagen_cli.application.planning_service import PlanningService
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.capabilities.catalog import CapabilityCatalog
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.execution.foreground import ForegroundExecutor
 from imagen_cli.providers.base import ArtifactDescriptor, ImmediateResult
-from tests.unit.test_capabilities import capability
+from tests.support import capability
 
 
 class OfflineAdapter:
@@ -50,7 +48,7 @@ def setup(container, png_bytes, *, inputs=False, approved=True, error=None, obse
                           "additionalProperties": False},
         continuation_strategy="explicit_images" if inputs else "none",
     )
-    validator = CapabilityValidator(CapabilityCatalog([record]))
+    validator = None
     ids = ()
     if inputs:
         identity = new_id("art")
@@ -86,7 +84,7 @@ def service(container, validator, executor):
     from imagen_cli.application.execution_service import ExecutionService
 
     return ExecutionService(
-        container.repositories, validator, container.artifact_store, executor,
+        container.repositories, container.artifact_store, executor,
     )
 
 
@@ -148,7 +146,7 @@ def test_consumed_unknown_returns_facts_even_if_sources_disappear(tmp_path, png_
 
 
 @pytest.mark.parametrize("change", ["pending", "profile", "endpoint", "upload", "provider",
-                                   "capability", "revision", "bytes", "order", "version",
+                                   "revision", "bytes", "order", "version",
                                    "parent", "digest", "context"])
 def test_drift_or_missing_approval_never_consumes_or_dispatches(tmp_path, png_bytes, change):
     with Container(workspace=str(tmp_path)) as container:
@@ -164,9 +162,6 @@ def test_drift_or_missing_approval_never_consumes_or_dispatches(tmp_path, png_by
                        "upload": {"trust_policy": {"allowed_upload_targets": []}},
                        "provider": {"provider": "other"}}[change]
             repo.update("profiles", "offline", changes)
-        elif change == "capability":
-            record = validator.catalog.records()[0].model_copy(update={"digest": "b" * 64})
-            validator = CapabilityValidator(CapabilityCatalog([record]))
         elif change == "bytes":
             container.artifact_store.get(ids[0]).write_bytes(b"tampered")
         elif change == "order":

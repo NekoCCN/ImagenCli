@@ -128,22 +128,6 @@ class Container:
                 PlanningService(self.repositories).approve(plan["id"], plan["plan_digest"])
                 return {str(key): value for key, value in plan.items()}
 
-            def provider_limit(plan: dict[str, Any]) -> int | None:
-                snapshot = plan["target_snapshot"]
-                records = self.repositories.list("capabilities", limit=1000)
-                for record in records:
-                    if (
-                        record.get("provider") == snapshot.get("provider")
-                        and record.get("family") == snapshot.get("family")
-                        and record.get("model") == plan.get("model")
-                        and record.get("model_revision") == snapshot.get("model_revision")
-                        and record.get("operation") == plan.get("operation")
-                    ):
-                        value = (record.get("input_limits") or {}).get("max_concurrency")
-                        if type(value) is int and not isinstance(value, bool):
-                            return value
-                return None
-
             def run(plan: dict[str, Any], index: int) -> str:
                 # Each child gets its own connection; the parent connection stays single-threaded.
                 with Container(
@@ -159,18 +143,13 @@ class Container:
                 return identity
 
             return batch.submit(
-                BatchService(
-                    self.repositories, prepare=prepare, run=run,
-                    provider_limit=provider_limit,
-                ),
+                BatchService(self.repositories, prepare=prepare, run=run),
                 args["requests"], args.get("concurrency", 2),
             )
         if command == "plan execute":
             from imagen_cli.application.artifact_service import ArtifactService
             from imagen_cli.application.execution_service import ExecutionService
             from imagen_cli.application.outcome_service import OutcomeService
-            from imagen_cli.capabilities.catalog import CapabilityCatalog
-            from imagen_cli.capabilities.validator import CapabilityValidator
             from imagen_cli.cli.commands import job
             from imagen_cli.execution.configured import ConfiguredAdapter
             from imagen_cli.execution.foreground import ForegroundExecutor
@@ -178,12 +157,6 @@ class Container:
             row = self.repositories.get("plans", args["plan_id"], include_private=True)
             if row is None:
                 return "not_found", {}
-            records: list[dict[str, Any]] = []
-            while True:
-                page = self.repositories.list("capabilities", limit=1000, offset=len(records))
-                records.extend(page)
-                if len(page) < 1000:
-                    break
             executor = ForegroundExecutor(
                 self.repositories, ConfiguredAdapter(
                     self.repositories, timeout=self.options.timeout,
@@ -193,8 +166,7 @@ class Container:
                 OutcomeService(self.repositories), self.private_state_store,
             )
             facts = ExecutionService(
-                self.repositories, CapabilityValidator(CapabilityCatalog(records)),
-                self.artifact_store, executor,
+                self.repositories, self.artifact_store, executor,
             ).execute_approved(
                 row["id"], row["plan_digest"],
                 model_revision=row["target_snapshot"]["model_revision"],
@@ -336,14 +308,7 @@ class Container:
                 self.repositories, command, profile=args.get("profile"), data=data,
                 limit=self.options.limit, cursor=self.options.cursor,
             )
-        if command == "capabilities declare":
-            from imagen_cli.application.capability_service import declare
-
-            return declare(
-                self.repositories, args["profile"],
-                args.get("operation", "generate"), model=args.get("model"),
-            )
-        if command in {"providers", "models", "capabilities"}:
+        if command in {"providers", "models"}:
             from jsonschema import validate
 
             from imagen_cli.cli.commands import discovery

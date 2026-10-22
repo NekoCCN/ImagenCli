@@ -6,7 +6,6 @@ from jsonschema import validate
 from imagen_cli.application.container import Container
 from imagen_cli.cli.registry import discover
 from tests.integration.test_local_cli import invoke
-from tests.unit.test_capabilities import capability
 
 
 def seed(workspace):
@@ -18,11 +17,15 @@ def seed(workspace):
                 "model_default": "image-model", "credential_ref": "private-reference",
                 "trust_policy": {},
             })
-        for identity, model in (("one", "first"), ("two", "second")):
-            container.repositories.insert("capabilities", capability(id=identity, model=model))
+        for profile, model in (("p1", "first"), ("p2", "second")):
+            container.repositories.insert("provider_models", {
+                "id": f"{profile}:{model}", "profile_id": profile, "model_id": model,
+                "display_name": model, "fetched_at": "2026-10-24T00:00:00Z",
+                "source_url": "", "evidence": "manual",
+            })
 
 
-@pytest.mark.parametrize("command", ["providers", "models", "capabilities"])
+@pytest.mark.parametrize("command", ["providers", "models"])
 def test_discovery_pages_persisted_facts_and_matches_schema(tmp_path, command):
     workspace = tmp_path / "work"
     seed(workspace)
@@ -41,33 +44,26 @@ def test_discovery_pages_persisted_facts_and_matches_schema(tmp_path, command):
     validate(result, discover(command)["output_schema"])
 
 
-def test_capability_discovery_retains_sources_and_evidence_without_promoting_status(tmp_path):
+def test_model_discovery_filters_by_profile_and_model(tmp_path):
     workspace = tmp_path / "work"
     seed(workspace)
-    code, result = invoke(workspace, "capabilities", "--profile=p1", "--model=second",
-                          "--operation=generate")
+    code, result = invoke(workspace, "models", "--profile=p1", "--model=first")
     assert code == 0
     rows = result["data"]["items"]
-    assert len(rows) == 1
-    assert rows[0]["model"] == "second"
-    assert rows[0]["support_status"] == "I"
-    assert rows[0]["live_evidence"] == []
-    # Public output retains source metadata but applies the shared URL redaction policy.
-    assert rows[0]["sources"][0]["date"] == "2026-10-23"
-    assert rows[0]["sources"][0]["locator"] == "fixture"
-    assert rows[0]["sources"][0]["url"] == "[redacted]"
+    assert [(row["profile"], row["model"]) for row in rows] == [("p1", "first")]
+    assert rows[0]["provider"] == "openai"
 
 
-@pytest.mark.parametrize("command", ["providers", "models", "capabilities"])
+@pytest.mark.parametrize("command", ["providers", "models"])
 def test_empty_discovery_is_truthful(tmp_path, command):
     code, result = invoke(tmp_path / "work", command)
     assert code == 0
     assert result["data"] == {"items": [], "next_cursor": None, "evidence": "offline_persisted"}
 
 
-def test_missing_profile_does_not_list_unrelated_capabilities(tmp_path):
+def test_missing_profile_does_not_list_unrelated_models(tmp_path):
     workspace = tmp_path / "work"
     seed(workspace)
-    code, result = invoke(workspace, "capabilities", "--profile=absent")
+    code, result = invoke(workspace, "models", "--profile=absent")
     assert code == 4
     assert result["data"] == {}

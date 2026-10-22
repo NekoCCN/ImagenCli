@@ -8,7 +8,7 @@ from imagen_cli.application.session_service import SessionService
 from imagen_cli.cli.registry import discover
 from tests.contract.test_profile_commands import config
 from tests.integration.test_local_cli import invoke
-from tests.unit.test_capabilities import capability
+from tests.support import capability
 
 
 @pytest.mark.parametrize("command,operation,inputs", [
@@ -77,9 +77,9 @@ def test_unsupported_parameters_do_not_create_plan(tmp_path):
     workspace = tmp_path / "work"
     prompt = seed(workspace, tmp_path)
     code, result = invoke(workspace, "generate", "--session", "poster", "--prompt-file",
-                          str(prompt), "--count", "3", "--dry-run")
+                          str(prompt), "--count", "0", "--dry-run")
     assert code == 2
-    assert result["status"] == "unsupported_capability"
+    assert result["status"] == "validation_error"
     with Container(workspace=str(workspace)) as container:
         assert container.repositories.list("plans") == []
         assert container.repositories.list("jobs") == []

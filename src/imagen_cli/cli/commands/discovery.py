@@ -12,7 +12,6 @@ def list_(
     *,
     profile: str | None = None,
     model: str | None = None,
-    operation: str | None = None,
     limit: int = 100,
     cursor: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
@@ -23,38 +22,27 @@ def list_(
     selected = repositories.get("profiles", profile) if profile else None
     if profile and selected is None:
         return "not_found", {}
-    table = "profiles" if command == "providers" else "capabilities"
-    items = []
-    offset = 0
-    while True:
-        rows = repositories.list(table, limit=1000, offset=offset)
-        for row in rows:
-            if selected and (
-                (table == "profiles" and row["id"] != selected["id"])
-                or (table == "capabilities" and any(
-                    row[key] != selected[key] for key in ("provider", "family")
-                ))
-            ):
+    items: list[dict[str, Any]] = []
+    if command == "providers":
+        for row in repositories.list("profiles", limit=1000):
+            if selected and row["id"] != selected["id"]:
                 continue
-            if model and row.get("model", row.get("model_default")) != model:
+            items.append({
+                "profile": row["id"], "provider": row["provider"], "family": row["family"],
+            })
+    else:
+        for row in repositories.list("provider_models", limit=1000):
+            if selected and row["profile_id"] != selected["id"]:
                 continue
-            if operation and row.get("operation") != operation:
+            if model and row["model_id"] != model:
                 continue
-            if command == "providers":
-                item = {key: row[key] for key in ("provider", "family")}
-                item["profile"] = row["id"]
-            elif command == "models":
-                item = {key: row[key] for key in (
-                    "provider", "family", "model", "model_revision",
-                )}
-                if item in items:
-                    continue
-            else:
-                item = row
-            items.append(item)
-        if len(rows) < 1000:
-            break
-        offset += len(rows)
+            owner = repositories.get("profiles", row["profile_id"])
+            items.append({
+                "profile": row["profile_id"],
+                "provider": (owner or {}).get("provider"),
+                "family": (owner or {}).get("family"),
+                "model": row["model_id"], "model_revision": "local",
+            })
     start = int(cursor.removeprefix("offset_")) if cursor else 0
     return "succeeded", {
         "items": items[start:start + limit],

@@ -46,7 +46,7 @@ def test_configured_timeout_reaches_single_http_dispatch(tmp_path, png_bytes, mo
 
 def test_cli_execution_returns_usable_artifact_paths(tmp_path, png_bytes, monkeypatch):
     from tests.integration.test_approved_execution import OfflineAdapter
-    from tests.unit.test_capabilities import capability
+    from tests.support import capability
 
     with Container(workspace=str(tmp_path)) as container:
         plan, _, _, _, _, _ = setup(container, png_bytes)

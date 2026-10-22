@@ -14,7 +14,7 @@ from imagen_cli.cli.entrypoint import main
 from imagen_cli.cli.registry import discover
 from tests.contract.test_creation_planning_cli import seed
 from tests.integration.test_local_cli import invoke
-from tests.unit.test_capabilities import capability
+from tests.support import capability
 
 
 def test_plan_review_and_approval_are_separate_from_execution(tmp_path):

@@ -12,21 +12,13 @@ from tests.integration.test_approved_execution import execute, service, setup
 def _execute_child(workspace, plan_id, png_bytes, barrier):
     from imagen_cli.application.artifact_service import ArtifactService
     from imagen_cli.application.outcome_service import OutcomeService
-    from imagen_cli.capabilities.catalog import CapabilityCatalog
-    from imagen_cli.capabilities.validator import CapabilityValidator
     from imagen_cli.execution.foreground import ForegroundExecutor
     from tests.integration.test_approved_execution import OfflineAdapter
-    from tests.unit.test_capabilities import capability
 
     socket.socket = lambda *a, **k: (_ for _ in ()).throw(AssertionError("network forbidden"))
     with Container(workspace=workspace) as container:
         plan = ExecutionPlan.model_validate(container.repositories.get("plans", plan_id))
-        record = capability(
-            parameter_schema={"type": "object", "properties": {"count": {"const": 1}},
-                              "additionalProperties": False},
-            continuation_strategy="none",
-        )
-        validator = CapabilityValidator(CapabilityCatalog([record]))
+        validator = None
         adapter = OfflineAdapter(png_bytes, observe=lambda request: barrier.wait(timeout=30))
         executor = ForegroundExecutor(
             container.repositories, adapter,

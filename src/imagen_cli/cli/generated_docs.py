@@ -15,8 +15,6 @@ from typing import Any
 
 import jsonschema
 
-from imagen_cli.capabilities import discovery as capability_discovery
-from imagen_cli.capabilities.catalog_data import CANONICAL_RECORDS
 from imagen_cli.cli.registry import COMMANDS, discover
 
 BEGIN_MARKER = "<!-- BEGIN GENERATED: commands -->"
@@ -130,20 +128,6 @@ def example_input(name: str) -> dict[str, Any]:
     return value
 
 
-def capability_example() -> dict[str, Any]:
-    """One real discovery result, shaped by the capabilities data schema."""
-    report = capability_discovery.discover([CANONICAL_RECORDS[0]])
-    value = {
-        "items": list(report.items),
-        "next_cursor": None,
-        "evidence": report.evidence,
-    }
-    schema = discover("capabilities")["data_schema"]
-    if not jsonschema.Draft202012Validator(schema).is_valid(value):
-        raise ValueError("capability example does not match the registry data schema")
-    return value
-
-
 def _type_label(spec: dict[str, Any]) -> str:
     if "const" in spec:
         return "const"
@@ -238,12 +222,6 @@ def render_markdown() -> str:
     lines += ["", "## Input schema examples", ""]
     for name in COMMANDS:
         lines += [f"### `{name}`", "", _json_block(example_input(name)), ""]
-    lines += [
-        "## Capability output example",
-        "",
-        _json_block(capability_example()),
-        "",
-    ]
     return "\n".join(lines)
 
 
@@ -267,10 +245,6 @@ def agent_reference() -> str:
         "输入示例（最小合法值）：",
         "",
         _json_block({name: example_input(name) for name in COMMANDS}),
-        "",
-        "能力查询输出示例：",
-        "",
-        _json_block(capability_example()),
         "",
     ]
     return "\n".join(lines)

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from imagen_cli.application.container import Container
-from tests.unit.test_capabilities import capability
+from tests.support import capability
 
 
 def test_cli_generate_resume_edit_dispatches_once_per_plan(tmp_path, png_bytes):

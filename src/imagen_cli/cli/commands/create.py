@@ -9,7 +9,6 @@ from typing import Any, Protocol
 
 from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.cli.input_readers import read_prompt
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.models import ProviderProfile
@@ -43,14 +42,12 @@ class CreateHandler:
         self,
         sessions: SessionService,
         profiles: ProfileService,
-        capabilities: CapabilityValidator,
         executor: Executor,
         *,
         planning_gate: Callable[[CreationSnapshot], AuthorizedPlan | None] | None = None,
     ) -> None:
         self.sessions = sessions
         self.profiles = profiles
-        self.capabilities = capabilities
         self.executor = executor
         self.planning_gate = planning_gate
 
@@ -77,19 +74,11 @@ class CreateHandler:
             parameters["count"] = creation.count
             if creation.size is not None:
                 parameters["size"] = creation.size
-            try:
-                decision = self.capabilities.validate(
-                    profile.provider,
-                    profile.family,
-                    model,
-                    model_revision,
-                    creation.operation,
-                    parameters,
-                )
-            except ValueError:
-                return "unsupported_capability", {}
-            if not decision.supported:
-                return "unsupported_capability", {}
+            digest = hashlib.sha256(json.dumps({
+                "provider": profile.provider, "family": profile.family,
+                "model": model, "revision": model_revision,
+                "operation": creation.operation, "parameters": parameters,
+            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
             if creation.references or creation.retry_of_job_id:
                 return "unsupported_capability", {}
             session = self.sessions.resume(creation.session)["session"]
@@ -128,7 +117,7 @@ class CreateHandler:
                     "parameters": parameters,
                     "input_hashes": hashes,
                     "input_sources": [source for _, source in sources],
-                    "capability": decision.digest,
+                    "capability": digest,
                 },
                 sort_keys=True,
                 ensure_ascii=False,
@@ -178,7 +167,7 @@ class CreateHandler:
                 model_revision,
                 prompt,
                 parameters,
-                decision.digest,
+                digest,
                 authorized=True,
                 dispatch_intent_recorded=False,
                 inputs=inputs,

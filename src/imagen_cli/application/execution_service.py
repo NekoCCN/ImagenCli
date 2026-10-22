@@ -6,7 +6,6 @@ from typing import Any
 
 from imagen_cli.application.planning_service import PlanningService
 from imagen_cli.application.profile_service import ProfileService
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.execution.foreground import ForegroundExecutor
 from imagen_cli.providers.base import ValidatedRequest
@@ -18,7 +17,6 @@ class ExecutionService:
     def __init__(
         self,
         repositories: Repositories,
-        capabilities: CapabilityValidator,
         artifact_store: ArtifactStore,
         executor: ForegroundExecutor,
     ) -> None:
@@ -34,7 +32,6 @@ class ExecutionService:
         ):
             raise ValueError("execution dependencies must share a connection")
         self.repositories = repositories
-        self.capabilities = capabilities
         self.artifact_store = artifact_store
         self.executor = executor
         self.planning = PlanningService(repositories)
@@ -63,21 +60,8 @@ class ExecutionService:
             if profile_row is None:
                 raise ValueError("profile is unavailable")
             profile = ProfileService().load(profile_row)
-            decision = self.capabilities.validate(
-                profile.provider, profile.family, plan["model"], model_revision,
-                plan["operation"], plan["normalized_parameters"],
-            )
-            record = self.capabilities.catalog.resolve(
-                profile.provider, profile.family, plan["model"], model_revision, plan["operation"],
-            )
-            if not decision.supported or record.transport_kind != "sync":
-                raise ValueError("unsupported foreground capability")
-            if record.continuation_strategy not in {"none", "explicit_images"}:
-                raise ValueError("unsupported continuation strategy")
             context: dict[str, Any] = {"kind": "none"}
             if input_artifact_ids or mask_artifact_id is not None:
-                if record.continuation_strategy != "explicit_images":
-                    raise ValueError("explicit image capability is required")
                 context = {
                     "kind": "explicit_images",
                     "input_artifact_ids": list(input_artifact_ids),
@@ -122,7 +106,7 @@ class ExecutionService:
             snapshot = {
                 **plan,
                 "target_snapshot": target,
-                "capability_digest": decision.digest,
+                "capability_digest": plan["capability_digest"],
                 "input_hashes": [item["sha256"] for item in manifest],
                 "portable_context": context,
                 "parent_turn_id": session.get("current_turn_id"),
@@ -161,7 +145,7 @@ class ExecutionService:
             request = ValidatedRequest(
                 plan_id, job_id, profile.id, profile.revision, plan["operation"],
                 plan["model"], model_revision, plan["prompt_snapshot"],
-                plan["normalized_parameters"], decision.digest,
+                plan["normalized_parameters"], plan["capability_digest"],
                 authorized=True, dispatch_intent_recorded=False,
                 inputs=tuple(contents[:-1] if mask_artifact_id is not None else contents),
                 mask=contents[-1] if mask_artifact_id is not None else None,

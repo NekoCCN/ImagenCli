@@ -8,8 +8,6 @@ import pytest
 from imagen_cli.application.container import Container
 from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.capabilities.catalog import CapabilityCatalog
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.cli.commands.create import AuthorizedPlan, CreateHandler
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.models import ProviderProfile
@@ -31,36 +29,6 @@ def setup(tmp_path: Path) -> Any:
             trust_policy={},
             revision=1,
         )
-        record = dict(
-            id="offline-cap",
-            provider="openai",
-            family="images",
-            model="offline-model",
-            model_revision="1",
-            operation="generate",
-            support_status="I",
-            parameter_schema={
-                "type": "object",
-                "properties": {"count": {"type": "integer"}},
-                "additionalProperties": False,
-            },
-            semantic_mapping={},
-            input_limits={},
-            transport_kind="sync",
-            continuation_strategy="explicit_images",
-            idempotency_contract={},
-            cancel_contract={},
-            sources=[
-                {"url": "https://example.invalid", "date": "2026-10-23", "locator": "fixture"}
-            ],
-            checked_at="2026-10-23T00:00:00Z",
-            offline_evidence=[],
-            live_evidence=[],
-            digest="a" * 64,
-        )
-        validator = CapabilityValidator(
-            CapabilityCatalog([record, {**record, "id": "edit", "operation": "edit"}])
-        )
         calls = []
 
         class Executor:
@@ -71,7 +39,7 @@ def setup(tmp_path: Path) -> Any:
 
         def build(gate: Any = None) -> CreateHandler:
             return CreateHandler(
-                sessions, ProfileService(), validator, Executor(), planning_gate=gate
+                sessions, ProfileService(), Executor(), planning_gate=gate
             )
 
         creation = CreationInput(
@@ -80,7 +48,7 @@ def setup(tmp_path: Path) -> Any:
         yield container, sessions, session, profile, calls, build, creation
 
 
-def test_missing_gate_async_and_capability_rejection_have_no_jobs(setup: Any) -> None:
+def test_missing_gate_and_async_rejection_have_no_jobs(setup: Any) -> None:
     container, _, _, profile, calls, build, creation = setup
     assert build().handle(creation, profile=profile, model_revision="1")[0] == "approval_required"
     assert (
@@ -89,7 +57,7 @@ def test_missing_gate_async_and_capability_rejection_have_no_jobs(setup: Any) ->
     )
     assert (
         build().handle(creation, profile=profile, model_revision="missing")[0]
-        == "unsupported_capability"
+        == "approval_required"
     )
     assert calls == []
     assert container.repositories.list("turns") == []
@@ -110,7 +78,7 @@ def test_explicit_gate_executes_once_and_binds_profile_and_prompt(setup: Any) ->
     assert status == "succeeded"
     assert len(calls) == len(seen) == 1
     assert calls[0].authorized is True
-    assert calls[0].capability_digest == "a" * 64
+    assert len(calls[0].capability_digest) == 64
     assert container.repositories.get("jobs", data["job_id"]) is not None
 
 

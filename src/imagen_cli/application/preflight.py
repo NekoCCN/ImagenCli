@@ -1,13 +1,13 @@
 """Offline preflight and immutable creation planning; never dispatch here."""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 from imagen_cli.application.planning_service import PlanningService
 from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.capabilities.catalog import CapabilityCatalog
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.primitive import new_id, sha256_bytes
 from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
@@ -37,31 +37,14 @@ def plan_creation(
         return "not_found", {}
     profile = ProfileService().load(row)
     model = creation.model or session.default_model or profile.model_default
-    records = repositories.list("capabilities", limit=1000)
-    catalog = CapabilityCatalog(records)
-    matches = [record for record in catalog.records() if (
-        record.provider == profile.provider and record.family == profile.family
-        and record.model == model and record.operation == creation.operation
-    )]
-    if len(matches) != 1:
-        return "unsupported_capability", {}
-    record = matches[0]
+    model_revision = "local"
     parameters = dict(creation.provider_params)
     if "count" in parameters or "size" in parameters:
         return "validation_error", {}
     parameters["count"] = creation.count
     if creation.size is not None:
         parameters["size"] = creation.size
-    try:
-        decision = CapabilityValidator(catalog).validate(
-            profile.provider, profile.family, model, record.model_revision,
-            creation.operation, parameters,
-        )
-    except ValueError:
-        return "unsupported_capability", {}
     if creation.mask or creation.references or creation.retry_of_job_id:
-        return "unsupported_capability", {}
-    if creation.inputs and record.continuation_strategy != "explicit_images":
         return "unsupported_capability", {}
     input_hashes: list[str] = []
     input_artifact_ids: list[str] = []
@@ -106,7 +89,7 @@ def plan_creation(
             "allowed_upload_targets", [profile.base_url],
         ),
         "provider": profile.provider, "family": profile.family,
-        "model_revision": record.model_revision,
+        "model_revision": model_revision,
     }
     if asynchronous and not dry_run:
         # Durable queue entry only: no approval is consumed and nothing is sent.
@@ -122,6 +105,17 @@ def plan_creation(
     plan, _ = PlanningService(repositories).create_plan(
         session_id=session.id, target_snapshot=target, operation=creation.operation,
         model=model, normalized_parameters=parameters, prompt_snapshot=creation.prompt,
-        input_hashes=input_hashes, portable_context=context, capability_digest=decision.digest,
+        input_hashes=input_hashes, portable_context=context,
+        capability_digest=_target_digest(target, model, creation.operation, parameters),
     )
     return "planned" if dry_run else "approval_required", {"plan": plan.model_dump(mode="json")}
+
+
+def _target_digest(
+    target: dict[str, Any], model: str, operation: str, parameters: dict[str, Any],
+) -> str:
+    payload = json.dumps(
+        {"target": target, "model": model, "operation": operation, "parameters": parameters},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

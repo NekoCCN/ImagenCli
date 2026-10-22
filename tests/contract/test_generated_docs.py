@@ -1,7 +1,5 @@
 """T099: generated help/schema examples stay tied to the single CLI registry."""
 
-import json
-
 import jsonschema
 import pytest
 
@@ -15,9 +13,6 @@ def test_generated_docs_match_registry_and_runbook() -> None:
     for name in COMMANDS:
         assert text.count(f"### `{name}`") == 1
         jsonschema.validate(docs.example_input(name), discover(name)["input_schema"])
-    capability = docs.capability_example()
-    jsonschema.validate(capability, discover("capabilities")["data_schema"])
-    assert json.dumps(capability, ensure_ascii=False)
 
 
 def test_command_help_is_derived_from_the_input_schema() -> None:

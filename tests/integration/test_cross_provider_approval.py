@@ -11,12 +11,10 @@ from imagen_cli.application.execution_service import ExecutionService
 from imagen_cli.application.outcome_service import OutcomeService
 from imagen_cli.application.planning_service import PlanningService
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.capabilities.catalog import CapabilityCatalog
-from imagen_cli.capabilities.validator import CapabilityValidator
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.execution.foreground import ForegroundExecutor
 from imagen_cli.providers.base import ArtifactDescriptor, ImmediateResult
-from tests.unit.test_capabilities import capability
+from tests.support import capability
 
 
 class RecordingAdapter:
@@ -65,7 +63,6 @@ def _setup(container: Container, png: bytes, *, approved: bool):
         },
         continuation_strategy="explicit_images", transport_kind="sync",
     )
-    validator = CapabilityValidator(CapabilityCatalog([record]))
     identity = new_id("art")
     container.artifact_store.stage(identity, png)
     container.artifact_store.publish(identity)
@@ -96,7 +93,7 @@ def _setup(container: Container, png: bytes, *, approved: bool):
         repository, adapter, ArtifactService(repository, container.artifact_store),
         OutcomeService(repository), container.private_state_store,
     )
-    api = ExecutionService(repository, validator, container.artifact_store, executor)
+    api = ExecutionService(repository, container.artifact_store, executor)
     return plan, approval, api, adapter, identity, digest, source, target
 
 

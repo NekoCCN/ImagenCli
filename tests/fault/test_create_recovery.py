@@ -13,20 +13,13 @@ from tests.integration.test_approved_execution import execute, service, setup
 def _crash_child(workspace, png_bytes, plan_id, boundary):
     from imagen_cli.application.artifact_service import ArtifactService
     from imagen_cli.application.outcome_service import OutcomeService
-    from imagen_cli.capabilities.catalog import CapabilityCatalog
-    from imagen_cli.capabilities.validator import CapabilityValidator
     from imagen_cli.domain.models import ExecutionPlan
     from imagen_cli.execution.foreground import ForegroundExecutor
     from tests.integration.test_approved_execution import OfflineAdapter
-    from tests.unit.test_capabilities import capability
 
     with Container(workspace=workspace) as container:
         plan = ExecutionPlan.model_validate(container.repositories.get("plans", plan_id))
-        validator = CapabilityValidator(CapabilityCatalog([capability(
-            parameter_schema={"type": "object", "properties": {"count": {"const": 1}},
-                              "additionalProperties": False},
-            continuation_strategy="none",
-        )]))
+        validator = None
 
         def observe(request):
             if boundary == "intent":
