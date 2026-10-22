@@ -9,7 +9,7 @@ import jsonschema
 import pytest
 
 from imagen_cli.application.container import Container
-from imagen_cli.cli.entrypoint import main
+from imagen_cli.cli.entrypoint import _parse, main
 from imagen_cli.cli.registry import COMMANDS, discover
 
 
@@ -31,6 +31,13 @@ def test_every_command_has_strict_input_and_data_discovery() -> None:
             assert output_data == data["data_schema"]
         assert data["commands"][0]["input_schema"] == data["input_schema"]
         assert data["commands"][0]["data_schema"] == data["data_schema"]
+
+
+def test_integer_options_are_parsed_as_integers() -> None:
+    _, args, _ = _parse([
+        "sheet", "--artifacts", "art_" + "1" * 32, "--columns", "4", "--cell", "128",
+    ])
+    assert args["columns"] == 4 and args["cell"] == 128
 
 
 def test_creation_discovery_is_operation_specific() -> None:

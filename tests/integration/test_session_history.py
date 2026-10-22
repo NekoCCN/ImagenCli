@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from imagen_cli.application import postprocess_service
 from imagen_cli.application.cleanup_service import collect, delete_session
 from imagen_cli.application.container import Container
 from imagen_cli.application.export_service import export_session
@@ -68,6 +69,51 @@ def test_delete_is_logical_and_gc_is_confirmed(tmp_path, png_bytes):
         )
         assert applied["deleted"] == [artifact_id]
         assert not path.exists()
+
+
+def test_gc_keeps_derived_artifacts_owned_by_live_sessions(tmp_path, png_bytes):
+    with Container(workspace=str(tmp_path)) as container:
+        plan, result = _executed(container, png_bytes)
+        source = result["artifacts"][0]["id"]
+        derived = postprocess_service.apply(
+            container.repositories, container.artifact_store, source,
+            [{"op": "pixelate", "params": {"scale": 2}}],
+        )["id"]
+        candidates = {
+            item["id"] for item in
+            collect(container.repositories, container.artifact_store)["candidates"]
+        }
+        assert source not in candidates and derived not in candidates
+
+
+def test_gc_removes_derived_artifacts_with_session_links(tmp_path, png_bytes):
+    with Container(workspace=str(tmp_path)) as container:
+        plan, result = _executed(container, png_bytes)
+        source = result["artifacts"][0]["id"]
+        derived = postprocess_service.apply(
+            container.repositories, container.artifact_store, source,
+            [{"op": "pixelate", "params": {"scale": 2}}],
+        )["id"]
+        delete_session(container.repositories, plan.session_id)
+        dry = collect(container.repositories, container.artifact_store)
+        assert {source, derived} <= {item["id"] for item in dry["candidates"]}
+        applied = collect(
+            container.repositories, container.artifact_store,
+            confirmed=(source, derived),
+        )
+        assert set(applied["deleted"]) == {source, derived}
+
+
+def test_delete_releases_the_name_for_reuse(tmp_path):
+    with Container(workspace=str(tmp_path)) as container:
+        service_ = SessionService(container.repositories, container.artifact_store)
+        first = service_.create_session("同名会话")
+        delete_session(container.repositories, first.id)
+        second = service_.create_session("同名会话")
+        assert second.id != first.id
+        assert second.name == "同名会话"
+        row = container.repositories.get("sessions", first.id)
+        assert row["deleted_at"] is not None and row["name"] != "同名会话"
 
 
 def _seed(container, png_bytes, name="seed"):

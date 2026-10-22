@@ -72,6 +72,8 @@ COMMANDS = {
                 ("asset open", "用系统默认程序打开产物图片，或 --folder 打开所在目录"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
+                ("skills list", "列出可安装的 agent skill"),
+                ("skills install", "把 agent skill 安装到当前项目或全局"),
                 ("models refresh", "从 profile 端点拉取模型列表；只写 provider_models"),
                 ("models add", "手工声明一个模型，evidence=manual"),
                 ("models use", "把一个模型设为 profile 默认；未声明时按 manual 登记"),
@@ -203,6 +205,12 @@ def _input_schema(name: str) -> dict[str, Any]:
                 "plan": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "yes": {"const": True},
             }
+    elif name == "skills install":
+        properties = {
+            "scope": {"enum": ["project", "global"], "default": "project"},
+            "skill": {"type": "array", "items": text, "minItems": 1},
+            "force": {"type": "boolean", "default": False},
+        }
     elif name.startswith(("job ", "batch ", "plan ")) and name != "batch submit":
         entity = name.split()[0]
         field = entity + "_id"
@@ -329,6 +337,16 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "models": {"type": "array", "items": {"type": "object"}},
             "model": {"type": "object"},
         })
+    if command.name == "skills list":
+        return _object({"skills": {"type": "array", "items": {"type": "object"}}}, ("skills",))
+    if command.name == "skills install":
+        return _object({
+            "scope": {"type": "string"},
+            "destination": {"type": "string"},
+            "installed": {"type": "array", "items": {"type": "object"}},
+            "existing": {"type": "array", "items": {"type": "object"}},
+            "available": {"type": "array", "items": {"type": "string"}},
+        }, ("scope", "destination", "installed", "existing"))
     if command.name == "cache audit":
         return _object({
             "entries": {"type": "array", "items": {"type": "object"}},

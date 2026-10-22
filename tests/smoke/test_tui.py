@@ -125,6 +125,83 @@ def test_delete_requires_the_session_name(deps):
     assert recorder.deleted == ["ses_" + "0" * 32]
 
 
+def test_delete_is_hinted_on_screen_and_reported(deps):
+    deps_value, recorder = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.current = "ses_" + "0" * 32
+            await pilot.pause()
+            keybar = " ".join(str(widget.render()) for widget in app.query("#keybar"))
+            assert "删除" in keybar
+            await pilot.press("x")
+            await pilot.pause()
+            await pilot.press(*"session-0")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "已删除" in str(app.status.render())
+
+    asyncio.run(run())
+    assert recorder.deleted == ["ses_" + "0" * 32]
+
+
+def test_new_session_reports_a_duplicate_name(deps):
+    deps_value, _ = deps
+    import sqlite3
+
+    def create_session(name, intent="", profile=None, model=None):
+        raise sqlite3.IntegrityError("UNIQUE constraint failed: sessions.name")
+
+    deps_value.create_session = create_session
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("n")
+            await pilot.pause()
+            await pilot.press(*"session-0")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "已存在" in str(app.status.render())
+
+    asyncio.run(run())
+
+
+def test_keyboard_selection_updates_the_current_session(deps):
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            first = app.current
+            await pilot.press("down")
+            await pilot.pause()
+            assert app.current == "ses_" + f"{1:032x}"
+            assert app.current != first
+
+    asyncio.run(run())
+
+
+def test_refresh_keeps_the_selection_and_status(deps):
+    deps_value, _ = deps
+    target = "ses_" + f"{42:032x}"
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.current = target
+            app.refresh_rows()
+            app._say("完成")
+            await pilot.pause()
+            await pilot.pause()
+            assert app.current == target
+            assert "完成" in str(app.status.render())
+
+    asyncio.run(run())
+
+
 def test_preview_describes_the_artifact(deps):
     deps_value, _ = deps
     repositories = deps_value.repositories
@@ -333,6 +410,7 @@ def test_consumed_plan_shows_its_result_instead_of_crashing(deps):
             await pilot.pause()
             assert "plan approve" not in calls
             await pilot.press("enter")
+            await app.workers.wait_for_complete()
             await pilot.pause()
             assert not isinstance(app.screen, PlanScreen)
 
@@ -502,12 +580,14 @@ def test_generate_plan_requires_approval_before_execution(deps):
             await pilot.pause()
             await pilot.press(*"a cat")
             await pilot.press("enter")
+            await app.workers.wait_for_complete()
             await pilot.pause()
             assert [call[0] for call in calls] == ["generate"]
             await pilot.press("a")
             await pilot.pause()
             assert [call[0] for call in calls] == ["generate", "plan approve"]
             await pilot.press("enter")
+            await app.workers.wait_for_complete()
             await pilot.pause()
 
     asyncio.run(run())
@@ -559,6 +639,7 @@ def test_command_palette_runs_commands_without_fields(deps):
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
             app._open_command("ops")
+            await app.workers.wait_for_complete()
             await pilot.pause()
 
     asyncio.run(run())
@@ -633,3 +714,136 @@ def test_provider_form_accepts_a_direct_api_key(deps):
     assert secrets == [("demo", "sk-direct")]
     assert saved and saved[0]["credential_ref"] == "private:cred-demo"
     assert "api_key" not in saved[0]
+
+
+def _link_output(deps_value, node: int, colour: str) -> str:
+    import io
+
+    stream = io.BytesIO()
+    Image.new("RGB", (8, 8), colour).save(stream, format="PNG")
+    identity = "art_" + f"{node:032x}"
+    deps_value.store.stage(identity, stream.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": "ses_" + "0" * 32, "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    return identity
+
+
+def test_filmstrip_switches_the_preview(deps):
+    deps_value, _ = deps
+    identities = [_link_output(deps_value, 11, "red"), _link_output(deps_value, 12, "blue")]
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.current = "ses_" + "0" * 32
+            app.refresh_rows()
+            await pilot.pause()
+            assert [item["id"] for item in app.film_items] == identities
+            assert app.film_index == 1
+            await pilot.press("[")
+            await pilot.pause()
+            assert app.film_index == 0
+            found = app._current_artifact()
+            assert found is not None and found[0] == identities[0]
+            await pilot.press("]")
+            await pilot.pause()
+            assert app.film_index == 1
+
+    asyncio.run(run())
+
+
+def test_command_palette_filters_by_name(deps):
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        return "succeeded", {"operations": ["pixelate"]}
+
+    deps_value.execute = execute
+
+    async def run():
+        from imagen_cli.cli.tui.app import CommandPaletteScreen
+
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("colon")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, CommandPaletteScreen)
+            total = len(screen.matches)
+            await pilot.press(*"ops")
+            await pilot.pause()
+            assert 0 < len(screen.matches) <= total
+            assert any(name == "ops" for name in screen.matches)
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert calls == ["ops"]
+
+
+def test_plan_execution_is_async_and_cannot_be_dismissed(deps):
+    import threading
+
+    from imagen_cli.cli.tui.app import PlanScreen
+
+    deps_value, _ = deps
+    started = threading.Event()
+    gate = threading.Event()
+
+    def execute(command, arguments):
+        if command == "plan execute":
+            started.set()
+            gate.wait(5)
+            return "succeeded", {"job": {"id": "job_" + "1" * 32, "state": "succeeded"}}
+        return "approved", {}
+
+    deps_value.execute = execute
+    app = WorkbenchApp(deps_value)
+    plan = {"id": "pln_" + "1" * 32, "plan_digest": "a" * 64,
+            "operation": "generate", "model": "picked-model"}
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.push_screen(PlanScreen(deps_value, plan))
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert started.wait(5)
+            assert isinstance(app.screen, PlanScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(app.screen, PlanScreen)
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not isinstance(app.screen, PlanScreen)
+
+    asyncio.run(run())
+
+
+def test_worker_executor_uses_an_isolated_workspace(tmp_path):
+    from imagen_cli.cli.tui.app import _executor
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    repositories = Repositories(connect(root / "state.sqlite3"))
+    store = ArtifactStore(root / "artifacts", repositories)
+    deps = Deps(
+        repositories, store,
+        execute=lambda command, arguments: (_ for _ in ()).throw(AssertionError("main")),
+        workspace_root=root,
+    )
+    try:
+        status, data = _executor(deps)("ops", {})
+    finally:
+        repositories.connection.close()
+    assert status == "succeeded"
+    assert "pixelate" in data["operations"]

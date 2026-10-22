@@ -232,6 +232,7 @@ class Container:
                     execute=self.execute,
                     private_store=self.private_state_store,
                     workspace_root=self.resolved_workspace.root,
+                    options=self.options,
                 ),
                 workspace_label=str(self.resolved_workspace.root),
             ).run()
@@ -405,6 +406,19 @@ class Container:
                 self.repositories, self.artifact_store,
                 plan=args.get("plan"), yes=args.get("yes") is True,
                 private_store=self.private_state_store,
+            )
+        if command.startswith("skills "):
+            from jsonschema import validate
+
+            from imagen_cli.cli.commands import skills
+
+            validate(args, discover(command)["input_schema"])
+            if command == "skills list":
+                return skills.list_()
+            return skills.install_(
+                args.get("skill"),
+                scope=args.get("scope", "project"),
+                force=args.get("force") is True,
             )
         if command not in {
             "session create", "session list", "session show", "session resume",

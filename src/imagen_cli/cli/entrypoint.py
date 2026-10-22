@@ -49,7 +49,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "provider", "family", "base-url", "model-default", "credential-ref",
                 "revision", "pipeline", "op", "send-credential", "id", "first", "second",
                 "artifacts", "columns", "cell", "backend", "tile", "overlap", "accept",
-                "key-file", "folder",
+                "key-file", "folder", "skill", "force",
             }
             if name not in OPTION_METADATA and not local_option:
                 raise ValueError("unknown option")
@@ -57,12 +57,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 name, name.replace("-", "_") if name != "async" else "async_",
             )
             target = parameters if local_option else controls
-            repeated = name in {"input", "reference"}
+            repeated = name in {"input", "reference", "skill"}
             if field in target and not repeated:
                 raise ValueError("duplicate option")
             value: Any = raw_value
             boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
-                "send-credential", "accept", "folder",
+                "send-credential", "accept", "folder", "force",
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
@@ -79,6 +79,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     value = argv[index]
                 if name in {
                     "limit", "timeout", "count", "concurrency", "revision", "tile", "overlap",
+                    "columns", "cell",
                 }:
                     value = int(value)
                 elif not value or "\0" in value:
@@ -221,6 +222,11 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             if "profile" in parameters:
                 raise ValueError("duplicate option")
             parameters["profile"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command in {"skills list", "skills install"}:
+        if words:
+            raise ValueError("unexpected positional arguments")
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("cache "):
