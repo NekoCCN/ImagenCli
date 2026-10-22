@@ -14,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Input, Static
+from textual.widgets import DataTable, Input, Static
 
 from imagen_cli.application import cache_service, media_ops
 from imagen_cli.cli.human import render as human_render
@@ -157,6 +157,16 @@ def _sanitize(value: object) -> str:
     return "".join(char for char in str(value) if char.isprintable())
 
 
+def _keybar(entries: list[tuple[str, str]]) -> Text:
+    text = Text()
+    for index, (key, label) in enumerate(entries):
+        if index:
+            text.append("  ")
+        text.append(f" {key} ", style="bold #14100a on #e3a455")
+        text.append(f" {label}", style="#99a1ac")
+    return text
+
+
 class ConfirmScreen(ModalScreen[bool]):
     """Typed confirmation; Enter with the exact word authorizes the action."""
 
@@ -164,11 +174,15 @@ class ConfirmScreen(ModalScreen[bool]):
         super().__init__()
         self.prompt = prompt
         self.word = word
-        self.message = Static(prompt)
         self.field = Input(placeholder=word)
 
     def compose(self) -> ComposeResult:
-        yield Vertical(self.message, self.field, Static("输入取消"), id="confirm")
+        yield Vertical(
+            Static(self.prompt, classes="panel-title"),
+            self.field,
+            Static("enter 确认 · esc 取消", classes="panel-hint"),
+            classes="panel", id="confirm",
+        )
 
     def on_mount(self) -> None:
         self.field.focus()
@@ -198,12 +212,11 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static(self.heading),
-            *(Vertical(Static(name), field) for (name, _, _), field in zip(self.fields,
-                                                                          self.inputs,
-                                                                          strict=True)),
-            Static("enter 提交 · esc 取消"),
-            id="form",
+            Static(self.heading, classes="panel-title"),
+            *(Horizontal(Static(name, classes="field-label"), field, classes="field")
+              for (name, _, _), field in zip(self.fields, self.inputs, strict=True)),
+            Static("enter 提交 · esc 取消", classes="panel-hint"),
+            classes="panel", id="form",
         )
 
     def on_mount(self) -> None:
@@ -244,10 +257,13 @@ class CacheScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("可回收空间"), self.table, self.status, self.field, id="cache"
+            Static("可回收空间", classes="panel-title"),
+            self.table, self.status, self.field,
+            classes="panel", id="cache",
         )
 
     def on_mount(self) -> None:
+        self.table.cursor_type = "row"
         self.table.add_columns("类型", "条目", "字节")
         extra = {} if self.deps.private_store is None else {
             "private_store": self.deps.private_store
@@ -299,13 +315,17 @@ class TransformScreen(ModalScreen[bool]):
         self.view = Static("")
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield self.table
-            with Vertical():
-                yield self.view
-                yield self.status
+        with Vertical(classes="panel", id="transform"):
+            yield Static("变换预设", classes="panel-title")
+            with Horizontal():
+                yield self.table
+                with Vertical():
+                    yield self.view
+                    yield self.status
+            yield Static("↑↓ 预览 · enter 应用 · esc 取消", classes="panel-hint")
 
     def on_mount(self) -> None:
+        self.table.cursor_type = "row"
         self.table.add_columns("预设")
         for name in self.names:
             self.table.add_row(name)
@@ -375,8 +395,10 @@ class ModelPickerScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("选择默认模型 · 输入过滤 · Enter 选定 · Esc 取消"),
+            Static("选择默认模型", classes="panel-title"),
             self.filter, self.table,
+            Static("输入过滤 · enter 选定 · esc 取消", classes="panel-hint"),
+            classes="panel", id="model-picker",
         )
 
     def on_mount(self) -> None:
@@ -439,11 +461,14 @@ class ProvidersScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
+            Static("Providers", classes="panel-title"),
             Static(
-                "Providers · a 新增 · u 更新 · m 刷新模型 · n 手输模型 · enter 选择默认模型\n"
-                "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空"
+                "a 新增 · u 更新 · m 刷新模型 · n 手输模型 · enter 选择默认模型\n"
+                "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空",
+                classes="panel-hint",
             ),
-            self.table, self.status, id="providers",
+            self.table, self.status,
+            classes="panel", id="providers",
         )
 
     def on_mount(self) -> None:
@@ -625,14 +650,15 @@ class PlanScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
+            Static("执行计划", classes="panel-title"),
             Static(
                 f"计划 {self.plan.get('id')}\n"
-                f"操作 {self.plan.get('operation')} · 模型 {self.plan.get('model')}\n"
-                f"摘要 {self.plan.get('plan_digest')}"
+                f"操作 {self.plan.get('operation')} · 模型 {self.plan.get('model')}"
             ),
+            Static(f"摘要 {self.plan.get('plan_digest')}", classes="panel-hint"),
             self.status,
-            Static("a 批准 · enter 执行 · esc 取消"),
-            id="plan",
+            Static("a 批准 · enter 执行 · esc 取消", classes="panel-hint"),
+            classes="panel", id="plan",
         )
 
     def on_mount(self) -> None:
@@ -717,7 +743,12 @@ class ResultScreen(ModalScreen[None]):
         self.body = Static("")
 
     def compose(self) -> ComposeResult:
-        yield Vertical(Static(f"{self.command} · {self.status}"), self.body, id="result")
+        yield Vertical(
+            Static(f"{self.command} · {self.status}", classes="panel-title"),
+            self.body,
+            Static("esc 关闭", classes="panel-hint"),
+            classes="panel", id="result",
+        )
 
     def on_mount(self) -> None:
         ok = self.status in {"succeeded", "accepted", "approved", "planned"}
@@ -725,7 +756,7 @@ class ResultScreen(ModalScreen[None]):
             "ok": ok, "status": self.status, "data": self.data,
             "error": None if ok else {"message": self.status},
         }
-        self.body.update(Text.from_ansi(human_render(value, color=True)))
+        self.body.update(human_render(value, color=False))
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -752,11 +783,14 @@ class CommandPaletteScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("全部命令 · ↑↓ 选择 · enter 打开 · esc 关闭"),
-            self.table, self.status, id="palette",
+            Static("全部命令", classes="panel-title"),
+            Static("↑↓ 选择 · enter 打开 · esc 关闭", classes="panel-hint"),
+            self.table, self.status,
+            classes="panel", id="palette",
         )
 
     def on_mount(self) -> None:
+        self.table.cursor_type = "row"
         self.table.add_columns("命令", "说明")
         for name in self.names:
             self.table.add_row(_sanitize(name), _sanitize(COMMANDS[name].summary))
@@ -809,16 +843,61 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
 
 class WorkbenchApp(App[None]):
     CSS = """
-    #sessions { width: 40%; }
-    #detail { width: 60%; }
-    #preview { height: 55%; }
-    #hint { height: auto; color: $text-muted; }
+    Screen {
+        background: #0b0d10; color: #e9e4da;
+        scrollbar-color: #3a424e; scrollbar-background: #0f1216;
+        scrollbar-color-hover: #e3a455; scrollbar-color-active: #e3a455;
+        scrollbar-background-hover: #0f1216; scrollbar-background-active: #0f1216;
+    }
+
+    #topbar { height: 1; background: #101318; padding: 0 1; }
+    #brand { width: auto; color: #e3a455; text-style: bold; padding: 0 1 0 0; }
+    #workspace { width: 1fr; color: #87909c; content-align: right middle; }
+
+    #body { height: 1fr; }
+
+    #sidebar { width: 36; background: #0f1216; border-right: solid #232932; padding: 1 1 0 1; }
+    #sessions { height: 1fr; background: #0f1216; }
+
+    DataTable { background: transparent; color: #d8d3ca; }
+    DataTable > .datatable--header { background: transparent; color: #87909c; text-style: bold; }
+    DataTable > .datatable--cursor { background: #e3a455; color: #14100a; text-style: bold; }
+    DataTable > .datatable--hover { background: #1a1f27; }
+
+    #detail-pane { width: 1fr; padding: 1 2; }
+    #detail { color: #e9e4da; text-style: bold; }
+    #preview-frame {
+        height: 1fr; margin-top: 1; background: #090b0e;
+        border: solid #232932; align: center middle; padding: 1;
+    }
+    #preview { width: auto; height: auto; color: #9aa1ac; text-align: center; }
+
+    #keybar { height: 1; background: #101318; padding: 0 1; }
+
+    ModalScreen { align: center middle; background: #0b0d10; }
+    .panel {
+        background: #12151a; border: solid #2b323c; padding: 1 2;
+        width: 80%; max-width: 96; height: auto; max-height: 94%; overflow-y: auto;
+        scrollbar-color: #3a424e; scrollbar-background: #12151a;
+        scrollbar-color-hover: #e3a455; scrollbar-color-active: #e3a455;
+    }
+    #providers, #palette, #model-picker { height: auto; }
+    #providers DataTable, #palette DataTable, #model-picker DataTable {
+        height: auto; max-height: 18;
+    }
+    .panel-title { color: #e9e4da; text-style: bold; padding-bottom: 1; }
+    .panel-hint { color: #87909c; }
+    .field { height: auto; margin-bottom: 1; }
+    .field-label { width: 14; color: #7d8692; content-align: left middle; padding-top: 1; }
+    .field Input { width: 1fr; }
+    Input { background: #0b0e12; border: solid #232932; color: #e9e4da; padding: 0 1; }
+    Input:focus { border: solid #e3a455; }
     """
     BINDINGS = [
         Binding("q", "quit", "退出"),
         Binding("c", "cache", "缓存"),
         Binding("v", "providers", "Providers"),
-        Binding("p", "providers", "Providers"),
+        Binding("p", "providers", "Providers", show=False),
         Binding("n", "new_session", "新建会话"),
         Binding("g", "generate", "生成"),
         Binding("m", "edit", "编辑"),
@@ -828,8 +907,7 @@ class WorkbenchApp(App[None]):
         Binding("t", "transform", "变换"),
         Binding("r", "refresh", "刷新"),
         Binding("colon", "commands", "全部命令"),
-        Binding("?", "help", "帮助"),
-    ]
+        Binding("?", "help", "帮助"),    ]
 
     def __init__(self, deps: Deps, *, workspace_label: str = "") -> None:
         super().__init__()
@@ -838,26 +916,29 @@ class WorkbenchApp(App[None]):
         self.sessions: DataTable[Any] = DataTable(id="sessions")
         self.detail = Static(id="detail")
         self.preview = Static(id="preview")
-        self.hint = Static(
-            "g 生成 · m 编辑 · n 新建会话 · t 变换 · f 分支 · e 导出\n"
-            ": 全部命令 · v/p providers · c 缓存 · x 删除 · r 刷新 · q 退出",
-            id="hint",
-        )
         self.current: str | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with Horizontal():
-            yield self.sessions
-            with Vertical(id="detail"):
+        yield Horizontal(
+            Static("IMAGEN", id="brand"),
+            Static(self.workspace_label, id="workspace"),
+            id="topbar",
+        )
+        with Horizontal(id="body"):
+            with Vertical(id="sidebar"):
+                yield self.sessions
+            with Vertical(id="detail-pane"):
                 yield self.detail
-                yield self.preview
-                yield self.hint
-        yield Footer()
+                with Vertical(id="preview-frame"):
+                    yield self.preview
+        yield Static(_keybar([
+            ("g", "生成"), ("m", "编辑"), ("t", "变换"), ("n", "新建"),
+            ("v", "Providers"), (":", "命令"), ("?", "帮助"),
+        ]), id="keybar")
 
     def on_mount(self) -> None:
         self.title = "Imagen"
-        self.sub_title = self.workspace_label
+        self.sessions.cursor_type = "row"
         self.sessions.add_columns("会话", "轮次", "版本")
         self.refresh_rows()
 
@@ -883,6 +964,9 @@ class WorkbenchApp(App[None]):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self.current = str(event.row_key.value)
+        self.show_detail()
+
+    def on_resize(self) -> None:
         self.show_detail()
 
     def _current_artifact(self) -> tuple[str, Path] | None:
@@ -917,18 +1001,21 @@ class WorkbenchApp(App[None]):
         row = self.deps.repositories.get("sessions", self.current)
         if row is None:
             return
-        self.detail.update(f"{_sanitize(row['name'])} · version {row['version']}")
+        self.detail.update(f"{_sanitize(row['name'])} · 版本 {row['version']}")
         found = self._current_artifact()
         if found is None:
-            self.preview.update("(无产物)")
+            self.preview.update(Text("尚无产物\n\n按 g 生成第一张图", justify="center"))
             return
         identity, path = found
         artifact = self.deps.repositories.get("artifacts", identity)
         if artifact is None:
-            self.preview.update("(产物不可用)")
+            self.preview.update(Text("产物不可用", justify="center"))
             return
         if preview.supported():
-            self.preview.update(Text.from_ansi(preview.ansi_blocks(path, cols=40, rows=12)))
+            frame = self.query_one("#preview-frame")
+            cols = max(20, frame.size.width - 2)
+            rows = max(5, frame.size.height - 2)
+            self.preview.update(Text.from_ansi(preview.ansi_blocks(path, cols=cols, rows=rows)))
         else:
             self.preview.update(preview.describe(artifact, path))
 
