@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from imagen_cli.application.cancel_service import process_start
 from imagen_cli.application.container import Container
 from imagen_cli.application.session_service import SessionService
 from imagen_cli.cli.options import SharedOptions
@@ -197,6 +198,10 @@ def _detached_parent(workspace: str, connection: Any) -> None:
 
 
 def test_worker_survives_parent_exit_then_kill_is_not_alive(tmp_path: Path) -> None:
+    if not worker_module.detached_supported():
+        pytest.skip("detached worker is unsupported on this platform")
+    # Windows has no SIGKILL; os.kill(SIGTERM) there is TerminateProcess, equally terminal.
+    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
     workspace = str(tmp_path / "workspace")
     context = multiprocessing.get_context("spawn")
     parent, child = context.Pipe(duplex=False)
@@ -223,9 +228,9 @@ def test_worker_survives_parent_exit_then_kill_is_not_alive(tmp_path: Path) -> N
             status, data = worker_module.status(repositories)
             assert status == "succeeded"
             assert data["workers"][0]["alive"] is True
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, kill_signal)
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and Path(f"/proc/{pid}").exists():
+        while time.monotonic() < deadline and process_start(pid) is not None:
             time.sleep(0.05)
         with Container(workspace=workspace) as container:
             status, data = worker_module.status(container.repositories)
@@ -243,8 +248,8 @@ def test_worker_survives_parent_exit_then_kill_is_not_alive(tmp_path: Path) -> N
             process.kill()
             process.join(5)
         if pid is not None:
-            with suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
+            with suppress(ProcessLookupError, OSError):
+                os.kill(pid, kill_signal)
 
 
 def test_cli_worker_status_and_async_enqueue(tmp_path: Path) -> None:
