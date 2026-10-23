@@ -33,7 +33,7 @@ FIELDS = {
         "id turn_id batch_id plan_id state dispatch_state remote_state local_save_state "
         "requested_count actual_count accepted_maybe remote_id private_locator_ref "
         "executor_id lease_token lease_expires_at cancel_intent cancel_local cancel_remote "
-        "cost created_at updated_at retry_of_job_id worker_queued"
+        "cost created_at updated_at retry_of_job_id worker_queued error"
     ),
     "batches": "id child_job_ids concurrency summary_state created_at",
     "capabilities": (

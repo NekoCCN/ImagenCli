@@ -95,6 +95,7 @@ def test_queued_job_marks_unknown_and_never_redispatches(tmp_path, png_bytes):
         assert result["status"] == "unknown"
         job = container.repositories.get("jobs", turn.job_id)
         assert job["accepted_maybe"] is True
+        assert job["error"] == {"type": "outcome_unknown", "error_class": "RuntimeError"}
         assert len(adapter.requests) == 1
         with pytest.raises(ValueError):
             run_queued(

@@ -374,11 +374,12 @@ def _execute_pending(container: Any, worker: Worker) -> None:
                 repositories, container.artifact_store,
                 container.private_state_store, adapter, job["id"],
             )
-        except Exception:  # noqa: BLE001 - keep the worker alive and the job observable
+        except Exception as error:  # noqa: BLE001 - keep the worker alive and the job observable
             current = repositories.get("jobs", job["id"], include_private=True) or {}
             OutcomeService(repositories).fail(
                 job["id"], error_type="internal_error",
                 accepted_maybe=current.get("dispatch_state") != "not_started",
+                error_class=type(error).__name__,
             )
 
 

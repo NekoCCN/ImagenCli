@@ -22,6 +22,7 @@ from imagen_cli.application import cache_service, media_ops
 from imagen_cli.cli.human import render as human_render
 from imagen_cli.cli.options import SharedOptions
 from imagen_cli.cli.registry import COMMANDS, discover
+from imagen_cli.cli.renderers import data_error, error_message
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.private_state import PrivateStateStore
@@ -833,7 +834,14 @@ class PlanScreen(ModalScreen[bool]):
             self._say(f"执行完成：{job.get('state')} · {job.get('id')}", "ok")
             self.dismiss(True)
         else:
-            self._say(f"执行结果：{status}", "error")
+            reason = error_message(job.get("error") or data.get("error"))
+            identity = job.get("id")
+            self._say(
+                f"执行结果：{status}"
+                + (f" · {reason}" if reason else "")
+                + (f" · {identity}" if identity else ""),
+                "error",
+            )
 
     def action_retry(self) -> None:
         if self.running:
@@ -914,9 +922,12 @@ class ResultScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         ok = self.status in {"succeeded", "accepted", "approved", "planned"}
+        message = error_message(data_error(self.data)) or str(
+            self.data.get("message") or self.status
+        )
         value = {
             "ok": ok, "status": self.status, "data": self.data,
-            "error": None if ok else {"message": self.status},
+            "error": None if ok else {"message": message},
         }
         self.body.update(human_render(value, color=False))
 
@@ -1380,7 +1391,8 @@ class WorkbenchApp(App[None]):
         plan = data.get("plan") or {}
         if status not in {"approval_required", "planned"} or not plan.get("id"):
             tone = "ok" if status in {"succeeded", "accepted"} else "error"
-            self._say(f"{label}结果：{status}", tone)
+            reason = error_message(data_error(data))
+            self._say(f"{label}结果：{status}" + (f" · {reason}" if reason else ""), tone)
             return
 
         def finished(changed: bool | None) -> None:
@@ -1445,8 +1457,9 @@ class WorkbenchApp(App[None]):
         if data.get("plan") and status in {"approval_required", "planned"}:
             self._push_plan(status, data, "命令")
             return
+        reason = error_message(data_error(data))
         self._say(
-            f"{command} · {status}",
+            f"{command} · {status}" + (f" · {reason}" if reason else ""),
             "ok" if status in {"succeeded", "accepted"} else "error",
         )
         self.push_screen(ResultScreen(command, status, data))

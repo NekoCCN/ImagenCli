@@ -99,8 +99,11 @@ def run_queued(
     outcomes = OutcomeService(repositories)
     try:
         request = build_request(repositories, store, job)
-    except (KeyError, OSError, ValueError):
-        return outcomes.fail(job_id, error_type="validation_error", accepted_maybe=False)
+    except (KeyError, OSError, ValueError) as error:
+        return outcomes.fail(
+            job_id, error_type="validation_error", accepted_maybe=False,
+            error_class=type(error).__name__,
+        )
     executor = ForegroundExecutor(
         repositories, adapter, ArtifactService(repositories, store), outcomes, private_store,
     )

@@ -206,6 +206,15 @@ def test_provider_failure_does_not_replace_previous_success(work, accepted, stat
     assert "create" not in result["next_actions"]
 
 
+def test_failure_reason_is_persisted_and_returned(work):
+    result = outcome_api(work).fail(
+        "job_one", error_type="safety_refusal", accepted_maybe=False, http_status=400
+    )
+    expected = {"type": "safety_refusal", "http_status": 400}
+    assert result["error"] == expected
+    assert work.repositories.get("jobs", "job_one")["error"] == expected
+
+
 def test_failed_save_cannot_be_reclassified_as_remote_failure(work):
     api = outcome_api(work)
     api.complete("job_one", actual_count=2)

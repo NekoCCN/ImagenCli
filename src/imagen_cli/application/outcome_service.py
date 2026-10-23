@@ -125,12 +125,20 @@ class OutcomeService:
         *,
         error_type: str,
         accepted_maybe: bool = False,
+        http_status: int | None = None,
+        error_class: str | None = None,
     ) -> dict[str, Any]:
         with self.repositories.transaction():
             job, turn = self._job(job_id)
             if job.get("remote_state") == "succeeded":
                 return self.complete(job_id, actual_count=job["actual_count"])
             status = "unknown" if accepted_maybe else "failed"
+            # Structured, provider-text-free reason so the failure is explainable later.
+            reason: dict[str, Any] = {"type": error_type}
+            if http_status is not None:
+                reason["http_status"] = http_status
+            if error_class:
+                reason["error_class"] = error_class
             self.repositories.update(
                 "jobs",
                 job_id,
@@ -138,12 +146,15 @@ class OutcomeService:
                     "state": status,
                     "remote_state": status,
                     "accepted_maybe": accepted_maybe,
+                    "error": reason,
                 },
             )
             self.repositories.update("turns", turn["id"], {"creation_state": status})
-            return self._result(
+            result = self._result(
                 status,
                 6 if accepted_maybe else 7,
                 self._artifacts(job_id, turn["id"]),
                 error_type,
             )
+            result["error"] = reason
+            return result

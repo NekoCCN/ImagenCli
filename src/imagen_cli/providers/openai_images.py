@@ -174,7 +174,9 @@ class OpenAIImagesAdapter:
             raise ProviderFailure("authentication_error") from None
         if response.status_code >= 300:
             if response.status_code in {307, 308}:
-                raise ProviderFailure("outcome_unknown", accepted_maybe=True)
+                raise ProviderFailure(
+                    "outcome_unknown", accepted_maybe=True, http_status=response.status_code
+                )
             code = ""
             try:
                 code = str(response.json().get("error", {}).get("code", ""))
@@ -187,7 +189,11 @@ class OpenAIImagesAdapter:
             }.get(response.status_code, "provider_error")
             if code == "content_policy_violation":
                 kind = "safety_refusal"
-            raise ProviderFailure(kind, accepted_maybe=response.status_code >= 500)
+            raise ProviderFailure(
+                kind,
+                accepted_maybe=response.status_code >= 500,
+                http_status=response.status_code,
+            )
         if len(response.content) > self.max_response_bytes:
             raise ProviderFailure("provider_error", accepted_maybe=True)
         try:

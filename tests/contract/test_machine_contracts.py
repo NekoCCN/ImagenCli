@@ -154,6 +154,22 @@ def test_failed_result_uses_provider_error_type():
     validator("result.schema.json").validate(result("failed"))
 
 
+def test_failed_result_explains_the_reason():
+    from imagen_cli.cli.renderers import result
+
+    refused = result("failed", {"error": {"type": "safety_refusal", "http_status": 400}})
+    assert refused["error"]["type"] == "safety_refusal"
+    assert "内容安全" in refused["error"]["message"]
+    assert "HTTP 400" in refused["error"]["message"]
+    unknown = result(
+        "unknown", {"error": {"type": "outcome_unknown", "error_class": "ReadTimeout"}}
+    )
+    assert "不自动重试" in unknown["error"]["message"]
+    assert "ReadTimeout" in unknown["error"]["message"]
+    nested = result("unknown", {"job": {"error": {"type": "provider_error", "http_status": 500}}})
+    assert "HTTP 500" in nested["error"]["message"]
+
+
 def test_stdin_supports_redirected_regular_files(tmp_path):
     from imagen_cli.cli.input_readers import read_stdin
 

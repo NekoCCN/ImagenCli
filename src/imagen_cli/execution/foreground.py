@@ -61,12 +61,14 @@ class ForegroundExecutor:
                 request.job_id,
                 error_type=error.type,
                 accepted_maybe=error.accepted_maybe,
+                http_status=error.http_status,
             )
-        except (Exception, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt) as error:
             return self.outcome_service.fail(
                 request.job_id,
                 error_type=OUTCOME_UNKNOWN,
                 accepted_maybe=True,
+                error_class=type(error).__name__,
             )
         job = self.repositories.get("jobs", request.job_id)
         if (

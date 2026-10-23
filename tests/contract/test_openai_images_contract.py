@@ -264,6 +264,7 @@ def test_http_failures_are_safe_and_never_replayed(
         adapter(profile, respond).create(creation)
     assert caught.value.type == kind
     assert caught.value.accepted_maybe is accepted
+    assert caught.value.http_status == status
     assert len(calls) == 1
     assert "SECRET" not in str(caught.value)
     assert "attacker" not in repr(caught.value)
@@ -284,6 +285,7 @@ def test_disconnect_is_unknown_and_not_retried(
         adapter(profile, disconnect).create(creation)
     assert caught.value.type == "outcome_unknown"
     assert caught.value.accepted_maybe
+    assert caught.value.http_status is None
     assert len(calls) == 1
     assert "SECRET" not in str(caught.value)
     assert caught.value.__cause__ is None

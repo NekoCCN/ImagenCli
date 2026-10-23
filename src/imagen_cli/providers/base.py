@@ -114,14 +114,17 @@ class ProviderFailure(Exception):
     type: str
     message: str
     accepted_maybe: bool
+    http_status: int | None = None
     retryable: bool = field(default=False, init=False, repr=False)
 
     def __init__(
         self, type: str, message: str | None = None, *, accepted_maybe: bool = False,
+        http_status: int | None = None,
     ) -> None:
         object.__setattr__(self, "type", type)
         object.__setattr__(self, "message", type if message is None else message)
         object.__setattr__(self, "accepted_maybe", accepted_maybe)
+        object.__setattr__(self, "http_status", http_status)
         object.__setattr__(self, "retryable", False)
         Exception.__init__(self, self.message)
 

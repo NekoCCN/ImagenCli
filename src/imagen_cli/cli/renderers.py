@@ -34,6 +34,41 @@ ERROR_TYPES = {
     "partial_success": "partial_failure",
     "failed": "provider_error",
 }
+# Why an attempt failed, in words; provider response text is never echoed.
+ERROR_REASONS = {
+    "safety_refusal": "上游内容安全策略拒绝了本次请求",
+    "authentication_error": "凭据无效或缺失",
+    "permission_denied": "没有访问该资源的权限",
+    "validation_error": "请求参数不合法",
+    "provider_error": "供应商返回错误",
+    "outcome_unknown": "无法确认供应商是否已受理（不自动重试）",
+    "internal_error": "本地执行出错",
+    "save_failed": "结果已返回，但本地保存失败",
+}
+
+
+def error_message(detail: Any) -> str | None:
+    """Human reason for a stored job error, or None when there is no usable detail."""
+    if not isinstance(detail, dict):
+        return None
+    label = ERROR_REASONS.get(str(detail.get("type")))
+    if label is None:
+        return None
+    if isinstance(status := detail.get("http_status"), int):
+        label += f"（HTTP {status}）"
+    if isinstance(exc := detail.get("error_class"), str) and exc:
+        label += f" · {exc}"
+    return label
+
+
+def data_error(data: Any) -> Any:
+    """The stored failure detail, from the top level or the job facts inside data."""
+    if not isinstance(data, dict):
+        return None
+    if isinstance(detail := data.get("error"), dict):
+        return detail
+    job = data.get("job")
+    return job.get("error") if isinstance(job, dict) else None
 
 
 def result(
@@ -50,9 +85,11 @@ def result(
             "error": None,
         }
     if error is None:
+        detail = data_error(data)
         error = {
-            "type": ERROR_TYPES.get(status, status),
-            "message": "命令未成功完成。",
+            "type": str(detail.get("type")) if isinstance(detail, dict) and detail.get("type")
+            else ERROR_TYPES.get(status, status),
+            "message": error_message(detail) or "命令未成功完成。",
             "retryable": False,
             "accepted_maybe": status in {"unknown", "partial_success"},
             "next_actions": [],
