@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -33,11 +34,63 @@ from . import preview
 PRESETS: dict[str, list[dict[str, Any]]] = {
     "像素化": [{"op": "pixelate", "params": {"scale": 4}}],
     "调色板": [{"op": "quantize", "params": {"colors": 16, "dither": True}}],
-    "线稿": [{"op": "grayscale"}, {"op": "autocontrast"},
-             {"op": "highpass", "params": {"radius": 2, "boost": 2}}],
+    "线稿": [
+        {"op": "grayscale"},
+        {"op": "autocontrast"},
+        {"op": "highpass", "params": {"radius": 2, "boost": 2}},
+    ],
     "抖动": [{"op": "dither", "params": {"mode": "atkinson"}}],
     "锐化": [{"op": "sharpen", "params": {"radius": 2, "percent": 160}}],
     "赛璐璐": [{"op": "cel_shade", "params": {"levels": 3}}],
+    "去AI塑料感": [
+        {
+            "op": "filmic_tone",
+            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+        },
+        {
+            "op": "de_ai_bloom",
+            "params": {"radius": 6, "intensity": 0.25, "threshold": 190, "preserve_lines": True},
+        },
+        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
+        {"op": "chromatic_aberration", "params": {"shift": 2, "radial": True}},
+    ],
+    "日系通透空气感": [
+        {"op": "color_temperature", "params": {"temperature": 0.15, "tint": -0.05}},
+        {
+            "op": "de_ai_bloom",
+            "params": {"radius": 10, "intensity": 0.35, "threshold": 170, "preserve_lines": True},
+        },
+        {"op": "vignette", "params": {"radius": 0.8, "feather": 0.4, "darkness": 0.3}},
+    ],
+    "热血集中线": [
+        {"op": "focus_lines", "params": {"lines": 140, "inner_radius": 0.35, "max_width": 3}},
+    ],
+    "黑白漫画网点": [
+        {"op": "screentone", "params": {"frequency": 35, "angle": 45.0, "contrast": 1.2}},
+    ],
+    "立绘贴纸白边": [
+        {"op": "sticker_outline", "params": {"width": 8, "color": "#ffffff", "shadow": True}},
+    ],
+    "XDoG动漫线稿": [
+        {
+            "op": "lineart_extract",
+            "params": {"radius": 1.0, "k": 1.6, "gamma": 0.98, "threshold": 0.02},
+        },
+    ],
+    "复古90年代胶片": [
+        {"op": "filmic_tone", "params": {"lift_black": 10, "compress_white": 238, "warmth": 0.2}},
+        {"op": "vignette", "params": {"radius": 0.7, "feather": 0.5, "darkness": 0.45}},
+        {"op": "film_grain", "params": {"amount": 0.08, "monochrome": False}},
+    ],
+    "动漫超分辨率 4x": [
+        {
+            "op": "superres",
+            "params": {"model": "realesrgan-x4plus-anime", "tile": 256, "overlap": 16},
+        },
+    ],
+    "通用超分辨率 4x": [
+        {"op": "superres", "params": {"model": "realesrgan-x4plus", "tile": 256, "overlap": 16}},
+    ],
 }
 
 
@@ -90,12 +143,20 @@ class Deps:
             self.secret_ref = self._secret_ref
 
     def _fork(
-        self, session_id: str, *, turn_id: str, name: str, artifact_ids: tuple[str, ...],
+        self,
+        session_id: str,
+        *,
+        turn_id: str,
+        name: str,
+        artifact_ids: tuple[str, ...],
     ) -> tuple[str, dict[str, Any]]:
         from imagen_cli.cli.commands import history
 
         return history.fork_(
-            self.repositories, session_id, turn_id=turn_id, name=name,
+            self.repositories,
+            session_id,
+            turn_id=turn_id,
+            name=name,
             artifact_ids=artifact_ids,
         )
 
@@ -105,12 +166,19 @@ class Deps:
         return history.export_(self.repositories, self.store, session_id, destination)
 
     def _transform(
-        self, artifact: str, pipeline: list[dict[str, Any]], session: str,
+        self,
+        artifact: str,
+        pipeline: list[dict[str, Any]],
+        session: str,
     ) -> dict[str, Any]:
         from imagen_cli.application import postprocess_service
 
         return postprocess_service.apply(
-            self.repositories, self.store, artifact, pipeline, session_id=session,
+            self.repositories,
+            self.store,
+            artifact,
+            pipeline,
+            session_id=session,
         )
 
     def _profile_set(self, parameters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -118,7 +186,10 @@ class Deps:
 
         data = profile_command.build_set(parameters)
         return profile_command.execute(
-            self.repositories, "profile set", profile=parameters["profile"], data=data,
+            self.repositories,
+            "profile set",
+            profile=parameters["profile"],
+            data=data,
         )
 
     def _models_refresh(self, profile: str) -> tuple[str, dict[str, Any]]:
@@ -128,10 +199,10 @@ class Deps:
         from imagen_cli.execution.configured import resolve_credential
 
         return models.refresh_(
-            self.repositories, profile, send_credential=True,
-            resolve_credential=partial(
-                resolve_credential, private_store=self.private_store
-            ),
+            self.repositories,
+            profile,
+            send_credential=True,
+            resolve_credential=partial(resolve_credential, private_store=self.private_store),
         )
 
     def _models_add(self, profile: str, model: str) -> tuple[str, dict[str, Any]]:
@@ -152,7 +223,8 @@ class Deps:
             return "not_found", {}
         open_path(path, folder=folder)
         return "succeeded", {
-            "artifact": artifact, "path": str(path.parent if folder else path),
+            "artifact": artifact,
+            "path": str(path.parent if folder else path),
             "opened": "folder" if folder else "image",
         }
 
@@ -162,13 +234,19 @@ class Deps:
         return self.private_store.write_credential(profile, key)
 
     def _create_session(
-        self, name: str, intent: str = "", profile: str | None = None,
+        self,
+        name: str,
+        intent: str = "",
+        profile: str | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
         from imagen_cli.application.session_service import SessionService
 
         row = SessionService(self.repositories, self.store).create_session(
-            name, intent=intent, default_profile_id=profile, default_model=model,
+            name,
+            intent=intent,
+            default_profile_id=profile,
+            default_model=model,
         )
         return row.model_dump(mode="json")
 
@@ -273,7 +351,8 @@ class ConfirmScreen(ModalScreen[bool]):
             Static(self.prompt, classes="panel-title"),
             self.field,
             Static("enter 确认 · esc 取消", classes="panel-hint"),
-            classes="panel", id="confirm",
+            classes="panel",
+            id="confirm",
         )
 
     def on_mount(self) -> None:
@@ -291,27 +370,33 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
 
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
-    def __init__(self, title: str, fields: list[tuple[str, str, str]],
-                 optional: set[str] | None = None,
-                 secrets: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        fields: list[tuple[str, str, str]],
+        optional: set[str] | None = None,
+        secrets: set[str] | None = None,
+    ) -> None:
         super().__init__()
         self.heading = title
         self.fields = fields
         self.optional = optional or set()
         self.secrets = secrets or set()
         self.inputs = [
-            Input(value=default, placeholder=placeholder, id=name,
-                  password=name in self.secrets)
+            Input(value=default, placeholder=placeholder, id=name, password=name in self.secrets)
             for name, placeholder, default in fields
         ]
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(self.heading, classes="panel-title"),
-            *(Horizontal(Static(_label(name), classes="field-label"), field, classes="field")
-              for (name, _, _), field in zip(self.fields, self.inputs, strict=True)),
+            *(
+                Horizontal(Static(_label(name), classes="field-label"), field, classes="field")
+                for (name, _, _), field in zip(self.fields, self.inputs, strict=True)
+            ),
             Static("enter 提交 · esc 取消", classes="panel-hint"),
-            classes="panel", id="form",
+            classes="panel",
+            id="form",
         )
 
     def on_mount(self) -> None:
@@ -321,8 +406,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         values = {str(field.id): field.value.strip() for field in self.inputs}
         missing = [
-            name for name, value in values.items()
-            if not value and name not in self.optional
+            name for name, value in values.items() if not value and name not in self.optional
         ]
         if missing:
             self.query_one(Static).update(
@@ -353,16 +437,19 @@ class CacheScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static("可回收空间", classes="panel-title"),
-            self.table, self.status, self.field,
-            classes="panel", id="cache",
+            self.table,
+            self.status,
+            self.field,
+            classes="panel",
+            id="cache",
         )
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
         self.table.add_columns("类型", "条目", "字节")
-        extra = {} if self.deps.private_store is None else {
-            "private_store": self.deps.private_store
-        }
+        extra = (
+            {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
+        )
         self.entries = self.deps.audit(self.deps.repositories, self.deps.store, **extra)
         for entry in self.entries:
             self.table.add_row(_sanitize(entry.kind), _sanitize(entry.identity), str(entry.bytes))
@@ -377,12 +464,10 @@ class CacheScreen(ModalScreen[bool]):
         if event.value != "purge" or not self.digest:
             self.status.update("未确认")
             return
-        extra = {} if self.deps.private_store is None else {
-            "private_store": self.deps.private_store
-        }
-        result = self.deps.purge(
-            self.deps.repositories, self.deps.store, self.digest, **extra
+        extra = (
+            {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
         )
+        result = self.deps.purge(self.deps.repositories, self.deps.store, self.digest, **extra)
         self.status.update(f"已删除 {result['deleted_bytes']} 字节")
         self.dismiss(True)
 
@@ -390,10 +475,83 @@ class CacheScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
+    """Adjust parameters for the current transform pipeline."""
+
+    BINDINGS = [Binding("escape", "cancel", "取消")]
+
+    def __init__(self, preset_name: str, pipeline: list[dict[str, Any]]) -> None:
+        super().__init__()
+        from imagen_cli.application.operator_catalog import get_operator_item
+
+        self.preset_name = preset_name
+        self.pipeline = copy.deepcopy(pipeline)
+        self.fields_info: list[tuple[str, str, str, str, int, str]] = []
+        self.inputs: list[Input] = []
+
+        for step_idx, step in enumerate(self.pipeline):
+            op = step.get("op", "")
+            params = step.get("params", {})
+            catalog_item = get_operator_item(op)
+            catalog_params = {p.name: p for p in catalog_item.parameters} if catalog_item else {}
+
+            for k, v in params.items():
+                field_id = f"f_{step_idx}_{k}"
+                p_meta = catalog_params.get(k)
+                if p_meta:
+                    label = f"{p_meta.label} ({k})"
+                    placeholder = f"默认 {p_meta.default} · {p_meta.description}"
+                    expected_type = p_meta.param_type
+                else:
+                    label = f"{op}.{k}"
+                    placeholder = f"当前值: {v}"
+                    expected_type = type(v).__name__
+
+                self.fields_info.append((field_id, label, placeholder, expected_type, step_idx, k))
+                self.inputs.append(Input(value=str(v), placeholder=placeholder, id=field_id))
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel", id="param-form"):
+            yield Static(f"参数调节 · {self.preset_name}", classes="panel-title")
+            for (_, label, _, _, _, _), inp in zip(self.fields_info, self.inputs, strict=True):
+                with Horizontal(classes="field"):
+                    yield Static(label, classes="field-label")
+                    yield inp
+            yield Static("enter 确认并预览 · esc 取消", classes="panel-hint")
+
+    def on_mount(self) -> None:
+        if self.inputs:
+            self.inputs[0].focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        new_pipeline = copy.deepcopy(self.pipeline)
+        for (_, _, _, type_str, step_idx, k), inp in zip(
+            self.fields_info, self.inputs, strict=True
+        ):
+            raw = inp.value.strip()
+            try:
+                if type_str in ("bool", "boolean"):
+                    val: Any = raw.lower() in ("true", "1", "yes", "on")
+                elif type_str in ("int", "integer"):
+                    val = int(raw)
+                elif type_str in ("float", "number"):
+                    val = float(raw)
+                else:
+                    val = raw
+                new_pipeline[step_idx]["params"][k] = val
+            except (ValueError, TypeError):
+                pass
+        self.dismiss(new_pipeline)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TransformScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("up", "cursor_up", "上一个", show=False),
         Binding("down", "cursor_down", "下一个", show=False),
+        Binding("p", "edit_params", "参数调节"),
         Binding("enter", "apply", "应用"),
         Binding("escape", "cancel", "取消"),
     ]
@@ -405,19 +563,25 @@ class TransformScreen(ModalScreen[bool]):
         self.session = session
         self.path = path
         self.names = list(PRESETS)
+        self.pipelines: dict[str, list[dict[str, Any]]] = {
+            k: [dict(step, params=dict(step.get("params", {}))) for step in v]
+            for k, v in PRESETS.items()
+        }
         self.table: DataTable[Any] = DataTable()
         self.status = Static("")
         self.view = Static("")
+        self.params_view = Static("", id="transform-params-view")
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="transform"):
-            yield Static("变换预设", classes="panel-title")
+            yield Static("变换预设与后处理工作室", classes="panel-title")
             with Horizontal():
                 yield self.table
-                with Vertical():
+                with Vertical(id="transform-preview-col"):
                     yield self.view
+                    yield self.params_view
                     yield self.status
-            yield Static("↑↓ 预览 · enter 应用 · esc 取消", classes="panel-hint")
+            yield Static("↑↓ 切换 · p 调参 · enter 应用 · esc 取消", classes="panel-hint")
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
@@ -440,24 +604,67 @@ class TransformScreen(ModalScreen[bool]):
         self.table.move_cursor(row=row)
         self.render_preview()
 
+    def _describe_pipeline(self, pipeline: list[dict[str, Any]]) -> str:
+        parts = []
+        for step in pipeline:
+            op = step.get("op", "")
+            params = step.get("params", {})
+            if params:
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                parts.append(f"• {op}: {param_str}")
+            else:
+                parts.append(f"• {op}")
+        return "\n".join(parts)
+
     def render_preview(self) -> None:
         row = self.table.cursor_row
         if not 0 <= row < len(self.names):
             return
         name = self.names[row]
+        pipeline = self.pipelines.get(name, PRESETS[name])
         try:
             with Image.open(self.path) as opened:
                 opened.load()
                 thumbnail = opened.convert("RGBA" if "A" in opened.getbands() else "RGB")
                 thumbnail.thumbnail((48, 24))
-                for step in PRESETS[name]:
-                    thumbnail = media_ops.OPS[step["op"]](thumbnail, **step.get("params", {}))
+                for step in pipeline:
+                    op_name = step.get("op", "")
+                    if op_name == "superres":
+                        model_name = str(step.get("params", {}).get("model", ""))
+                        scale = 4 if "x4" in model_name else 2
+                        target_w = min(48, max(thumbnail.width, thumbnail.width * scale))
+                        target_h = min(24, max(thumbnail.height, thumbnail.height * scale))
+                        thumbnail = thumbnail.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                        continue
+                    if op_name in media_ops.OPS:
+                        thumbnail = media_ops.OPS[op_name](thumbnail, **step.get("params", {}))
             image = thumbnail.convert("RGB")
             self.view.update(Text.from_ansi(preview.ansi_image(image, cols=48, rows=12)))
-            self.status.update(f"{name} · enter 应用")
-        except (ValueError, KeyError, OSError) as error:
+            self.params_view.update(self._describe_pipeline(pipeline))
+            self.status.update(f"{name} · p 调参 · enter 应用")
+        except (ValueError, KeyError, OSError, RuntimeError) as error:
             self.view.update("预览不可用")
+            self.params_view.update(self._describe_pipeline(pipeline))
             self.status.update(_sanitize(error))
+
+    def action_edit_params(self) -> None:
+        row = self.table.cursor_row
+        if not 0 <= row < len(self.names):
+            return
+        name = self.names[row]
+        pipeline = self.pipelines.get(name, PRESETS[name])
+        has_params = any(bool(step.get("params")) for step in pipeline)
+        if not has_params:
+            self.status.update(f"{name} 无可配置参数")
+            return
+
+        def on_saved(updated_pipeline: list[dict[str, Any]] | None) -> None:
+            if updated_pipeline is not None:
+                self.pipelines[name] = updated_pipeline
+                self.render_preview()
+                self.status.update(f"{name} 参数已更新 · enter 应用")
+
+        self.app.push_screen(ParamEditScreen(name, pipeline), on_saved)
 
     def action_apply(self) -> None:
         row = self.table.cursor_row
@@ -465,9 +672,10 @@ class TransformScreen(ModalScreen[bool]):
             return
         name = self.names[row]
         assert self.deps.transform is not None
+        pipeline = self.pipelines.get(name, PRESETS[name])
         try:
-            result = self.deps.transform(self.artifact, PRESETS[name], self.session)
-        except (ValueError, KeyError, OSError) as error:
+            result = self.deps.transform(self.artifact, pipeline, self.session)
+        except (ValueError, KeyError, OSError, RuntimeError) as error:
             self.status.update(_sanitize(error))
             return
         self.dismiss(bool(result))
@@ -491,9 +699,11 @@ class ModelPickerScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static("选择默认模型", classes="panel-title"),
-            self.filter, self.table,
+            self.filter,
+            self.table,
             Static("输入过滤 · enter 选定 · esc 取消", classes="panel-hint"),
-            classes="panel", id="model-picker",
+            classes="panel",
+            id="model-picker",
         )
 
     def on_mount(self) -> None:
@@ -540,8 +750,7 @@ class ProvidersScreen(ModalScreen[bool]):
         ("family", "images / generate_content", "images"),
         ("base_url", "https://…", ""),
         ("model_default", "model id", ""),
-        ("credential_ref", "env:NAME / keyring:SERVICE / private:NAME（可留空）",
-         "env:IMAGEN_KEY"),
+        ("credential_ref", "env:NAME / keyring:SERVICE / private:NAME（可留空）", "env:IMAGEN_KEY"),
         ("api_key", "直接填 API key（写入私有存储，不回显）", ""),
         ("revision", "1", "1"),
     )
@@ -562,8 +771,10 @@ class ProvidersScreen(ModalScreen[bool]):
                 "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空",
                 classes="panel-hint",
             ),
-            self.table, self.status,
-            classes="panel", id="providers",
+            self.table,
+            self.status,
+            classes="panel",
+            id="providers",
         )
 
     def on_mount(self) -> None:
@@ -575,8 +786,12 @@ class ProvidersScreen(ModalScreen[bool]):
         self.table.clear()
         for row in queries.iter_all(self.deps.repositories, "profiles"):
             self.table.add_row(
-                _sanitize(row["id"]), _sanitize(row["provider"]), _sanitize(row["family"]),
-                _sanitize(row["model_default"]), str(row["revision"]), key=row["id"],
+                _sanitize(row["id"]),
+                _sanitize(row["provider"]),
+                _sanitize(row["family"]),
+                _sanitize(row["model_default"]),
+                str(row["revision"]),
+                key=row["id"],
             )
 
     def _selected(self) -> dict[str, Any] | None:
@@ -598,9 +813,7 @@ class ProvidersScreen(ModalScreen[bool]):
         if secret:
             if self.deps.secret_ref is None:
                 raise ValueError("private credential storage is unavailable")
-            parameters["credential_ref"] = self.deps.secret_ref(
-                str(values["profile"]), secret
-            )
+            parameters["credential_ref"] = self.deps.secret_ref(str(values["profile"]), secret)
         elif not parameters.get("credential_ref"):
             raise ValueError("填写 API key，或提供 env:/keyring:/private: 引用")
         return parameters
@@ -622,8 +835,10 @@ class ProvidersScreen(ModalScreen[bool]):
 
         self.app.push_screen(
             FormScreen(
-                "新增 profile", list(self.FIELDS),
-                optional=self.OPTIONAL, secrets=self.SECRETS,
+                "新增 profile",
+                list(self.FIELDS),
+                optional=self.OPTIONAL,
+                secrets=self.SECRETS,
             ),
             done,
         )
@@ -634,8 +849,11 @@ class ProvidersScreen(ModalScreen[bool]):
             self.status.update("没有选中 profile")
             return
         defaults = [
-            (name, placeholder,
-             _sanitize(profile["id"] if name == "profile" else profile.get(name, value)))
+            (
+                name,
+                placeholder,
+                _sanitize(profile["id"] if name == "profile" else profile.get(name, value)),
+            )
             for name, placeholder, value in self.FIELDS
         ]
 
@@ -655,8 +873,10 @@ class ProvidersScreen(ModalScreen[bool]):
 
         self.app.push_screen(
             FormScreen(
-                "更新 profile", defaults,
-                optional=self.OPTIONAL, secrets=self.SECRETS,
+                "更新 profile",
+                defaults,
+                optional=self.OPTIONAL,
+                secrets=self.SECRETS,
             ),
             done,
         )
@@ -689,9 +909,7 @@ class ProvidersScreen(ModalScreen[bool]):
                 return
             self.status.update(f"{status}: {values['model']}")
 
-        self.app.push_screen(
-            FormScreen("添加模型", [("model", "model id", "")]), done
-        )
+        self.app.push_screen(FormScreen("添加模型", [("model", "model id", "")]), done)
 
     def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
         self.action_choose_model()
@@ -719,9 +937,7 @@ class ProvidersScreen(ModalScreen[bool]):
             self.status.update(f"{status}: default {_sanitize(model)}")
             self.refresh_rows()
 
-        self.app.push_screen(
-            ModelPickerScreen(rows, str(profile.get("model_default") or "")), done
-        )
+        self.app.push_screen(ModelPickerScreen(rows, str(profile.get("model_default") or "")), done)
 
     def action_dismiss_screen(self) -> None:
         self.dismiss(False)
@@ -755,7 +971,8 @@ class PlanScreen(ModalScreen[bool]):
             Static(f"摘要 {self.plan.get('plan_digest')}", classes="panel-hint"),
             self.status,
             Static("a 批准 · enter 执行 · r 重试 · esc 取消", classes="panel-hint"),
-            classes="panel", id="plan",
+            classes="panel",
+            id="plan",
         )
 
     def on_mount(self) -> None:
@@ -809,14 +1026,11 @@ class PlanScreen(ModalScreen[bool]):
         self.running = True
         self._say("执行中… 首次请求可能 20–60 秒，完成后自动返回", "info")
         # Owned by the app: dismissing this screen must not cancel the paid request.
-        self.app.run_worker(self._execute_job, thread=True, group="plan-execute",
-                            exclusive=True)
+        self.app.run_worker(self._execute_job, thread=True, group="plan-execute", exclusive=True)
 
     def _execute_job(self) -> None:
         try:
-            status, data = _executor(self.deps)(
-                "plan execute", {"plan_id": self.plan["id"]}
-            )
+            status, data = _executor(self.deps)("plan execute", {"plan_id": self.plan["id"]})
         except Exception as error:  # noqa: BLE001 - surfaced in the panel
             self.app.call_from_thread(self._finish, None, _sanitize(error))
             return
@@ -875,9 +1089,7 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
         spec = properties.get(name) or {}
         kind = spec.get("type")
         if kind is None and "anyOf" in spec:
-            kind = next(
-                (item.get("type") for item in spec["anyOf"] if item.get("type")), None
-            )
+            kind = next((item.get("type") for item in spec["anyOf"] if item.get("type")), None)
         if not raw:
             continue
         if kind == "integer":
@@ -890,9 +1102,7 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
 
                 arguments[name] = json.loads(raw)
             else:
-                arguments[name] = [
-                    item.strip() for item in raw.split(",") if item.strip()
-                ]
+                arguments[name] = [item.strip() for item in raw.split(",") if item.strip()]
         elif kind == "object":
             import json
 
@@ -917,7 +1127,8 @@ class ResultScreen(ModalScreen[None]):
             Static(f"{self.command} · {self.status}", classes="panel-title"),
             self.body,
             Static("esc 关闭", classes="panel-hint"),
-            classes="panel", id="result",
+            classes="panel",
+            id="result",
         )
 
     def on_mount(self) -> None:
@@ -926,7 +1137,9 @@ class ResultScreen(ModalScreen[None]):
             self.data.get("message") or self.status
         )
         value = {
-            "ok": ok, "status": self.status, "data": self.data,
+            "ok": ok,
+            "status": self.status,
+            "data": self.data,
             "error": None if ok else {"message": message},
         }
         self.body.update(human_render(value, color=False))
@@ -948,7 +1161,8 @@ class CommandPaletteScreen(ModalScreen[str | None]):
     def __init__(self) -> None:
         super().__init__()
         self.names = sorted(
-            name for name, command in COMMANDS.items()
+            name
+            for name, command in COMMANDS.items()
             if command.available and name not in {"tui", "help", "schema"}
         )
         self.matches = list(self.names)
@@ -959,9 +1173,12 @@ class CommandPaletteScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static("全部命令", classes="panel-title"),
-            self.filter, self.table, self.status,
+            self.filter,
+            self.table,
+            self.status,
             Static("输入过滤 · ↑↓ 选择 · enter 打开 · esc 关闭", classes="panel-hint"),
-            classes="panel", id="palette",
+            classes="panel",
+            id="palette",
         )
 
     def on_mount(self) -> None:
@@ -974,10 +1191,9 @@ class CommandPaletteScreen(ModalScreen[str | None]):
     def _populate(self) -> None:
         needle = self.filter.value.strip().lower()
         self.matches = [
-            name for name in self.names
-            if not needle
-            or needle in name.lower()
-            or needle in str(COMMANDS[name].summary).lower()
+            name
+            for name in self.names
+            if not needle or needle in name.lower() or needle in str(COMMANDS[name].summary).lower()
         ]
         self.table.clear()
         for name in self.matches:
@@ -1022,9 +1238,7 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
         spec = properties[name] if isinstance(properties[name], dict) else {}
         kind = spec.get("type")
         if kind is None and "anyOf" in spec:
-            kind = next(
-                (item.get("type") for item in spec["anyOf"] if item.get("type")), None
-            )
+            kind = next((item.get("type") for item in spec["anyOf"] if item.get("type")), None)
         default = spec.get("default", "")
         if default in {"", None} and spec.get("const") is not None:
             default = spec["const"]
@@ -1051,7 +1265,8 @@ class HelpScreen(ModalScreen[None]):
             Static("快捷键", classes="panel-title"),
             *(Static(f"{key}  {description}") for key, description in self.rows),
             Static(": 打开全部命令 · esc 关闭", classes="panel-hint"),
-            classes="panel", id="help",
+            classes="panel",
+            id="help",
         )
 
     def action_close(self) -> None:
@@ -1113,6 +1328,12 @@ class WorkbenchApp(App[None]):
     #providers DataTable, #palette DataTable, #model-picker DataTable {
         height: 1fr; width: 1fr;
     }
+    #transform { width: 90%; max-width: 104; height: 90%; overflow: hidden; }
+    #transform DataTable { width: 32; height: 1fr; }
+    #transform-preview-col { width: 1fr; margin-left: 2; height: 1fr; }
+    #transform-params-view { height: 4; overflow-y: auto; color: #8e97a4; margin-top: 1; }
+    #param-form { max-width: 82; max-height: 84%; overflow-y: auto; }
+    #param-form .field-label { width: 24; }
     #palette-filter { margin-bottom: 1; width: 1fr; }
     .panel-title { color: #f4efec; text-style: bold; padding-bottom: 1; }
     .panel-hint { color: #8e97a4; }
@@ -1175,10 +1396,22 @@ class WorkbenchApp(App[None]):
                     yield self.preview
                 yield self.film
                 yield self.status
-        yield Static(_keybar([
-            ("g", "生成"), ("m", "编辑"), ("t", "变换"), ("n", "新建"),
-            ("v", "配置"), ("x", "删除"), ("[ ]", "产物"), (":", "命令"), ("?", "帮助"),
-        ]), id="keybar")
+        yield Static(
+            _keybar(
+                [
+                    ("g", "生成"),
+                    ("m", "编辑"),
+                    ("t", "变换"),
+                    ("n", "新建"),
+                    ("v", "配置"),
+                    ("x", "删除"),
+                    ("[ ]", "产物"),
+                    (":", "命令"),
+                    ("?", "帮助"),
+                ]
+            ),
+            id="keybar",
+        )
 
     def on_mount(self) -> None:
         self.title = "Imagen"
@@ -1192,13 +1425,17 @@ class WorkbenchApp(App[None]):
     def refresh_rows(self) -> None:
         self.sessions.clear()
         sessions = [
-            row for row in queries.iter_all(self.deps.repositories, "sessions")
+            row
+            for row in queries.iter_all(self.deps.repositories, "sessions")
             if row.get("deleted_at") is None
         ]
         for row in sessions:
             turns = len(queries.iter_all(self.deps.repositories, "turns", session_id=row["id"]))
             self.sessions.add_row(
-                _sanitize(row["name"]), str(turns), str(row["version"]), key=row["id"],
+                _sanitize(row["name"]),
+                str(turns),
+                str(row["version"]),
+                key=row["id"],
             )
         identities = [str(row["id"]) for row in sessions]
         if self.current not in identities:
@@ -1217,9 +1454,11 @@ class WorkbenchApp(App[None]):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         # Repopulating the table queues highlights for old positions; only the live cursor counts.
-        if self.sessions.row_count == 0 or event.row_key != self.sessions.coordinate_to_cell_key(
-            self.sessions.cursor_coordinate
-        ).row_key:
+        if (
+            self.sessions.row_count == 0
+            or event.row_key
+            != self.sessions.coordinate_to_cell_key(self.sessions.cursor_coordinate).row_key
+        ):
             return
         identity = str(event.row_key.value)
         if identity != self.current:
@@ -1231,7 +1470,9 @@ class WorkbenchApp(App[None]):
         self.show_detail()
 
     def _artifact_item(
-        self, identity: str, turn: dict[str, Any] | None,
+        self,
+        identity: str,
+        turn: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         artifact = self.deps.repositories.get("artifacts", identity)
         path = self.deps.store.get(identity)
@@ -1259,9 +1500,7 @@ class WorkbenchApp(App[None]):
         )
         for turn in turns:
             references = sorted(
-                queries.iter_all(
-                    self.deps.repositories, "artifact_references", turn_id=turn["id"]
-                ),
+                queries.iter_all(self.deps.repositories, "artifact_references", turn_id=turn["id"]),
                 key=lambda row: int(row.get("index") or 0),
             )
             for reference in references:
@@ -1299,12 +1538,14 @@ class WorkbenchApp(App[None]):
         self._render_preview()
 
     def action_previous_artifact(self) -> None:
-        self._select_artifact((self.film_index if self.film_index >= 0
-                               else len(self.film_items)) - 1)
+        self._select_artifact(
+            (self.film_index if self.film_index >= 0 else len(self.film_items)) - 1
+        )
 
     def action_next_artifact(self) -> None:
-        self._select_artifact((self.film_index if self.film_index >= 0
-                               else len(self.film_items) - 1) + 1)
+        self._select_artifact(
+            (self.film_index if self.film_index >= 0 else len(self.film_items) - 1) + 1
+        )
 
     def _render_film(self) -> None:
         if not self.film_items:
@@ -1314,7 +1555,7 @@ class WorkbenchApp(App[None]):
         width = self.film.size.width or 0
         limit = max(3, min(9, (width - 14) // 5)) if width else 9
         start = max(0, min(len(self.film_items) - limit, self.film_index - limit // 2))
-        window = self.film_items[start:start + limit]
+        window = self.film_items[start : start + limit]
         text = Text()
         text.append("产物 ", style="#8e97a4")
         text.append(f"{self.film_index + 1}/{len(self.film_items)}  ", style="#8e97a4")
@@ -1367,13 +1608,14 @@ class WorkbenchApp(App[None]):
         self.detail.update(f"{_sanitize(row['name'])} · 版本 {row['version']}")
         profile, model = self._creation_defaults(row)
         model = model.rsplit("/", 1)[-1]
-        self.meta_base = " · ".join(
-            part for part in (profile, model) if part
-        ) or "尚未选择端点与模型"
+        self.meta_base = (
+            " · ".join(part for part in (profile, model) if part) or "尚未选择端点与模型"
+        )
         self.meta.update(self.meta_base)
         previous = (
             str(self.film_items[self.film_index]["id"])
-            if 0 <= self.film_index < len(self.film_items) else None
+            if 0 <= self.film_index < len(self.film_items)
+            else None
         )
         items = self._load_artifacts()
         identities = [str(item["id"]) for item in items]
@@ -1452,7 +1694,10 @@ class WorkbenchApp(App[None]):
         self.push_screen(ResultScreen(command, "failed", {"message": message}))
 
     def _command_done(
-        self, command: str, status: str, data: dict[str, Any],
+        self,
+        command: str,
+        status: str,
+        data: dict[str, Any],
     ) -> None:
         if data.get("plan") and status in {"approval_required", "planned"}:
             self._push_plan(status, data, "命令")
@@ -1476,8 +1721,10 @@ class WorkbenchApp(App[None]):
                 return
             try:
                 row = self.deps.create_session(
-                    values["name"], values.get("intent", ""),
-                    values.get("profile"), values.get("model"),
+                    values["name"],
+                    values.get("intent", ""),
+                    values.get("profile"),
+                    values.get("model"),
                 )
             except sqlite3.IntegrityError:
                 self._say(f"会话名已存在：{values['name']}", "error")
@@ -1492,8 +1739,12 @@ class WorkbenchApp(App[None]):
         self.push_screen(
             FormScreen(
                 "新建会话",
-                [("name", "会话名", ""), ("intent", "意图（可留空）", ""),
-                 ("profile", "配置（可留空）", ""), ("model", "模型（可留空）", "")],
+                [
+                    ("name", "会话名", ""),
+                    ("intent", "意图（可留空）", ""),
+                    ("profile", "配置（可留空）", ""),
+                    ("model", "模型（可留空）", ""),
+                ],
                 optional={"intent", "profile", "model"},
             ),
             done,
@@ -1523,7 +1774,10 @@ class WorkbenchApp(App[None]):
 
     @work(thread=True, group="creation", exclusive=True)
     def _plan_creation(
-        self, operation: str, arguments: dict[str, Any], label: str,
+        self,
+        operation: str,
+        arguments: dict[str, Any],
+        label: str,
     ) -> None:
         try:
             status, data = _executor(self.deps)(operation, arguments)
@@ -1555,8 +1809,10 @@ class WorkbenchApp(App[None]):
             if not values or self.deps.execute is None:
                 return
             arguments: dict[str, Any] = {
-                "schema_version": 1, "operation": "generate",
-                "session": session["name"], "prompt": values["prompt"],
+                "schema_version": 1,
+                "operation": "generate",
+                "session": session["name"],
+                "prompt": values["prompt"],
                 "count": int(values.get("count", "1")),
                 "size": values.get("size", "1024x1024"),
             }
@@ -1570,10 +1826,13 @@ class WorkbenchApp(App[None]):
         self.push_screen(
             FormScreen(
                 "生成图片",
-                [("prompt", "提示词", ""),
-                 ("profile", "配置（可留空）", profile_default),
-                 ("model", "模型（可留空）", model_default),
-                 ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
+                [
+                    ("prompt", "提示词", ""),
+                    ("profile", "配置（可留空）", profile_default),
+                    ("model", "模型（可留空）", model_default),
+                    ("count", "数量", "1"),
+                    ("size", "尺寸", "1024x1024"),
+                ],
                 optional={"profile", "model"},
             ),
             done,
@@ -1593,8 +1852,10 @@ class WorkbenchApp(App[None]):
             if not values or self.deps.execute is None:
                 return
             arguments: dict[str, Any] = {
-                "schema_version": 1, "operation": "edit",
-                "session": session["name"], "prompt": values["prompt"],
+                "schema_version": 1,
+                "operation": "edit",
+                "session": session["name"],
+                "prompt": values["prompt"],
                 "inputs": ["artifact:" + identity],
                 "count": int(values.get("count", "1")),
                 "size": values.get("size", "1024x1024"),
@@ -1609,10 +1870,13 @@ class WorkbenchApp(App[None]):
         self.push_screen(
             FormScreen(
                 f"编辑 {identity}",
-                [("prompt", "提示词", ""),
-                 ("profile", "配置（可留空）", profile_default),
-                 ("model", "模型（可留空）", model_default),
-                 ("count", "数量", "1"), ("size", "尺寸", "1024x1024")],
+                [
+                    ("prompt", "提示词", ""),
+                    ("profile", "配置（可留空）", profile_default),
+                    ("model", "模型（可留空）", model_default),
+                    ("count", "数量", "1"),
+                    ("size", "尺寸", "1024x1024"),
+                ],
                 optional={"profile", "model"},
             ),
             done,
@@ -1651,11 +1915,15 @@ class WorkbenchApp(App[None]):
         self._open_current(True)
 
     def action_help(self) -> None:
-        self.push_screen(HelpScreen([
-            ({"colon": ":"}.get(binding.key, binding.key), str(binding.description))
-            for binding in self.BINDINGS
-            if isinstance(binding, Binding) and binding.show
-        ]))
+        self.push_screen(
+            HelpScreen(
+                [
+                    ({"colon": ":"}.get(binding.key, binding.key), str(binding.description))
+                    for binding in self.BINDINGS
+                    if isinstance(binding, Binding) and binding.show
+                ]
+            )
+        )
 
     def action_delete(self) -> None:
         if self.current is None or self.deps.delete_session is None:
@@ -1687,8 +1955,8 @@ class WorkbenchApp(App[None]):
         if session is None:
             return
         turns = [
-            row for row in queries.iter_all(self.deps.repositories, "turns",
-                                            session_id=self.current)
+            row
+            for row in queries.iter_all(self.deps.repositories, "turns", session_id=self.current)
             if row.get("creation_state") == "succeeded"
         ]
         if not turns:
@@ -1696,7 +1964,8 @@ class WorkbenchApp(App[None]):
             return
         turn = sorted(turns, key=lambda row: (row.get("created_at", ""), row["id"]))[-1]
         artifacts = tuple(
-            row["artifact_id"] for row in queries.iter_all(
+            row["artifact_id"]
+            for row in queries.iter_all(
                 self.deps.repositories, "artifact_references", turn_id=turn["id"]
             )
             if row.get("role") == "output"
@@ -1710,8 +1979,7 @@ class WorkbenchApp(App[None]):
         status, _ = self.deps.fork(
             self.current, turn_id=turn["id"], name=name, artifact_ids=artifacts
         )
-        self._say(f"分支 {status}: {_sanitize(name)}",
-                  "ok" if status == "succeeded" else "error")
+        self._say(f"分支 {status}: {_sanitize(name)}", "ok" if status == "succeeded" else "error")
         self.refresh_rows()
 
     def action_export(self) -> None:
@@ -1735,9 +2003,7 @@ class WorkbenchApp(App[None]):
                 "ok" if status == "succeeded" else "error",
             )
 
-        self.push_screen(
-            FormScreen("导出会话", [("destination", "zip 路径", default)]), done
-        )
+        self.push_screen(FormScreen("导出会话", [("destination", "zip 路径", default)]), done)
 
     def action_transform(self) -> None:
         if self.current is None or self.deps.transform is None:
@@ -1753,6 +2019,4 @@ class WorkbenchApp(App[None]):
                 self.show_detail()
                 self._select_artifact(len(self.film_items) - 1)
 
-        self.push_screen(
-            TransformScreen(self.deps, identity, self.current, path), finished
-        )
+        self.push_screen(TransformScreen(self.deps, identity, self.current, path), finished)

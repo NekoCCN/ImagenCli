@@ -67,6 +67,15 @@ CASES = {
     "tilt_shift": {"radius": 2, "band": 0.3},
     "oil_paint": {"colors": 6},
     "palette_map": {"palette": "000000,ffffff,ff0000"},
+    "film_grain": {"amount": 0.05, "seed": 42},
+    "de_ai_bloom": {"radius": 2, "intensity": 0.2, "threshold": 180},
+    "filmic_tone": {"lift_black": 6, "compress_white": 245},
+    "chromatic_aberration": {"shift": 1, "radial": False},
+    "vignette": {"radius": 0.75, "feather": 0.5, "darkness": 0.3},
+    "color_temperature": {"temperature": 0.1, "tint": -0.05},
+    "focus_lines": {"lines": 20, "inner_radius": 0.3, "max_width": 2, "seed": 42},
+    "screentone": {"frequency": 10, "angle": 45.0},
+    "lineart_extract": {"radius": 1.0, "k": 1.6, "gamma": 0.98, "threshold": 0.02},
 }
 
 
@@ -137,3 +146,20 @@ def test_target_bytes_shrinks_jpeg():
 def test_target_bytes_refuses_lossless_png(image):
     with pytest.raises(ValueError, match="lossy"):
         media_ops.encode(image, format="png", target_bytes=100)
+
+
+def test_sticker_outline_and_alpha_requirement():
+    rgba = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+    for x in range(6, 14):
+        for y in range(6, 14):
+            rgba.putpixel((x, y), (255, 100, 100, 255))
+    stickered = media_ops.sticker_outline(rgba, width=2, color="#ffffff", shadow=True)
+    assert stickered.mode == "RGBA"
+    assert stickered.size == rgba.size
+    # 边缘扩充了白色贴纸边
+    assert stickered.getpixel((5, 5))[3] > 0
+
+    # 无 alpha 输入时应抛出异常
+    with pytest.raises(ValueError, match="alpha"):
+        media_ops.sticker_outline(Image.new("RGB", (10, 10)), width=2)
+

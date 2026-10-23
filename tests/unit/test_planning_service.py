@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -8,7 +8,7 @@ from imagen_cli.storage.repositories import Repositories
 
 
 def _stamp(second: int) -> str:
-    return f"2026-10-23T12:00:{second:02d}Z"
+    return (datetime.now(UTC) + timedelta(seconds=second)).isoformat().replace("+00:00", "Z")
 
 
 def _target(**changes):
@@ -22,7 +22,9 @@ def _target(**changes):
     return value
 
 
-def _service(tmp_path, *, now="2026-10-23T12:00:00Z"):
+def _service(tmp_path, *, now=None):
+    if now is None:
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     connection = connect(tmp_path / "state.sqlite3")
     repositories = Repositories(connection)
     repositories.insert("sessions", {"id": "ses_1234567890124abc89abcdef123456ab", "name": "work"})

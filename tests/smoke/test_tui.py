@@ -283,6 +283,43 @@ def test_transform_preview_writes_only_on_enter(deps):
     assert len(calls) == 1
 
 
+def test_transform_param_tuning(deps):
+    from imagen_cli.cli.tui.app import ParamEditScreen
+
+    deps_value, _ = deps
+    calls = []
+
+    def transform(artifact, pipeline, session):
+        calls.append((artifact, pipeline, session))
+        return {"id": "art_transformed"}
+
+    deps_value.transform = transform
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            assert isinstance(app.screen, ParamEditScreen)
+            await pilot.press("backspace", "8")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ParamEditScreen)
+            await pilot.press("enter")
+            await pilot.pause()
+
+    _publish_output(deps_value)
+    asyncio.run(run())
+    assert len(calls) == 1
+    pipeline = calls[0][1]
+    assert pipeline[0]["params"]["scale"] == 8
+
+
+
 def test_providers_refresh_models_uses_the_selection(deps):
     deps_value, _ = deps
     deps_value.repositories.insert("profiles", {

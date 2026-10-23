@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import random
 from collections.abc import Callable
 from typing import Any, cast
@@ -688,6 +689,388 @@ def palette_map(image: Image.Image, *, palette: str = "000000,ffffff,ff0000,00ff
     return quantized.convert("RGBA" if image.mode == "RGBA" else "RGB")
 
 
+def film_grain(image: Image.Image, *, amount: float = 0.05, monochrome: bool = True,
+               shadow_bias: bool = True, seed: int = 42) -> Image.Image:
+    """Anti-AI analog grain: organic Gaussian noise with luminance weighting."""
+    if not 0.0 <= amount <= 0.5:
+        raise ValueError("amount must be between 0.0 and 0.5")
+    if amount == 0.0:
+        return image.copy()
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = image.size
+    rng = random.Random(seed)
+
+    table = [max(0, min(255, int(128 + rng.gauss(0, amount * 255 * 0.9)))) for _ in range(4096)]
+    if monochrome:
+        noise_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
+        noise_img = Image.frombytes("L", (w, h), noise_bytes).convert("RGB")
+    else:
+        r_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
+        g_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
+        b_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
+        noise_img = Image.merge("RGB", (
+            Image.frombytes("L", (w, h), r_bytes),
+            Image.frombytes("L", (w, h), g_bytes),
+            Image.frombytes("L", (w, h), b_bytes),
+        ))
+
+    soft = ImageChops.soft_light(rgb, noise_img)
+    if shadow_bias:
+        lum = rgb.convert("L")
+        mask = lum.point(lambda v: 255 if v <= 160 else max(0, 255 - (v - 160) * 3))
+        result = Image.composite(soft, rgb, mask)
+    else:
+        result = soft
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def de_ai_bloom(image: Image.Image, *, radius: int = 8, intensity: float = 0.3,
+                threshold: int = 180, preserve_lines: bool = True) -> Image.Image:
+    """Anti-AI / Anime glow: diffuse highlights while preserving line art."""
+    if radius < 1 or radius > 100:
+        raise ValueError("radius must be between 1 and 100")
+    if not 0.0 <= intensity <= 1.0:
+        raise ValueError("intensity must be between 0.0 and 1.0")
+    if not 0 <= threshold <= 255:
+        raise ValueError("threshold must be between 0 and 255")
+    if intensity == 0.0:
+        return image.copy()
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    lum = rgb.convert("L")
+
+    denom = max(1, 255 - threshold)
+    mask = lum.point(lambda v: int(255 * ((v - threshold) / denom) ** 1.5) if v > threshold else 0)
+    highlights = Image.composite(rgb, Image.new("RGB", rgb.size, (0, 0, 0)), mask)
+    glow = highlights.filter(ImageFilter.GaussianBlur(radius))
+
+    screened = ImageChops.screen(rgb, glow)
+    blended = Image.blend(rgb, screened, intensity)
+
+    if preserve_lines:
+        line_mask = lum.point(lambda v: int((1.0 - v / 80.0) * 255) if v < 80 else 0)
+        blended = Image.composite(rgb, blended, line_mask)
+
+    if alpha is not None:
+        blended = blended.convert("RGBA")
+        blended.putalpha(alpha)
+    return blended
+
+
+def filmic_tone(image: Image.Image, *, lift_black: int = 6, compress_white: int = 245,
+                saturation: float = 0.95, warmth: float = 0.0) -> Image.Image:
+    """Anti-AI filmic tone curve: lift crushed blacks and compress harsh blown highlights."""
+    if not 0 <= lift_black <= 50:
+        raise ValueError("lift_black must be between 0 and 50")
+    if not 150 <= compress_white <= 255:
+        raise ValueError("compress_white must be between 150 and 255")
+    if not 0.0 <= saturation <= 2.0:
+        raise ValueError("saturation must be between 0.0 and 2.0")
+    if not -1.0 <= warmth <= 1.0:
+        raise ValueError("warmth must be between -1.0 and 1.0")
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    span = compress_white - lift_black
+
+    base_lut = [
+        int(lift_black + span * ((i / 255.0) ** 2 * (3.0 - 2.0 * (i / 255.0))))
+        for i in range(256)
+    ]
+
+    r_lut = [max(0, min(255, int(base_lut[i] + warmth * 10 * (1 - abs(i - 128) / 128.0))))
+             for i in range(256)]
+    b_lut = [max(0, min(255, int(base_lut[i] - warmth * 10 * (1 - abs(i - 128) / 128.0))))
+             for i in range(256)]
+    g_lut = base_lut
+
+    r, g, b = rgb.split()
+    r = r.point(r_lut)
+    g = g.point(g_lut)
+    b = b.point(b_lut)
+    graded = Image.merge("RGB", (r, g, b))
+
+    if saturation != 1.0:
+        graded = ImageEnhance.Color(graded).enhance(saturation)
+
+    if alpha is not None:
+        graded = graded.convert("RGBA")
+        graded.putalpha(alpha)
+    return graded
+
+
+def chromatic_aberration(image: Image.Image, *, shift: int = 2,
+                         radial: bool = True) -> Image.Image:
+    """Optical chromatic dispersion: slight red/blue fringing towards frame edges."""
+    if not 1 <= shift <= 30:
+        raise ValueError("shift must be between 1 and 30")
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = image.size
+    r, g, b = rgb.split()
+
+    if radial:
+        scale_r = 1.0 + (shift * 2.0) / max(w, h)
+        scale_b = max(0.5, 1.0 - (shift * 2.0) / max(w, h))
+
+        rw, rh = max(w, round(w * scale_r)), max(h, round(h * scale_r))
+        r_big = r.resize((rw, rh), Image.Resampling.BILINEAR)
+        r_crop = r_big.crop(((rw - w) // 2, (rh - h) // 2, (rw - w) // 2 + w, (rh - h) // 2 + h))
+
+        bw, bh = max(1, round(w * scale_b)), max(1, round(h * scale_b))
+        b_small = b.resize((bw, bh), Image.Resampling.BILINEAR)
+        b_pad = Image.new("L", (w, h), 0)
+        b_pad.paste(b_small, ((w - bw) // 2, (h - bh) // 2))
+
+        result = Image.merge("RGB", (r_crop, g, b_pad))
+    else:
+        r_off = ImageChops.offset(r, shift, 0)
+        b_off = ImageChops.offset(b, -shift, 0)
+        result = Image.merge("RGB", (r_off, g, b_off))
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def vignette(image: Image.Image, *, radius: float = 0.75, feather: float = 0.5,
+             darkness: float = 0.5) -> Image.Image:
+    """Lens light falloff / vignette."""
+    if not 0.1 <= radius <= 2.0:
+        raise ValueError("radius must be between 0.1 and 2.0")
+    if not 0.05 <= feather <= 1.0:
+        raise ValueError("feather must be between 0.05 and 1.0")
+    if not 0.0 <= darkness <= 1.0:
+        raise ValueError("darkness must be between 0.0 and 1.0")
+    if darkness == 0.0:
+        return image.copy()
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = image.size
+
+    mw, mh = 64, 64
+    mask_bytes = bytearray(mw * mh)
+    inv_feather = 1.0 / feather
+    for y in range(mh):
+        ny = (y - mh / 2) / (mh / 2)
+        for x in range(mw):
+            nx = (x - mw / 2) / (mw / 2)
+            dist = math.sqrt(nx * nx + ny * ny)
+            if dist <= radius:
+                factor = 1.0
+            elif dist >= radius + feather:
+                factor = 1.0 - darkness
+            else:
+                t = (dist - radius) * inv_feather
+                smooth_t = t * t * (3.0 - 2.0 * t)
+                factor = 1.0 - darkness * smooth_t
+            mask_bytes[y * mw + x] = int(factor * 255)
+
+    small_mask = Image.frombytes("L", (mw, mh), bytes(mask_bytes))
+    mask = small_mask.resize((w, h), Image.Resampling.BILINEAR)
+
+    result = ImageChops.multiply(rgb, mask.convert("RGB"))
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def color_temperature(image: Image.Image, *, temperature: float = 0.0,
+                      tint: float = 0.0) -> Image.Image:
+    """Warm/cool and tint color balance."""
+    if not -1.0 <= temperature <= 1.0:
+        raise ValueError("temperature must be between -1.0 and 1.0")
+    if not -1.0 <= tint <= 1.0:
+        raise ValueError("tint must be between -1.0 and 1.0")
+    if temperature == 0.0 and tint == 0.0:
+        return image.copy()
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+
+    r_scale = max(0.0, 1.0 + 0.18 * temperature + 0.06 * tint)
+    g_scale = max(0.0, 1.0 - 0.12 * tint)
+    b_scale = max(0.0, 1.0 - 0.18 * temperature + 0.06 * tint)
+
+    r_lut = [min(255, int(i * r_scale)) for i in range(256)]
+    g_lut = [min(255, int(i * g_scale)) for i in range(256)]
+    b_lut = [min(255, int(i * b_scale)) for i in range(256)]
+
+    r, g, b = rgb.split()
+    r = r.point(r_lut)
+    g = g.point(g_lut)
+    b = b.point(b_lut)
+    result = Image.merge("RGB", (r, g, b))
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def focus_lines(image: Image.Image, *, lines: int = 120, center_x: float = 0.5,
+                center_y: float = 0.5, inner_radius: float = 0.35, max_width: int = 3,
+                line_color: str = "#000000", seed: int = 42) -> Image.Image:
+    """Manga / anime dramatic radial action lines (集中线 / 速度线)."""
+    if not 10 <= lines <= 600:
+        raise ValueError("lines must be between 10 and 600")
+    if not 0.0 <= center_x <= 1.0 or not 0.0 <= center_y <= 1.0:
+        raise ValueError("center coordinates must be between 0.0 and 1.0")
+    if not 0.05 <= inner_radius <= 0.95:
+        raise ValueError("inner_radius must be between 0.05 and 0.95")
+    if not 1 <= max_width <= 20:
+        raise ValueError("max_width must be between 1 and 20")
+
+    w, h = image.size
+    cx, cy = w * center_x, h * center_y
+    rx = w * inner_radius * 0.5
+    ry = h * inner_radius * 0.5
+    outer_diag = math.hypot(w, h) * 1.5
+
+    col_rgb = _colour(line_color)
+    col_rgba = (*col_rgb, 255)
+
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    rng = random.Random(seed)
+
+    step = 2.0 * math.pi / lines
+    for i in range(lines):
+        angle = i * step + rng.uniform(-step * 0.35, step * 0.35)
+        line_w = rng.uniform(1.0, float(max_width))
+        inner_jitter = rng.uniform(0.85, 1.25)
+
+        p_in_x = cx + rx * inner_jitter * math.cos(angle)
+        p_in_y = cy + ry * inner_jitter * math.sin(angle)
+
+        perp_angle = angle + math.pi / 2.0
+        p_out_cx = cx + outer_diag * math.cos(angle)
+        p_out_cy = cy + outer_diag * math.sin(angle)
+
+        dx = math.cos(perp_angle) * line_w
+        dy = math.sin(perp_angle) * line_w
+
+        p_out1 = (p_out_cx - dx, p_out_cy - dy)
+        p_out2 = (p_out_cx + dx, p_out_cy + dy)
+
+        draw.polygon([(p_in_x, p_in_y), p_out1, p_out2], fill=col_rgba)
+
+    base = image.convert("RGBA")
+    composited = Image.alpha_composite(base, overlay)
+    return composited if image.mode == "RGBA" else composited.convert("RGB")
+
+
+def screentone(image: Image.Image, *, frequency: int = 40, angle: float = 45.0,
+               contrast: float = 1.2) -> Image.Image:
+    """Manga screentone (黑白漫画网点纸)."""
+    if not 5 <= frequency <= 150:
+        raise ValueError("frequency must be between 5 and 150")
+    if not 0.0 <= angle <= 90.0:
+        raise ValueError("angle must be between 0.0 and 90.0")
+    if not 0.1 <= contrast <= 3.0:
+        raise ValueError("contrast must be between 0.1 and 3.0")
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    gray = image.convert("L")
+    if contrast != 1.0:
+        gray = ImageEnhance.Contrast(gray).enhance(contrast)
+
+    w, h = image.size
+    period = max(2, min(w, h) // frequency)
+    rad = math.radians(angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    inv_p = 2.0 * math.pi / period
+
+    gray_bytes = gray.tobytes()
+    out_bytes = bytearray(w * h)
+
+    idx = 0
+    for y in range(h):
+        for x in range(w):
+            u = x * cos_a - y * sin_a
+            v = x * sin_a + y * cos_a
+            dot_thresh = int(127.5 * (math.cos(u * inv_p) * math.cos(v * inv_p) + 1.0))
+            lum = gray_bytes[idx]
+            out_bytes[idx] = 255 if lum > dot_thresh else 0
+            idx += 1
+
+    result = Image.frombytes("L", (w, h), bytes(out_bytes)).convert("RGB")
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def sticker_outline(image: Image.Image, *, width: int = 6, color: str = "#ffffff",
+                    shadow: bool = True, shadow_offset: int = 4,
+                    shadow_blur: int = 4) -> Image.Image:
+    """ACG Die-cut sticker outline with optional drop shadow."""
+    if not 1 <= width <= 50:
+        raise ValueError("width must be between 1 and 50")
+    if not 0 <= shadow_offset <= 50:
+        raise ValueError("shadow_offset must be between 0 and 50")
+    if not 0 <= shadow_blur <= 50:
+        raise ValueError("shadow_blur must be between 0 and 50")
+
+    if "A" not in image.getbands():
+        raise ValueError("sticker_outline requires an image with transparency (alpha channel)")
+
+    w, h = image.size
+    alpha = image.getchannel("A")
+    outline_mask = alpha.filter(ImageFilter.MaxFilter(width * 2 + 1))
+    outline_col = (*_colour(color), 255)
+    outline_layer = Image.new("RGBA", (w, h), outline_col)
+
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+    if shadow:
+        shadow_mask = outline_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
+        shadow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 150))
+        shadow_shifted = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        shadow_shifted.paste(shadow_layer, (shadow_offset, shadow_offset), shadow_mask)
+        canvas = Image.alpha_composite(canvas, shadow_shifted)
+
+    canvas.paste(outline_layer, (0, 0), outline_mask)
+    canvas.paste(image, (0, 0), alpha)
+    return canvas
+
+
+def lineart_extract(image: Image.Image, *, radius: float = 1.0, k: float = 1.6,
+                    gamma: float = 0.98, threshold: float = 0.02) -> Image.Image:
+    """XDoG (Extended Difference of Gaussians) clean line art extraction."""
+    if not 0.2 <= radius <= 10.0:
+        raise ValueError("radius must be between 0.2 and 10.0")
+    if not 1.1 <= k <= 5.0:
+        raise ValueError("k must be between 1.1 and 5.0")
+    if not 0.5 <= gamma <= 1.0:
+        raise ValueError("gamma must be between 0.5 and 1.0")
+    if not 0.0 <= threshold <= 0.5:
+        raise ValueError("threshold must be between 0.0 and 0.5")
+
+    gray = image.convert("L")
+    g1 = gray.filter(ImageFilter.GaussianBlur(radius))
+    g2 = gray.filter(ImageFilter.GaussianBlur(radius * k))
+
+    b1 = g1.tobytes()
+    b2 = g2.tobytes()
+    out = bytearray(len(b1))
+
+    thresh_val = threshold * 255.0
+    for i in range(len(b1)):
+        diff = b1[i] - gamma * b2[i]
+        out[i] = 0 if diff < thresh_val else 255
+
+    return Image.frombytes("L", gray.size, bytes(out)).convert("RGB")
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
     "resize": resize, "crop": crop, "trim": trim, "pad": pad, "seamless": seamless,
     "orient": orient, "perspective": perspective, "chroma_key": chroma_key,
@@ -705,6 +1088,11 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "edge": edge, "rotate": rotate, "flip": flip, "transpose": transpose, "dither": dither,
     "halftone": halftone, "cel_shade": cel_shade, "ascii": ascii_art, "glitch": glitch,
     "scanlines": scanlines, "watermark": watermark,
+    "film_grain": film_grain, "de_ai_bloom": de_ai_bloom, "filmic_tone": filmic_tone,
+    "chromatic_aberration": chromatic_aberration, "vignette": vignette,
+    "color_temperature": color_temperature, "focus_lines": focus_lines,
+    "screentone": screentone, "sticker_outline": sticker_outline,
+    "lineart_extract": lineart_extract,
 }
 
 def _optional_ops() -> dict[str, Callable[..., Image.Image]]:

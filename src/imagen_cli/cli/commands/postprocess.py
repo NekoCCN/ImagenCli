@@ -15,6 +15,10 @@ def _value(text: str) -> Any:
     try:
         return int(text)
     except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
         return text
 
 

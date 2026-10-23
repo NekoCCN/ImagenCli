@@ -99,3 +99,24 @@ def test_encode_must_be_the_final_step(workspace):
         postprocess_service.validate(
             [{"op": "encode", "params": {"format": "png"}}, {"op": "grayscale"}]
         )
+
+
+def test_advanced_pipeline_with_float_params(workspace):
+    from imagen_cli.cli.commands import postprocess
+
+    parsed = [
+        postprocess.parse_op("film_grain:amount=0.06,monochrome=true,seed=42"),
+        postprocess.parse_op("filmic_tone:lift_black=6,compress_white=245"),
+        postprocess.parse_op("vignette:radius=0.75,feather=0.5,darkness=0.3"),
+    ]
+    assert parsed[0]["params"]["amount"] == 0.06
+    assert parsed[0]["params"]["monochrome"] is True
+    assert parsed[0]["params"]["seed"] == 42
+    assert parsed[2]["params"]["radius"] == 0.75
+
+    repositories, store = workspace
+    result = postprocess_service.apply(repositories, store, "art_" + "a" * 32, parsed)
+    assert result["id"] != "art_" + "a" * 32
+    assert result["origin_manifest"]["kind"] == "postprocess"
+
+
