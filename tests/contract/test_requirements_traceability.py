@@ -7,8 +7,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT = ROOT / "docs" / "requirements-traceability.md"
-EXPECTED = {f"FR-{index:03d}" for index in range(1, 45)} | {
-    f"SC-{index:03d}" for index in range(1, 11)
+EXPECTED = {f"FR-{index:03d}" for index in range(1, 49)} | {
+    f"SC-{index:03d}" for index in range(1, 14)
 }
 ROW = re.compile(r"^\| (FR-\d{3}|SC-\d{3}) \|(.*)\|$", re.MULTILINE)
 STATUSES = {"implemented", "partial", "unimplemented"}
