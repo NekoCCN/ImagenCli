@@ -1,8 +1,10 @@
 """Local session history and CAS publication; never dispatches provider work."""
 
+import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from imagen_cli.application.cleanup_service import released_name
 from imagen_cli.domain.contracts import JsonObject
 from imagen_cli.domain.enums import (
     ArtifactRole,
@@ -71,7 +73,18 @@ class SessionService:
             version=0,
             created_at=_now(),
         )
-        self.repositories.insert("sessions", session.model_dump(mode="json"))
+        try:
+            self.repositories.insert("sessions", session.model_dump(mode="json"))
+        except sqlite3.IntegrityError:
+            # Rows soft-deleted before delete freed the name still hold it; free it and retry.
+            holder = next((
+                row for row in self.repositories.list("sessions", name=name)
+                if row.get("deleted_at") is not None
+            ), None)
+            if holder is None:
+                raise
+            self.repositories.update("sessions", holder["id"], {"name": released_name(holder)})
+            self.repositories.insert("sessions", session.model_dump(mode="json"))
         return session
 
     def create_turn(

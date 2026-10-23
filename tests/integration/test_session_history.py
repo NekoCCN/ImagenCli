@@ -116,6 +116,21 @@ def test_delete_releases_the_name_for_reuse(tmp_path):
         assert row["deleted_at"] is not None and row["name"] != "同名会话"
 
 
+def test_create_releases_a_name_held_by_a_legacy_deleted_row(tmp_path):
+    """Rows soft-deleted before delete freed the name keep it; create must not fail."""
+    legacy = "ses_" + "1" * 32
+    with Container(workspace=str(tmp_path)) as container:
+        container.repositories.insert("sessions", {
+            "id": legacy, "name": "Test", "version": 0,
+            "created_at": "2026-10-24T08:26:02Z", "deleted_at": "2026-10-24T08:26:02Z",
+        })
+        service_ = SessionService(container.repositories, container.artifact_store)
+        created = service_.create_session("Test")
+        assert created.name == "Test"
+        released = container.repositories.get("sessions", legacy)
+        assert released["name"] == f"Test · 已删除 {legacy}"
+
+
 def _seed(container, png_bytes, name="seed"):
     service_ = SessionService(container.repositories, container.artifact_store)
     session = service_.create_session(name)

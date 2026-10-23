@@ -9,6 +9,11 @@ from imagen_cli.storage.repositories import Repositories
 from imagen_cli.storage.safety import safe_path
 
 
+def released_name(session: dict[str, Any]) -> str:
+    """The name a soft-deleted row gives up; mirrored by create_session for legacy rows."""
+    return f"{session['name']} · 已删除 {session['id']}"
+
+
 def delete_session(repositories: Repositories, session_id: str) -> dict[str, Any]:
     with repositories.transaction():
         session = repositories.get("sessions", session_id)
@@ -18,7 +23,7 @@ def delete_session(repositories: Repositories, session_id: str) -> dict[str, Any
             # The name is UNIQUE and soft-deleted rows keep their place, so free it for reuse.
             session = repositories.update("sessions", session_id, {
                 "deleted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "name": f"{session['name']} · 已删除 {session_id}",
+                "name": released_name(session),
             })
         return cast(dict[str, Any], session)
 
