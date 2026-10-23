@@ -97,7 +97,9 @@ def plan_creation(
             session.id, instruction=creation.prompt, operation=creation.operation,
             resolved_profile_snapshot=target, model=model, parameters=parameters,
             requested_count=creation.count, parent_turn_id=session.current_turn_id,
+            references={"input": input_artifact_ids} if input_artifact_ids else None,
         )
+        repositories.update("jobs", turn.job_id, {"worker_queued": True})
         return "accepted", {
             "job": repositories.get("jobs", turn.job_id),
             "turn": repositories.get("turns", turn.id),

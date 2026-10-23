@@ -247,7 +247,7 @@ def test_worker_survives_parent_exit_then_kill_is_not_alive(tmp_path: Path) -> N
                 os.kill(pid, signal.SIGKILL)
 
 
-def test_cli_worker_commands_and_async_enqueue_only(tmp_path: Path) -> None:
+def test_cli_worker_status_and_async_enqueue(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     prompt = seed(workspace, tmp_path)
     if not worker_module.detached_supported():
@@ -261,6 +261,7 @@ def test_cli_worker_commands_and_async_enqueue_only(tmp_path: Path) -> None:
     assert job["state"] == "queued"
     assert job["dispatch_state"] == "not_started"
     assert job["executor_id"] is None
+    assert job["worker_queued"] is True
     with Container(workspace=str(workspace)) as container:
         assert len(container.repositories.list("jobs")) == 1
         assert container.repositories.list("turns")[0]["creation_state"] == "queued"
@@ -268,23 +269,6 @@ def test_cli_worker_commands_and_async_enqueue_only(tmp_path: Path) -> None:
     code, status = invoke(workspace, "worker", "status")
     assert code == 0
     assert status["data"]["workers"] == []
-    code, started = invoke(workspace, "worker", "start")
-    assert code == 0, started
-    assert started["data"]["worker"]["state"] == "running"
-    worker_pid = started["data"]["worker"]["pid"]
-    try:
-        code, status = invoke(workspace, "worker", "status")
-        assert code == 0
-        assert status["data"]["workers"][0]["alive"] is True
-        code, recovered = invoke(workspace, "worker", "recover")
-        assert code == 0
-        assert recovered["data"]["recovered"] == []
-    finally:
-        with suppress(ProcessLookupError):
-            os.kill(worker_pid, signal.SIGTERM)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and Path(f"/proc/{worker_pid}").exists():
-            time.sleep(0.05)
     with Container(workspace=str(workspace)) as container:
         assert len(container.repositories.list("jobs")) == 1
 

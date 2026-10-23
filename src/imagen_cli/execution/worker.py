@@ -344,6 +344,44 @@ def spawn_worker(
         raise
 
 
+def _execute_pending(container: Any, worker: Worker) -> None:
+    """Run queued async jobs once; a claimed job is never dispatched again."""
+    from imagen_cli.application.outcome_service import OutcomeService
+    from imagen_cli.execution.configured import ConfiguredAdapter
+    from imagen_cli.execution.queued import run_queued
+
+    repositories = container.repositories
+    pending = [
+        row for row in repositories.list("jobs", limit=1000, include_private=True)
+        if row.get("worker_queued") is True
+        and row.get("state") == "queued"
+        and row.get("dispatch_state") == "not_started"
+        and row.get("lease_token") is None
+    ]
+    if not pending:
+        return
+    adapter = ConfiguredAdapter(
+        repositories, timeout=container.options.timeout,
+        private_store=container.private_state_store,
+    )
+    for job in pending:
+        try:
+            worker.claim(job["id"])
+        except LeaseError:
+            continue
+        try:
+            run_queued(
+                repositories, container.artifact_store,
+                container.private_state_store, adapter, job["id"],
+            )
+        except Exception:  # noqa: BLE001 - keep the worker alive and the job observable
+            current = repositories.get("jobs", job["id"], include_private=True) or {}
+            OutcomeService(repositories).fail(
+                job["id"], error_type="internal_error",
+                accepted_maybe=current.get("dispatch_state") != "not_started",
+            )
+
+
 def _serve(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--workspace", required=True)
@@ -369,11 +407,15 @@ def _serve(argv: list[str]) -> int:
             lease_seconds=arguments.lease,
         )
         worker.start()
-        while not stopping.wait(worker.heartbeat_seconds):
-            try:
-                worker.heartbeat()
-            except LeaseError:
-                break
+        next_heartbeat = time.monotonic()
+        while not stopping.wait(0.2):
+            if time.monotonic() >= next_heartbeat:
+                try:
+                    worker.heartbeat()
+                except LeaseError:
+                    break
+                next_heartbeat = time.monotonic() + worker.heartbeat_seconds
+            _execute_pending(container, worker)
         with suppress(LeaseError):
             worker.stop()
     return 0

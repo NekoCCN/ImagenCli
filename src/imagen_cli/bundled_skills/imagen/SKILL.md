@@ -66,6 +66,19 @@ imagen job wait job_... --timeout 300 --agent
 imagen asset open art_... --agent          # 或 --folder
 ```
 
+## 异步队列
+
+`imagen generate ... --async` 会把请求直接放入本地队列，由 `imagen worker start`
+启动的隔离 worker 执行一次；它不生成批准计划，只在用户明确同意发送时使用。
+
+```bash
+imagen generate --session ses_... --profile local --prompt-stdin --async --agent
+imagen worker start --agent
+imagen job wait job_... --timeout 300 --agent
+```
+
+结果未知时停止观察，不重发；worker 崩溃后只做 recover 观察。
+
 ## 安全
 
 - 密钥只写本地私有存储：`imagen profile secret <profile> --key-file <file>`，

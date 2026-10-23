@@ -35,8 +35,8 @@ COMMANDS = {
         *(
             Command(name, summary, available=True)
             for name, summary in (
-                ("generate", "生成本地执行计划并要求批准；尚不发送供应商请求"),
-                ("edit", "冻结输入并生成本地编辑计划；尚不发送供应商请求"),
+                ("generate", "生成执行计划并要求批准；--async 入队由本地 worker 执行"),
+                ("edit", "冻结输入并生成编辑计划；--async 入队由本地 worker 执行"),
                 ("plan show", "查看持久执行计划；不发送请求"),
                 ("plan approve", "显式批准计划摘要；不发送请求"),
                 ("plan execute", "执行已批准计划；最多发送一次供应商创建请求"),
@@ -63,12 +63,13 @@ COMMANDS = {
                 ("job reconcile", "核对本地 staging 并恢复图片；不重新生成"),
                 ("job cancel", "wait 停止观察；local 校验执行者身份后请求终止；remote 未开放"),
                 ("worker status", "查看持久 worker 与启动身份；不派发创建"),
-                ("worker start", "在支持的平台启动隔离 worker 并完成握手"),
+                ("worker start", "在支持的平台启动隔离 worker，执行 async 队列并维持心跳"),
                 ("worker recover", "仅接管过期租约做观察/恢复；不重发创建"),
                 ("batch submit", "离线校验全部子请求后按并发上限执行；每个子项独立 job"),
                 ("batch get", "查看批次汇总与全部子任务事实；不改变子任务"),
                 ("batch wait", "有界等待批次汇总；不重试子任务"),
                 ("asset gc", "dry-run 列出未被引用的受管产物；--plan --yes 仅确认该清单"),
+                ("asset show", "查看单个产物的路径、归属与来源事实"),
                 ("asset open", "用系统默认程序打开产物图片，或 --folder 打开所在目录"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
@@ -87,10 +88,6 @@ COMMANDS = {
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
-        ),
-        *(
-            Command(name, "尚未交付；不会上传或创建请求", "M3")
-            for name in ("asset show",)
         ),
     )
 }
@@ -438,6 +435,16 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "artifact": {"type": "string"}, "path": {"type": "string"},
             "opened": {"enum": ["image", "folder"]},
         }, ("artifact", "path", "opened"))
+    if command.name == "asset show":
+        return _object({
+            "artifact": {"type": "object"},
+            "path": {"type": ["string", "null"]},
+            "available": {"type": "boolean"},
+            "owners": {"type": "array", "items": {"type": "object"}},
+            "producer_turn": {"type": ["object", "null"]},
+            "producer_job": {"type": ["object", "null"]},
+            "next_actions": {"type": "array", "items": {"type": "object"}},
+        }, ("artifact", "path", "available", "owners"))
     if command.name == "asset gc":
         return _object({
             "dry_run": {"type": "boolean"},

@@ -16,6 +16,8 @@ imagen session resume ses_... --agent
 imagen session fork ses_... --from-turn trn_... --name "分支" --agent
 imagen session export ses_... --to backup.zip --agent
 imagen session import backup.zip --agent
+imagen asset show art_... --agent          # 路径、所属会话、来源轮次
+imagen asset open art_... --agent          # 用系统默认程序打开
 ```
 
 - 导入会重映射全部 ID，同名会话自动加 `(imported)` 后缀。
