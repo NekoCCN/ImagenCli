@@ -202,6 +202,20 @@ def test_orphan_job_payload_is_reclaimed(store, tmp_path):
     assert private_store.identities() == []
 
 
+def test_profile_credential_is_never_an_orphan_payload(store, tmp_path):
+    repositories, artifacts, _ = store
+    private_store = private(tmp_path)
+    private_store.write_secret("cred-e4a5", b"gateway key")
+    repositories.insert("profiles", {
+        "id": "locallm", "name": "locallm", "credential_ref": "private:cred-e4a5",
+        "revision": 1,
+    })
+    assert cache_service.audit(
+        repositories, artifacts, now=NOW, private_store=private_store
+    ) == []
+    assert private_store.identities() == ["cred-e4a5"]
+
+
 def test_purge_refuses_plans_over_the_entry_limit(store):
     repositories, artifacts, data = store
     for seed in range(10, 13):

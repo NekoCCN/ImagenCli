@@ -128,6 +128,12 @@ def audit(
         turns = {
             row["id"]: row for row in queries.iter_all(repositories, "turns")
         }
+        # A profile key is private state too; it must never be reclaimed as a job payload.
+        credentials = {
+            row["credential_ref"][8:] for row in queries.iter_all(repositories, "profiles")
+            if isinstance(row.get("credential_ref"), str)
+            and row["credential_ref"].startswith("private:")
+        }
         claimed: set[str] = set()
         for row in queries.iter_all(repositories, "native_contexts", include_private=True):
             relpath = row.get("private_relpath")
@@ -146,7 +152,7 @@ def audit(
             size = _size(safe_path(private_store.root, relpath))
             entries.append(Entry("expired_native_context", row["id"], size, {}))
         for identity in private_store.identities():
-            if identity in jobs or identity + ".bin" in claimed:
+            if identity in jobs or identity in credentials or identity + ".bin" in claimed:
                 continue
             size = _size(safe_path(private_store.root, identity + ".bin"))
             entries.append(Entry("orphan_job_payload", identity, size, {}))
