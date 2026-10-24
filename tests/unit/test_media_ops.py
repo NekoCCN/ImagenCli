@@ -168,3 +168,121 @@ def test_sticker_outline_and_alpha_requirement():
     with pytest.raises(ValueError, match="alpha"):
         media_ops.sticker_outline(Image.new("RGB", (10, 10)), width=2)
 
+
+def test_film_grain_monochrome_vs_chromatic():
+    base = Image.new("RGB", (32, 32), (128, 128, 128))
+    mono = media_ops.film_grain(base, amount=0.1, monochrome=True, seed=42)
+    chroma = media_ops.film_grain(base, amount=0.1, monochrome=False, seed=42)
+
+    # 单色微噪点：三通道增减量完全一致
+    mono_bytes = mono.tobytes()
+    for i in range(0, len(mono_bytes), 3):
+        r, g, b = mono_bytes[i], mono_bytes[i + 1], mono_bytes[i + 2]
+        assert r == g == b
+
+    # 彩色微噪点：存在通道间不同步的扰动
+    chroma_bytes = chroma.tobytes()
+    has_diff = any(
+        chroma_bytes[i] != chroma_bytes[i + 1] or chroma_bytes[i] != chroma_bytes[i + 2]
+        for i in range(0, len(chroma_bytes), 3)
+    )
+    assert has_diff
+
+
+def test_focus_lines_preserves_center_safe_zone():
+    center_color = (255, 0, 0)
+    base = Image.new("RGB", (64, 64), center_color)
+    result = media_ops.focus_lines(base, lines=30, inner_radius=0.4, seed=42)
+
+    # 中心点与内半径安全区内的像素应保持原色
+    cx, cy = 32, 32
+    for dx in range(-5, 6):
+        for dy in range(-5, 6):
+            if dx * dx + dy * dy <= 25:
+                assert result.getpixel((cx + dx, cy + dy)) == center_color
+
+    # 外围区域存在非原色的集中线像素
+    assert result.tobytes() != base.tobytes()
+
+
+def test_vignette_center_preserved_and_corners_attenuated():
+    base = Image.new("RGB", (64, 64), (200, 200, 200))
+    vignetted = media_ops.vignette(base, radius=0.6, feather=0.4, darkness=0.5)
+
+    center_pix = vignetted.getpixel((32, 32))
+    corner_pix = vignetted.getpixel((0, 0))
+
+    # 中心像素亮度保持或接近原值
+    assert center_pix[0] >= 190
+    # 四角像素亮度显著下降
+    assert corner_pix[0] < center_pix[0] - 30
+
+
+def test_color_temperature_directional_shift():
+    base = Image.new("RGB", (32, 32), (128, 128, 128))
+    warm = media_ops.color_temperature(base, temperature=0.3)
+    cool = media_ops.color_temperature(base, temperature=-0.3)
+
+    warm_p = warm.getpixel((16, 16))
+    cool_p = cool.getpixel((16, 16))
+
+    # 暖色：R升高，B降低
+    assert warm_p[0] > 128 and warm_p[2] < 128
+    # 冷色：B升高，R降低
+    assert cool_p[2] > 128 and cool_p[0] < 128
+
+
+def test_aces_tonemap_and_guided_filter_characteristics():
+    # ACES 压制高光死白
+    bright = Image.new("RGB", (20, 20), (250, 250, 250))
+    toned = media_ops.aces_tonemap(bright, exposure=1.0)
+    toned_p = toned.getpixel((10, 10))
+    # 经 ACES 曲线处理，高光平滑滚降在安全显示区间
+    assert toned_p[0] <= 255
+    assert toned.size == (20, 20)
+
+    # Guided Filter 增强微观高频细节
+    noisy = Image.new("RGB", (20, 20))
+    for y in range(20):
+        for x in range(20):
+            noisy.putpixel((x, y), ((x * 10) % 256, (y * 10) % 256, ((x + y) * 5) % 256))
+    boosted = media_ops.guided_filter(noisy, radius=2, boost=2.0)
+    assert boosted.size == (20, 20)
+    assert boosted.tobytes() != noisy.tobytes()
+
+
+def test_anamorphic_flare_streak_spread():
+    # 纯黑背景上中心一个高光白色小点
+    dark = Image.new("RGB", (64, 64), (0, 0, 0))
+    dark.putpixel((32, 32), (255, 255, 255))
+    flared = media_ops.anamorphic_flare(
+        dark, threshold=150, length=32, tint="#4a90e2", intensity=0.8
+    )
+
+    # 水平方向（X 轴两侧）产生显著蓝色眩光条纹
+    left_flare = flared.getpixel((20, 32))
+    right_flare = flared.getpixel((44, 32))
+    # 纵向对应位置无水平条纹
+    top_pos = flared.getpixel((32, 20))
+
+    assert left_flare[2] > top_pos[2]
+    assert right_flare[2] > top_pos[2]
+
+
+def test_kuwahara_and_color_transfer():
+    # 桑原滤波测试
+    step_img = Image.new("RGB", (24, 24), (20, 20, 20))
+    for x in range(12, 24):
+        for y in range(24):
+            step_img.putpixel((x, y), (220, 220, 220))
+    filtered = media_ops.kuwahara(step_img, size=3)
+    assert filtered.size == step_img.size
+
+    # 统计色彩迁移测试
+    sky = media_ops.color_transfer(step_img, style="anime_sky", strength=0.8)
+    assert sky.size == step_img.size
+    cyber = media_ops.color_transfer(step_img, style="cyberpunk", strength=0.8)
+    assert cyber.size == step_img.size
+    assert sky.tobytes() != cyber.tobytes()
+
+

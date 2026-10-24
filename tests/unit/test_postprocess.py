@@ -120,3 +120,28 @@ def test_advanced_pipeline_with_float_params(workspace):
     assert result["origin_manifest"]["kind"] == "postprocess"
 
 
+def test_paper_based_pipeline_execution(workspace):
+    from imagen_cli.cli.commands import postprocess
+
+    parsed = [
+        postprocess.parse_op("aces_tonemap:exposure=1.1,contrast=1.05"),
+        postprocess.parse_op("guided_filter:radius=2,eps=0.04,boost=1.6"),
+        postprocess.parse_op("kuwahara:size=3"),
+        postprocess.parse_op("anamorphic_flare:threshold=180,length=24,tint=#4a90e2"),
+        postprocess.parse_op("color_transfer:style=anime_sky,strength=0.8"),
+    ]
+    assert parsed[0]["op"] == "aces_tonemap"
+    assert parsed[0]["params"]["exposure"] == 1.1
+    assert parsed[1]["op"] == "guided_filter"
+    assert parsed[1]["params"]["boost"] == 1.6
+    assert parsed[3]["op"] == "anamorphic_flare"
+    assert parsed[3]["params"]["tint"] == "#4a90e2"
+
+    repositories, store = workspace
+    result = postprocess_service.apply(repositories, store, "art_" + "a" * 32, parsed)
+    assert result["id"] != "art_" + "a" * 32
+    assert result["origin_manifest"]["kind"] == "postprocess"
+    assert len(result["origin_manifest"]["pipeline"]) == 5
+
+
+

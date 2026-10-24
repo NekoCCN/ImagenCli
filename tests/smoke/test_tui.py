@@ -349,6 +349,37 @@ def test_transform_intro_display(deps):
     asyncio.run(run())
 
 
+def test_all_transform_presets_render_successfully(deps):
+    from imagen_cli.cli.tui.app import PRESETS, TransformScreen
+
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, TransformScreen)
+
+            for row_idx in range(len(PRESETS)):
+                screen.table.move_cursor(row=row_idx)
+                screen.render_preview()
+                view_str = str(screen.view.render())
+                intro_str = str(screen.intro_view.render())
+                status_str = str(screen.status.render())
+
+                assert "预览不可用" not in view_str, f"Preset {screen.names[row_idx]} render failed"
+                assert len(intro_str.strip()) > 0, f"Preset {screen.names[row_idx]} intro empty"
+                assert "enter" in status_str
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+    _publish_output(deps_value)
+    asyncio.run(run())
 
 
 def test_providers_refresh_models_uses_the_selection(deps):

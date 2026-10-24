@@ -1218,14 +1218,11 @@ def anamorphic_flare(
 
     gray = rgb.convert("L")
     mask = gray.point(lambda p: p if p >= t_val else 0)
-    scaled_w = max(16, w // 2)
-    scaled_h = max(8, h // 8)
-    streak = mask.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
-    streak = streak.filter(ImageFilter.GaussianBlur(radius=len_val // 4))
-    streak = streak.resize((w, h), Image.Resampling.BILINEAR)
-    streak = streak.filter(ImageFilter.BoxBlur(1))
+    # Anisotropic horizontal streak convolution
+    streak = mask.filter(ImageFilter.BoxBlur((len_val, 1)))
 
     streak_arr = np.asarray(streak, dtype=np.float32) / 255.0
+    streak_arr = np.minimum(1.0, streak_arr * (len_val * 0.5))
     scale = float(intensity) * 1.5
     flare_rgb = np.dstack([
         streak_arr * (tint_rgb[0] * scale),

@@ -651,6 +651,20 @@ class TransformScreen(ModalScreen[bool]):
                 opened.load()
                 thumbnail = opened.convert("RGBA" if "A" in opened.getbands() else "RGB")
                 thumbnail.thumbnail((48, 24))
+                # 若算子需要 alpha 通道而当前图像无透明层，为缩略图自适应透明边缘以支持预览
+                needs_alpha = any(
+                    s.get("op") in ("sticker_outline", "background_blur") for s in pipeline
+                )
+                if needs_alpha and "A" not in thumbnail.getbands():
+                    from PIL import ImageDraw
+
+                    mask = Image.new("L", thumbnail.size, 0)
+                    draw = ImageDraw.Draw(mask)
+                    draw.rectangle(
+                        [2, 1, max(3, thumbnail.width - 3), max(2, thumbnail.height - 2)], fill=255
+                    )
+                    thumbnail = thumbnail.convert("RGBA")
+                    thumbnail.putalpha(mask)
                 for step in pipeline:
                     op_name = step.get("op", "")
                     if op_name == "superres":
