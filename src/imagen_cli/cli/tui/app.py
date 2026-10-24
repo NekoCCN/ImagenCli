@@ -77,6 +77,24 @@ PRESETS: dict[str, list[dict[str, Any]]] = {
             "params": {"radius": 1.0, "k": 1.6, "gamma": 0.98, "threshold": 0.02},
         },
     ],
+    "ACES电影级色调": [
+        {"op": "aces_tonemap", "params": {"exposure": 1.0, "contrast": 1.05}},
+    ],
+    "引导滤波细节增强": [
+        {"op": "guided_filter", "params": {"radius": 4, "eps": 0.04, "boost": 1.5}},
+    ],
+    "桑原二次元平涂": [
+        {"op": "kuwahara", "params": {"size": 5}},
+    ],
+    "剧场版宽银幕眩光": [
+        {
+            "op": "anamorphic_flare",
+            "params": {"threshold": 215, "length": 36, "tint": "#4a90e2", "intensity": 0.65},
+        },
+    ],
+    "日系晴空色彩迁移": [
+        {"op": "color_transfer", "params": {"style": "anime_sky", "strength": 0.8}},
+    ],
     "复古90年代胶片": [
         {"op": "filmic_tone", "params": {"lift_black": 10, "compress_white": 238, "warmth": 0.2}},
         {"op": "vignette", "params": {"radius": 0.7, "feather": 0.5, "darkness": 0.45}},
@@ -570,6 +588,7 @@ class TransformScreen(ModalScreen[bool]):
         self.table: DataTable[Any] = DataTable()
         self.status = Static("")
         self.view = Static("")
+        self.intro_view = Static("", id="transform-intro-view")
         self.params_view = Static("", id="transform-params-view")
 
     def compose(self) -> ComposeResult:
@@ -579,6 +598,7 @@ class TransformScreen(ModalScreen[bool]):
                 yield self.table
                 with Vertical(id="transform-preview-col"):
                     yield self.view
+                    yield self.intro_view
                     yield self.params_view
                     yield self.status
             yield Static("↑↓ 切换 · p 调参 · enter 应用 · esc 取消", classes="panel-hint")
@@ -622,6 +642,10 @@ class TransformScreen(ModalScreen[bool]):
             return
         name = self.names[row]
         pipeline = self.pipelines.get(name, PRESETS[name])
+        from imagen_cli.application import operator_catalog
+
+        intro_text = operator_catalog.get_intro_text(name)
+        self.intro_view.update(Text.from_markup(intro_text))
         try:
             with Image.open(self.path) as opened:
                 opened.load()
@@ -1331,6 +1355,10 @@ class WorkbenchApp(App[None]):
     #transform { width: 90%; max-width: 104; height: 90%; overflow: hidden; }
     #transform DataTable { width: 32; height: 1fr; }
     #transform-preview-col { width: 1fr; margin-left: 2; height: 1fr; }
+    #transform-intro-view {
+        height: auto; max-height: 5; overflow-y: auto; color: #ddd8d4;
+        margin: 1 0; padding: 0 1; background: #0f131a; border-left: solid #f2a6c0;
+    }
     #transform-params-view { height: 4; overflow-y: auto; color: #8e97a4; margin-top: 1; }
     #param-form { max-width: 82; max-height: 84%; overflow-y: auto; }
     #param-form .field-label { width: 24; }

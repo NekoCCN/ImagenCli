@@ -319,6 +319,37 @@ def test_transform_param_tuning(deps):
     assert pipeline[0]["params"]["scale"] == 8
 
 
+def test_transform_intro_display(deps):
+    from imagen_cli.cli.tui.app import TransformScreen
+
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, TransformScreen)
+            intro_text = str(screen.intro_view.render())
+            assert "像素化" in intro_text or "Pixelate" in intro_text
+            assert "原理" in intro_text
+            assert "适用" in intro_text
+
+            await pilot.press("down")
+            await pilot.pause()
+            new_intro = str(screen.intro_view.render())
+            assert len(new_intro) > 0
+            await pilot.press("escape")
+            await pilot.pause()
+
+    _publish_output(deps_value)
+    asyncio.run(run())
+
+
+
 
 def test_providers_refresh_models_uses_the_selection(deps):
     deps_value, _ = deps

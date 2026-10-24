@@ -1071,6 +1071,230 @@ def lineart_extract(image: Image.Image, *, radius: float = 1.0, k: float = 1.6,
     return Image.frombytes("L", gray.size, bytes(out)).convert("RGB")
 
 
+def aces_tonemap(
+    image: Image.Image,
+    *,
+    exposure: float = 1.0,
+    contrast: float = 1.0,
+) -> Image.Image:
+    """ACES (Academy Color Encoding System) filmic tone mapping curve.
+
+    Stephen Hill & Krzysztof Narkowicz (SIGGRAPH 2015).
+    Preserves cinematic highlight roll-off and shadows while eliminating plastic over-saturation.
+    """
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32) / 255.0
+    x = arr * max(0.1, exposure)
+    a, b, c, d, e = 2.51, 0.03, 2.43, 0.59, 0.14
+    mapped = (x * (a * x + b)) / (x * (c * x + d) + e)
+    mapped = np.clip(mapped, 0.0, 1.0)
+    if contrast != 1.0:
+        mapped = np.clip((mapped - 0.5) * max(0.2, contrast) + 0.5, 0.0, 1.0)
+    res = Image.fromarray((mapped * 255.0).astype(np.uint8), "RGB")
+    if alpha is not None:
+        res = res.convert("RGBA")
+        res.putalpha(alpha)
+    return res
+
+
+def guided_filter(
+    image: Image.Image,
+    *,
+    radius: int = 4,
+    eps: float = 0.04,
+    boost: float = 1.5,
+) -> Image.Image:
+    """Guided image filter for edge-preserving texture and detail recovery.
+
+    He, Sun & Tang (ECCV 2010 / TPAMI 2013).
+    Restores fine hairs, skin micro-texture and fabrics without halo artifacts.
+    """
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    r = max(1, int(radius))
+    eps_val = max(1e-5, float(eps))
+    boost_val = float(boost)
+
+    gray = rgb.convert("L")
+    p = np.asarray(gray, dtype=np.float32) / 255.0
+    mean_p = np.asarray(gray.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+    p2 = Image.fromarray(np.clip(p * p * 255.0, 0, 255).astype(np.uint8))
+    mean_p2 = np.asarray(p2.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+    var_p = np.maximum(0.0, mean_p2 - mean_p * mean_p)
+
+    a_coeff = var_p / (var_p + eps_val)
+    b_coeff = mean_p - a_coeff * mean_p
+
+    img_a = Image.fromarray(np.clip(a_coeff * 255.0, 0, 255).astype(np.uint8))
+    img_b = Image.fromarray(np.clip(b_coeff * 255.0, 0, 255).astype(np.uint8))
+    mean_a = np.asarray(img_a.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+    mean_b = np.asarray(img_b.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+
+    base_lum = mean_a * p + mean_b
+    high_freq = (p - base_lum) * boost_val
+
+    rgb_arr = np.asarray(rgb, dtype=np.float32)
+    enhanced = np.clip(rgb_arr + np.dstack([high_freq * 255.0] * 3), 0, 255).astype(np.uint8)
+    res = Image.fromarray(enhanced, "RGB")
+    if alpha is not None:
+        res = res.convert("RGBA")
+        res.putalpha(alpha)
+    return res
+
+
+def kuwahara(
+    image: Image.Image,
+    *,
+    size: int = 5,
+) -> Image.Image:
+    """Kuwahara edge-preserving smoothing filter for anime & cel-shading painting style.
+
+    Papari et al. (IEEE TIP 2007) / Kyprianidis (2012).
+    Smooths uniform regions while preserving razor-sharp character contours and lineart.
+    """
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    r = max(1, int(size) // 2)
+    gray = rgb.convert("L")
+    w, h = rgb.size
+    rgb_arr = np.asarray(rgb, dtype=np.float32)
+
+    offsets = [(-r // 2, -r // 2), (r // 2, -r // 2), (-r // 2, r // 2), (r // 2, r // 2)]
+    means_rgb = []
+    variances = []
+    for ox, oy in offsets:
+        shifted_img = gray.transform((w, h), Image.Transform.AFFINE, (1, 0, ox, 0, 1, oy))
+        m_l = np.asarray(shifted_img.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+        shifted_l2 = Image.fromarray(np.clip(m_l * m_l * 255.0, 0, 255).astype(np.uint8))
+        m_l2 = np.asarray(shifted_l2.filter(ImageFilter.BoxBlur(r)), dtype=np.float32) / 255.0
+        v = np.maximum(0.0, m_l2 - m_l * m_l)
+        variances.append(v)
+
+        shifted_rgb = rgb.transform((w, h), Image.Transform.AFFINE, (1, 0, ox, 0, 1, oy))
+        m_rgb = np.asarray(shifted_rgb.filter(ImageFilter.BoxBlur(r)), dtype=np.float32)
+        means_rgb.append(m_rgb)
+
+    var_stack = np.stack(variances, axis=-1)
+    min_idx = np.argmin(var_stack, axis=-1)
+    out_arr = np.zeros_like(rgb_arr)
+    for i in range(4):
+        mask = (min_idx == i)[:, :, np.newaxis]
+        out_arr += means_rgb[i] * mask
+
+    res = Image.fromarray(np.clip(out_arr, 0, 255).astype(np.uint8), "RGB")
+    if alpha is not None:
+        res = res.convert("RGBA")
+        res.putalpha(alpha)
+    return res
+
+
+def anamorphic_flare(
+    image: Image.Image,
+    *,
+    threshold: int = 215,
+    length: int = 36,
+    tint: str = "#4a90e2",
+    intensity: float = 0.65,
+) -> Image.Image:
+    """Anamorphic widescreen horizontal streak flare and optical diffraction.
+
+    Keshmirian (2008). Simulates horizontal cinema flares on bright specular highlights.
+    """
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    t_val = min(254, max(50, int(threshold)))
+    len_val = max(8, int(length))
+    tint_rgb = _colour(tint)
+
+    gray = rgb.convert("L")
+    mask = gray.point(lambda p: p if p >= t_val else 0)
+    scaled_w = max(16, w // 2)
+    scaled_h = max(8, h // 8)
+    streak = mask.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
+    streak = streak.filter(ImageFilter.GaussianBlur(radius=len_val // 4))
+    streak = streak.resize((w, h), Image.Resampling.BILINEAR)
+    streak = streak.filter(ImageFilter.BoxBlur(1))
+
+    streak_arr = np.asarray(streak, dtype=np.float32) / 255.0
+    scale = float(intensity) * 1.5
+    flare_rgb = np.dstack([
+        streak_arr * (tint_rgb[0] * scale),
+        streak_arr * (tint_rgb[1] * scale),
+        streak_arr * (tint_rgb[2] * scale),
+    ])
+
+    base_arr = np.asarray(rgb, dtype=np.float32)
+    blended = np.clip(base_arr + flare_rgb, 0, 255).astype(np.uint8)
+    res = Image.fromarray(blended, "RGB")
+    if alpha is not None:
+        res = res.convert("RGBA")
+        res.putalpha(alpha)
+    return res
+
+
+def color_transfer(
+    image: Image.Image,
+    *,
+    style: str = "anime_sky",
+    strength: float = 1.0,
+) -> Image.Image:
+    """Statistical color transfer in Ruderman opponent/Lab space.
+
+    Reinhard et al. (IEEE CGA 2001). Transfers filmic or anime palettes naturally.
+    """
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32) / 255.0
+
+    lum_l = (arr[:, :, 0] + arr[:, :, 1] + arr[:, :, 2]) / np.sqrt(3)
+    a = (arr[:, :, 0] + arr[:, :, 1] - 2 * arr[:, :, 2]) / np.sqrt(6)
+    b = (arr[:, :, 0] - arr[:, :, 1]) / np.sqrt(2)
+
+    mu_l, s_l = float(np.mean(lum_l)), float(np.std(lum_l)) + 1e-5
+    mu_a, s_a = float(np.mean(a)), float(np.std(a)) + 1e-5
+    mu_b, s_b = float(np.mean(b)), float(np.std(b)) + 1e-5
+
+    presets_stats: dict[str, tuple[float, float, float, float, float, float]] = {
+        "anime_sky": (0.60, 0.22, -0.05, 0.18, -0.02, 0.16),
+        "cyberpunk": (0.45, 0.26, 0.12, 0.28, -0.15, 0.25),
+        "vintage_warm": (0.52, 0.20, 0.04, 0.14, 0.08, 0.15),
+        "morandi": (0.50, 0.14, 0.01, 0.08, 0.02, 0.09),
+    }
+    t_mu_l, t_s_l, t_mu_a, t_s_a, t_mu_b, t_s_b = presets_stats.get(
+        style, presets_stats["anime_sky"]
+    )
+
+    alpha_ratio = min(2.0, max(0.5, t_s_l / s_l))
+    new_lum_l = (lum_l - mu_l) * alpha_ratio + t_mu_l
+    new_a = (a - mu_a) * min(2.0, max(0.5, t_s_a / s_a)) + t_mu_a
+    new_b = (b - mu_b) * min(2.0, max(0.5, t_s_b / s_b)) + t_mu_b
+
+    r_out = new_lum_l / np.sqrt(3) + new_a / np.sqrt(6) + new_b / np.sqrt(2)
+    g_out = new_lum_l / np.sqrt(3) + new_a / np.sqrt(6) - new_b / np.sqrt(2)
+    b_out = new_lum_l / np.sqrt(3) - 2 * new_a / np.sqrt(6)
+
+    mapped_rgb = np.clip(np.dstack([r_out, g_out, b_out]), 0.0, 1.0)
+    str_val = min(1.0, max(0.0, float(strength)))
+    final_arr = (arr * (1.0 - str_val) + mapped_rgb * str_val) * 255.0
+    res = Image.fromarray(np.clip(final_arr, 0, 255).astype(np.uint8), "RGB")
+    if alpha is not None:
+        res = res.convert("RGBA")
+        res.putalpha(alpha)
+    return res
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
     "resize": resize, "crop": crop, "trim": trim, "pad": pad, "seamless": seamless,
     "orient": orient, "perspective": perspective, "chroma_key": chroma_key,
@@ -1093,7 +1317,10 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "color_temperature": color_temperature, "focus_lines": focus_lines,
     "screentone": screentone, "sticker_outline": sticker_outline,
     "lineart_extract": lineart_extract,
+    "aces_tonemap": aces_tonemap, "guided_filter": guided_filter, "kuwahara": kuwahara,
+    "anamorphic_flare": anamorphic_flare, "color_transfer": color_transfer,
 }
+
 
 def _optional_ops() -> dict[str, Callable[..., Image.Image]]:
     import importlib

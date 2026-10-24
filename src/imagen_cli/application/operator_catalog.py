@@ -560,6 +560,167 @@ OPERATORS: list[OperatorItem] = [
             ),
         ],
     ),
+    # --- Advanced Paper-based Ops ---
+    OperatorItem(
+        key="aces_tonemap",
+        name="ACES 电影级色调映射 (ACES Filmic Tone)",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="好莱坞电影工业级色调映射，完美高光滚降与胶片暗部，消除高光死白",
+        default_op="aces_tonemap",
+        default_params={"exposure": 1.0, "contrast": 1.0},
+        parameters=[
+            Parameter(
+                "exposure",
+                "曝光系数",
+                "float",
+                1.0,
+                min_value=0.2,
+                max_value=3.0,
+                description="整体亮度曝光缩放倍数",
+            ),
+            Parameter(
+                "contrast",
+                "中灰对比度",
+                "float",
+                1.0,
+                min_value=0.5,
+                max_value=2.0,
+                description="胶片中间调对比度微调",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="guided_filter",
+        name="引导滤波保边纹理 (Guided Filter)",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="何恺明经典引导滤波，微观纹理与发丝细节恢复，无边缘光晕伪影",
+        default_op="guided_filter",
+        default_params={"radius": 4, "eps": 0.04, "boost": 1.5},
+        parameters=[
+            Parameter(
+                "radius",
+                "局部半径",
+                "int",
+                4,
+                min_value=1,
+                max_value=16,
+                description="局部均值方差引导半径",
+            ),
+            Parameter(
+                "eps",
+                "平滑正则化",
+                "float",
+                0.04,
+                min_value=0.001,
+                max_value=0.2,
+                description="平滑阈值，较小值能保留更硬的边缘",
+            ),
+            Parameter(
+                "boost",
+                "细节增益",
+                "float",
+                1.5,
+                min_value=0.5,
+                max_value=3.0,
+                description="高频微观纹理恢复放大倍率",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="kuwahara",
+        name="桑原动漫平涂滤波 (Kuwahara Filter)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="四象限各向异性滤波，保留锋利线稿轮廓的同时平滑色块，呈现赛璐璐手绘插画风",
+        default_op="kuwahara",
+        default_params={"size": 5},
+        parameters=[
+            Parameter(
+                "size",
+                "窗口尺寸",
+                "int",
+                5,
+                min_value=3,
+                max_value=15,
+                description="象限滤波窗口大小（奇数）",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="anamorphic_flare",
+        name="剧场版宽银幕眩光 (Anamorphic Flare)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="模拟好莱坞变形宽银幕镜头的标志性横向高光条纹与光学星芒，增强画面张力",
+        default_op="anamorphic_flare",
+        default_params={"threshold": 215, "length": 36, "tint": "#4a90e2", "intensity": 0.65},
+        parameters=[
+            Parameter(
+                "threshold",
+                "高光阈值",
+                "int",
+                215,
+                min_value=120,
+                max_value=250,
+                description="产生眩光的高光亮度起征点",
+            ),
+            Parameter(
+                "length",
+                "眩光横向长度",
+                "int",
+                36,
+                min_value=10,
+                max_value=120,
+                description="变形镜头横向条纹拉伸长度",
+            ),
+            Parameter(
+                "tint",
+                "眩光色调",
+                "str",
+                "#4a90e2",
+                description="十六进制色彩，经典蓝青色或香槟金",
+            ),
+            Parameter(
+                "intensity",
+                "混合强度",
+                "float",
+                0.65,
+                min_value=0.1,
+                max_value=1.5,
+                description="眩光叠加不透明度",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="color_transfer",
+        name="色彩空间风格迁移 (Color Transfer)",
+        category="photo",
+        category_label=CATEGORIES["photo"],
+        description="基于 Reinhard 统计色彩迁移，赋予画面日系晴空、赛博霓虹或复古暖调氛围",
+        default_op="color_transfer",
+        default_params={"style": "anime_sky", "strength": 1.0},
+        parameters=[
+            Parameter(
+                "style",
+                "调色风格",
+                "choice",
+                "anime_sky",
+                choices=["anime_sky", "cyberpunk", "vintage_warm", "morandi"],
+                description="预设色彩统计分布",
+            ),
+            Parameter(
+                "strength",
+                "迁移浓度",
+                "float",
+                1.0,
+                min_value=0.1,
+                max_value=1.0,
+                description="风格迁移融合权重",
+            ),
+        ],
+    ),
 ]
 
 OPERATORS_BY_OP: dict[str, OperatorItem] = {item.default_op: item for item in OPERATORS}
@@ -568,3 +729,153 @@ OPERATORS_BY_OP: dict[str, OperatorItem] = {item.default_op: item for item in OP
 def get_operator_item(op: str) -> OperatorItem | None:
     return OPERATORS_BY_OP.get(op)
 
+
+# -------------------------------------------------------------------------
+# Comprehensive Introductions for Presets & Operators
+# -------------------------------------------------------------------------
+
+INTROS: dict[str, dict[str, str]] = {
+    "像素化": {
+        "title": "像素化 (Pixelate)",
+        "summary": "经典复古 8-bit / 16-bit 游戏像素点阵颗粒化",
+        "principle": "块状降采样与马赛克网格重采样",
+        "scenarios": "复古像素艺术、像素游戏头像、局部马赛克",
+    },
+    "调色板": {
+        "title": "调色板减色 (Color Palette)",
+        "summary": "降低色彩深度，提取有限色板与抖动过渡",
+        "principle": "中值切分色彩量化与 Floyd-Steinberg 扩散",
+        "scenarios": "像素复古风、复古印章、限色插画",
+    },
+    "线稿": {
+        "title": "经典高反差线稿 (Classic Lineart)",
+        "summary": "提取图像骨架边缘并反转为黑白手绘线稿",
+        "principle": "高通滤波边缘检测 + 自动色阶拉伸 + 反色处理",
+        "scenarios": "快速提取线稿、填色练习、着色线稿底图",
+    },
+    "抖动": {
+        "title": "有序抖动 (Ordered Dither)",
+        "summary": "早期单色或限色显示屏经典噪点抖动艺术",
+        "principle": "Atkinson / Floyd 误差扩散矩阵算法",
+        "scenarios": "点阵印刷风、赛博朋克终端感、复古海报",
+    },
+    "锐化": {
+        "title": "反虚光锐化 (Unsharp Sharpen)",
+        "summary": "增强画面微观边缘对比，提升视觉聚焦清晰度",
+        "principle": "高斯差分钝化掩模 (Unsharp Masking)",
+        "scenarios": "弥补镜头软化、提高小图清晰度",
+    },
+    "赛璐璐": {
+        "title": "赛璐璐分色 (Cel Shading)",
+        "summary": "将真实光影离散化为阶梯状动漫阴影与硬边",
+        "principle": "色彩阶梯量化 + 索贝尔边缘勾线",
+        "scenarios": "写实转动漫、扁平二次元动画风格化",
+    },
+    "去AI塑料感": {
+        "title": "去AI塑料感 (Anti-AI Film Look)",
+        "summary": "消除扩散模型常见的平滑塑料皮、高光死白与糖精色彩",
+        "principle": "模拟银盐微颗粒打乱平滑 + S曲线压制死白溢出 + 高光漫射保边 + 光学镜头色散",
+        "scenarios": "AI 二次元特写立绘、写实人像，赋予画面沉稳厚重的胶片物理呼吸感",
+    },
+    "ACES电影级色调": {
+        "title": "ACES电影级色调 (ACES Filmic Tone)",
+        "summary": "好莱坞与顶级现代渲染引擎标准的电影工业级色调映射",
+        "principle": (
+            "Stephen Hill & Krzysztof Narkowicz (SIGGRAPH 2015)，完美的胶片高光滚降与渐进暗部"
+        ),
+        "scenarios": "大光比场景、夕阳夜景、消除高光刺眼与死白",
+    },
+    "引导滤波细节增强": {
+        "title": "引导滤波细节增强 (Guided Filter)",
+        "summary": "无光晕伪影的高频保边微纹理恢复与细节强化",
+        "principle": "何恺明等 (ECCV 2010)，基于局部线性模型精准恢复微观高频细节",
+        "scenarios": "发丝微光、眼眸纹理、服装布料质感，消除AI过度平滑抹脸感",
+    },
+    "桑原二次元平涂": {
+        "title": "桑原二次元平涂 (Kuwahara Filter)",
+        "summary": "保持角色轮廓边缘锐利的同时平滑内部色块，呈现纯净的手绘插画质感",
+        "principle": "Papari et al. (IEEE TIP 2007)，四象限最小局部方差滤波",
+        "scenarios": "二次元插画背景平涂、厚涂转赛璐璐风、消除AI碎噪点",
+    },
+    "剧场版宽银幕眩光": {
+        "title": "剧场版宽银幕眩光 (Anamorphic Flare)",
+        "summary": "模拟好莱坞变形宽银幕镜头的标志性横向高光条纹与光学星芒",
+        "principle": "Keshmirian (2008) 镜头衍射模拟，沿横轴产生冷蓝或香槟金横向光斑",
+        "scenarios": "动漫战斗高潮、舞台灯光、反光点星芒、大片电影海报感",
+    },
+    "日系晴空色彩迁移": {
+        "title": "日系晴空色彩迁移 (Color Transfer)",
+        "summary": "新海诚风清爽明快的通透蓝天与暖阳金光氛围",
+        "principle": "Reinhard et al. (IEEE CGA 2001)，去相关色彩空间统计分布迁移",
+        "scenarios": "暗沉或灰蒙画面快速转为通透日系动漫风",
+    },
+    "日系通透空气感": {
+        "title": "日系通透空气感 (Anime Air Glow)",
+        "summary": "京都动画风格的清新明快、清透阳光与柔和光晕",
+        "principle": "微暖色温偏移 + 柔光高光漫射 + 柔和暗角",
+        "scenarios": "日常治愈系插画、风景原画、唯美立绘",
+    },
+    "热血集中线": {
+        "title": "热血集中线 (Manga Focus Lines)",
+        "summary": "少年热血漫画经典的视觉焦点放射速度线",
+        "principle": "极坐标空间射线发射算法，留出中心主体安全区",
+        "scenarios": "动作特写、出招画面、情绪爆发、夸张冲击力表达",
+    },
+    "黑白漫画网点": {
+        "title": "黑白漫画网点 (Manga Screentone)",
+        "summary": "实体黑白漫画与印刷杂志的 45 度半色调网点纸效果",
+        "principle": "XDoG 线稿提取 + 45° 调频半色调光栅算法",
+        "scenarios": "单行本插页、同人本印刷风、黑白报纸风",
+    },
+    "立绘贴纸白边": {
+        "title": "立绘贴纸白边 (Die-cut Sticker)",
+        "summary": "游戏立绘切边、周边贴纸或亚克力徽章常用的白边描边与柔和投影",
+        "principle": "Alpha 距离场二值形态学膨胀 + 环境遮蔽柔和阴影",
+        "scenarios": "角色表情包、透明底立绘导出、徽章与周边印制预览",
+    },
+    "XDoG动漫线稿": {
+        "title": "XDoG动漫手绘线稿 (XDoG Lineart)",
+        "summary": "模拟铅笔在纸上绘制的动漫草稿与线稿提取",
+        "principle": "扩展高斯差分 (Extended Difference of Gaussians)，对暗部轮廓高灵敏",
+        "scenarios": "草稿线稿提取、填色底稿、线稿临摹学习",
+    },
+    "复古90年代胶片": {
+        "title": "复古90年代胶片 (Retro 90s Film)",
+        "summary": "胶片单反相机的暖调怀旧质感与微弱边缘暗角",
+        "principle": "胶片暖调色温偏移 + 颗粒模拟 + 镜头暗角",
+        "scenarios": "拍立得、复古街拍、千禧年怀旧插画",
+    },
+    "动漫超分辨率 4x": {
+        "title": "动漫超分辨率 4x (Anime Super-Resolution)",
+        "summary": "基于 RealESRGAN-anime ONNX 模型的 4 倍无损超分重建",
+        "principle": "残差密集神经网络推理，专精二次元平滑边缘与纯净色块重建",
+        "scenarios": "低分辨率动漫截图放大、壁纸高清化、印刷级分辨率重建",
+    },
+    "通用超分辨率 4x": {
+        "title": "通用超分辨率 4x (General Super-Resolution)",
+        "summary": "基于 RealESRGAN 通用写实模型的 4 倍细节超分重建",
+        "principle": "深度神经网络纹理超分辨率重构，兼顾真实细节与清晰度",
+        "scenarios": "真实摄影照片、写实人像与宏大场景 4K 放大",
+    },
+}
+
+
+def get_intro_text(key: str) -> str:
+    """Return formatted introductory text for TUI transform screen."""
+    item = INTROS.get(key)
+    if item:
+        return (
+            f"[bold cyan]✦ {item['title']}[/]\n"
+            f"[white]{item['summary']}[/]\n"
+            f"[dim]原理：{item['principle']}[/]\n"
+            f"[dim green]适用：{item['scenarios']}[/]"
+        )
+    # Fallback to operator item if key matches op
+    op_item = get_operator_item(key)
+    if op_item:
+        return (
+            f"[bold cyan]✦ {op_item.name}[/]\n"
+            f"[white]{op_item.description}[/]\n"
+            f"[dim]分类：{op_item.category_label}[/]"
+        )
+    return "[dim]选择变换预设查看介绍与效果[/]"

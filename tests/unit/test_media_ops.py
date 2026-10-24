@@ -76,6 +76,11 @@ CASES = {
     "focus_lines": {"lines": 20, "inner_radius": 0.3, "max_width": 2, "seed": 42},
     "screentone": {"frequency": 10, "angle": 45.0},
     "lineart_extract": {"radius": 1.0, "k": 1.6, "gamma": 0.98, "threshold": 0.02},
+    "aces_tonemap": {"exposure": 1.0, "contrast": 1.1},
+    "guided_filter": {"radius": 2, "eps": 0.04, "boost": 1.5},
+    "kuwahara": {"size": 3},
+    "anamorphic_flare": {"threshold": 180, "length": 10, "tint": "#4a90e2", "intensity": 0.5},
+    "color_transfer": {"style": "anime_sky", "strength": 0.8},
 }
 
 
