@@ -37,45 +37,60 @@ class OperatorItem:
 
 
 CATEGORIES: dict[str, str] = {
-    "preset": "🌟 精选管线预设 (Presets)",
-    "anti_ai": "🧬 生成模型伪影抑制 (Generative Artifact Suppression)",
-    "acg": "🎨 非真实感渲染与动漫表现 (Non-Photorealistic Rendering & Anime Optics)",
-    "photo": "🌈 色彩空间变换与色调映射 (Color Space Transformation & Tone Mapping)",
-    "art": "📐 空间域与频域滤波 (Spatial & Frequency Domain Filtering)",
-    "superres": "🚀 深度神经超分辨率 (Deep Super-Resolution)",
+    "preset": "精选管线预设 (Presets)",
+    "anti_ai": "去AI感 (Generative Artifact Suppression)",
+    "acg": "二次元动漫 (Non-Photorealistic Rendering & Anime Optics)",
+    "photo": "色彩光影 (Color Space Transformation & Tone Mapping)",
+    "art": "风格滤波 (Spatial & Frequency Domain Filtering)",
+    "superres": "超分辨率 (Deep Super-Resolution)",
 }
 
 # Rich presets mapping
 PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     "去AI塑料感 (Anti-AI Organic)": [
         {
+            "op": "surface_blur",
+            "params": {"radius": 3, "threshold": 18.0, "blend": 0.8},
+        },
+        {
             "op": "filmic_tone",
-            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
+            "params": {"lift_black": 2, "compress_white": 250, "saturation": 0.98},
         },
         {
             "op": "de_ai_bloom",
-            "params": {"radius": 6, "intensity": 0.12, "threshold": 220, "preserve_lines": True},
+            "params": {"radius": 4, "intensity": 0.08, "threshold": 230, "preserve_lines": True},
         },
-        {
-            "op": "film_grain",
-            "params": {"amount": 0.03, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
-        },
-        {"op": "chromatic_aberration", "params": {"shift": 1, "radial": True}},
     ],
     "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": [
         {"op": "anti_checkerboard", "params": {"strength": 0.3, "cutoff": 0.85}},
         {"op": "de_haloing", "params": {"radius": 2, "strength": 0.5, "threshold": 25}},
         {
+            "op": "surface_blur",
+            "params": {"radius": 4, "threshold": 20.0, "blend": 0.85},
+        },
+        {
             "op": "subsurface_scattering",
-            "params": {"radius": 4, "scatter_strength": 0.15, "skin_only": True},
+            "params": {"radius": 3, "scatter_strength": 0.12, "skin_only": True},
         },
         {
             "op": "filmic_tone",
-            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
+            "params": {"lift_black": 2, "compress_white": 250, "saturation": 0.98},
+        },
+    ],
+    "二次元平涂去杂 (Anime Cel Surface Smoothing)": [
+        {
+            "op": "surface_blur",
+            "params": {"radius": 4, "threshold": 22.0, "blend": 0.9},
         },
         {
-            "op": "film_grain",
-            "params": {"amount": 0.025, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
+            "op": "color_purity",
+            "params": {"shadow_desat": 0.3, "shadow_threshold": 65.0, "vibrance_boost": 0.12},
+        },
+    ],
+    "动漫色彩提纯 (Anime Color Purity)": [
+        {
+            "op": "color_purity",
+            "params": {"shadow_desat": 0.4, "shadow_threshold": 70.0, "vibrance_boost": 0.2},
         },
     ],
     "日系通透空气感 (Shinkai Airy)": [
@@ -1041,6 +1056,82 @@ OPERATORS: list[OperatorItem] = [
             ),
         ],
     ),
+    OperatorItem(
+        key="surface_blur",
+        name="表面去杂平滑 (Surface Blur)",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="基于色差引导高斯权重与中值滤波结合的二次元色块去杂色保边算子。",
+        default_op="surface_blur",
+        default_params={"radius": 4, "threshold": 20.0, "blend": 0.85},
+        parameters=[
+            Parameter(
+                "radius",
+                "平滑半径",
+                "int",
+                4,
+                min_value=1,
+                max_value=30,
+                description="平滑滤波空间邻域核半径",
+            ),
+            Parameter(
+                "threshold",
+                "色差阈值",
+                "float",
+                20.0,
+                min_value=0.0,
+                max_value=100.0,
+                description="色差容差阈值，低于该差值被判定为同色块并熨平均匀",
+            ),
+            Parameter(
+                "blend",
+                "混合强度",
+                "float",
+                0.85,
+                min_value=0.0,
+                max_value=1.0,
+                description="平滑效果与原图的融合权重系数",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="color_purity",
+        name="动漫色彩提纯 (Color Purity)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="基于暗部照度掩模的阴影去脏与色彩纯度自适应增强算子。",
+        default_op="color_purity",
+        default_params={"shadow_desat": 0.35, "shadow_threshold": 70.0, "vibrance_boost": 0.15},
+        parameters=[
+            Parameter(
+                "shadow_desat",
+                "暗部去杂色",
+                "float",
+                0.35,
+                min_value=0.0,
+                max_value=1.0,
+                description="阴影区域杂乱反光的饱和度衰减比例",
+            ),
+            Parameter(
+                "shadow_threshold",
+                "暗部范围",
+                "float",
+                70.0,
+                min_value=0.0,
+                max_value=255.0,
+                description="定义阴影暗部的照度阈值界限",
+            ),
+            Parameter(
+                "vibrance_boost",
+                "色彩提纯",
+                "float",
+                0.15,
+                min_value=-1.0,
+                max_value=1.0,
+                description="主体未饱和色彩的自然通透度增益系数",
+            ),
+        ],
+    ),
 ]
 
 OPERATORS_BY_OP: dict[str, OperatorItem] = {item.default_op: item for item in OPERATORS}
@@ -1120,31 +1211,57 @@ INTROS: dict[str, dict[str, str]] = {
     "去AI塑料感": {
         "title": "去AI塑料感 (Anti-AI Organic)",
         "summary": (
-            "本预设管线复合胶片非线性色阶映射、漫反射保边光晕与感光噪点，"
-            "抑制生成模型的均一塑料质感。"
+            "本预设管线复合表面保边去杂、非线性软肩色阶与微量光晕，"
+            "抑制生成模型的油腻塑料质感与微观杂色。"
         ),
         "principle": (
-            "基于三次 Hermite 曲线压缩死白过冲，叠加高斯漫射光晕与照度加"
-            "权银盐感光噪点。"
+            "基于色差引导高斯保边表面平滑消除浮动色斑，结合高光软肩滚降"
+            "与极高光微漫射恢复自然光影。"
         ),
         "scenarios": (
-            "适用于消除扩散模型生成人像的蜡质反光与极端高光死白，赋予画面"
-            "真实感光特性。"
+            "适用于消除扩散模型生成画面的蜡质油光与不自然高光，呈现干净通透质感。"
         ),
     },
     "抗AI生成伪影综合治理": {
         "title": "抗AI伪影综合 (Anti-AI Artifacts)",
         "summary": (
-            "本预设管线结合频域陷波滤波、次表面漫反射、反锐化光晕约束与胶"
-            "片色阶，多维度消除生成伪影。"
+            "本预设管线结合频域陷波滤波、反边缘振铃、表面去杂平滑与"
+            "胶片色阶，多维度消除生成伪影。"
         ),
         "principle": (
-            "复合 2D-FFT 频域陷波滤除棋盘格谐波、波长分离次表面散射抑制塑料皮，"
-            "以及形态学极值抑制边缘振铃。"
+            "复合 2D-FFT 频域陷波滤除转置卷积棋盘格，结合形态学反振铃"
+            "与表面保边平滑消除结构伪影。"
         ),
         "scenarios": (
-            "适用于高要求 AI 生成作品的全流程伪影净化，还原生物组织温润度"
-            "与物理光学成像特性。"
+            "适用于高画质 AI 生成作品的全流程伪影净化，还原平滑纯净的画面层次。"
+        ),
+    },
+    "二次元平涂去杂": {
+        "title": "二次元平涂去杂 (Anime Cel Smoothing)",
+        "summary": (
+            "本预设管线专为二次元插画平涂设计，消除AI在色块内部生成的"
+            "细碎杂色斑驳与暗部脏色。"
+        ),
+        "principle": (
+            "基于色差引导表面模糊平滑色块内部微小杂斑，结合暗部照度掩模"
+            "衰减阴影杂乱饱和度以保全线条锐度。"
+        ),
+        "scenarios": (
+            "适用于二次元动漫角色、日系赛璐珞立绘及平涂背景消除AI杂色噪点。"
+        ),
+    },
+    "动漫色彩提纯": {
+        "title": "动漫色彩提纯 (Anime Color Purity)",
+        "summary": (
+            "本预设管线衰减暗部多余杂乱反光饱和度，提纯明亮主体未饱和色彩，"
+            "重构二次元画作的清爽通透感。"
+        ),
+        "principle": (
+            "基于非线性照度掩模对阴影暗部实施选择性去饱和，并结合色差权重"
+            "对明部主体进行自然饱和度微调增益。"
+        ),
+        "scenarios": (
+            "适用于解决AI生图在阴影深处泛紫泛红等脏色问题，恢复二次元纯净冷暖对比。"
         ),
     },
     "anti_checkerboard": {
@@ -1683,39 +1800,41 @@ INTROS: dict[str, dict[str, str]] = {
 
 
 PRESET_CATEGORIES: dict[str, str] = {
-    "像素化": "📐 风格滤波",
-    "调色板": "📐 风格滤波",
-    "线稿": "🎨 二次元动漫",
-    "抖动": "📐 风格滤波",
-    "锐化": "📐 风格滤波",
-    "赛璐璐": "🎨 二次元动漫",
-    "去AI塑料感": "🧬 去AI感",
-    "抗AI生成伪影综合治理": "🧬 去AI感",
-    "日系通透空气感": "🎨 二次元动漫",
-    "热血集中线": "🎨 二次元动漫",
-    "黑白漫画网点": "🎨 二次元动漫",
-    "立绘贴纸白边": "📐 风格滤波",
-    "XDoG动漫线稿": "🎨 二次元动漫",
-    "ACES电影级色调": "🌈 色彩光影",
-    "引导滤波细节增强": "📐 风格滤波",
-    "桑原二次元平涂": "🎨 二次元动漫",
-    "剧场版宽银幕眩光": "🎨 二次元动漫",
-    "日系晴空色彩迁移": "🌈 色彩光影",
-    "复古90年代胶片": "🌈 色彩光影",
-    "动漫超分辨率 4x": "🚀 超分辨率",
-    "通用超分辨率 4x": "🚀 超分辨率",
-    "日系治愈空气柔光": "🎨 二次元动漫",
-    "大魄力动感鱼眼": "🎨 二次元动漫",
-    "橙青影视色彩平衡": "🌈 色彩光影",
+    "像素化": "风格滤波",
+    "调色板": "风格滤波",
+    "线稿": "二次元动漫",
+    "抖动": "风格滤波",
+    "锐化": "风格滤波",
+    "赛璐璐": "二次元动漫",
+    "去AI塑料感": "去AI感",
+    "抗AI生成伪影综合治理": "去AI感",
+    "二次元平涂去杂": "去AI感",
+    "动漫色彩提纯": "二次元动漫",
+    "日系通透空气感": "二次元动漫",
+    "热血集中线": "二次元动漫",
+    "黑白漫画网点": "二次元动漫",
+    "立绘贴纸白边": "风格滤波",
+    "XDoG动漫线稿": "二次元动漫",
+    "ACES电影级色调": "色彩光影",
+    "引导滤波细节增强": "风格滤波",
+    "桑原二次元平涂": "二次元动漫",
+    "剧场版宽银幕眩光": "二次元动漫",
+    "日系晴空色彩迁移": "色彩光影",
+    "复古90年代胶片": "色彩光影",
+    "动漫超分辨率 4x": "超分辨率",
+    "通用超分辨率 4x": "超分辨率",
+    "日系治愈空气柔光": "二次元动漫",
+    "大魄力动感鱼眼": "二次元动漫",
+    "橙青影视色彩平衡": "色彩光影",
 }
 
 CATEGORIES_LIST: list[str] = [
     "全部",
-    "🧬 去AI感",
-    "🎨 二次元动漫",
-    "🌈 色彩光影",
-    "📐 风格滤波",
-    "🚀 超分辨率",
+    "去AI感",
+    "二次元动漫",
+    "色彩光影",
+    "风格滤波",
+    "超分辨率",
 ]
 
 
@@ -1725,11 +1844,11 @@ def get_intro_text(key: str) -> str:
     category_badge = ""
     for k, cat in PRESET_CATEGORIES.items():
         if k in key:
-            category_badge = f" [bold magenta][{cat}][/]"
+            category_badge = f" [bold cyan][{cat}][/]"
             break
     if item:
         return (
-            f"[bold cyan]✦ {item['title']}[/]{category_badge}\n"
+            f"[bold cyan]{item['title']}[/]{category_badge}\n"
             f"[white]{item['summary']}[/]\n"
             f"[dim]原理：{item['principle']}[/]\n"
             f"[dim green]适用：{item['scenarios']}[/]"
@@ -1738,7 +1857,7 @@ def get_intro_text(key: str) -> str:
     op_item = get_operator_item(key)
     if op_item:
         return (
-            f"[bold cyan]✦ {op_item.name}[/] [bold magenta][{op_item.category_label}][/]\n"
+            f"[bold cyan]{op_item.name}[/] [bold cyan][{op_item.category_label}][/]\n"
             f"[white]{op_item.description}[/]\n"
             f"[dim]分类：{op_item.category_label}[/]"
         )

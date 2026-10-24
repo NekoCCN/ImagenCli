@@ -132,3 +132,61 @@ def test_de_haloing_suppresses_edge_overshoot():
     # The halo line (pixel 15) should be clamped and suppressed
     assert res_arr[16, 15, 0] < 200
 
+
+def test_surface_blur_smooths_intra_region_and_preserves_edges():
+    # 构造图像：左半边为含微弱杂色的平坦二次元色块，右半边为暗色背景，中间为黑线
+    arr = np.full((32, 32, 3), 180, dtype=np.uint8)
+    # 模拟色块内细碎 AI 杂色 (色差在 5~10 之间)
+    noise = np.random.default_rng(42).integers(-8, 9, (32, 16, 3), dtype=np.int16)
+    arr[:, :16] = np.clip(arr[:, :16].astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    # 构造硬边线稿 (黑线)
+    arr[:, 16] = 20
+    # 右侧为暗部固有色
+    arr[:, 17:] = 60
+    img = Image.fromarray(arr)
+
+    res = media_ops.OPS["surface_blur"](img, radius=3, threshold=20.0, blend=0.9)
+    assert res.size == img.size
+    res_arr = np.array(res)
+
+    # 1. 色块内部方差显著下降 (杂色被熨平均匀)
+    assert np.std(res_arr[:, :15]) < np.std(arr[:, :15])
+    # 2. 轮廓黑线没有被涂抹泛白 (保持锐利黑线)
+    assert res_arr[16, 16, 0] < 45
+
+    # 3. 边界异常参数校验
+    import pytest
+
+    with pytest.raises(ValueError):
+        media_ops.OPS["surface_blur"](img, radius=0)
+    with pytest.raises(ValueError):
+        media_ops.OPS["surface_blur"](img, threshold=-5.0)
+    with pytest.raises(ValueError):
+        media_ops.OPS["surface_blur"](img, blend=1.5)
+
+
+def test_color_purity_cleans_shadow_and_boosts_vibrance():
+    # 构造含高饱和杂色阴影与纯色亮部的图像
+    img_rgba = Image.new("RGBA", (32, 32), (0, 0, 0, 200))
+    arr = np.array(img_rgba)
+    # 顶部为暗部但混入了 AI 常见的杂乱紫色 (R=60, G=10, B=65)
+    arr[:16, :] = [60, 10, 65, 200]
+    # 底部为高明度主体肤色 (R=240, G=180, B=150)
+    arr[16:, :] = [240, 180, 150, 200]
+    img = Image.fromarray(arr, mode="RGBA")
+
+    res = media_ops.OPS["color_purity"](
+        img, shadow_desat=0.5, shadow_threshold=80.0, vibrance_boost=0.15
+    )
+    assert res.size == img.size
+    assert res.mode == "RGBA"
+    # alpha 通道必须完美保留
+    assert res.getchannel("A").getpixel((0, 0)) == 200
+
+    res_arr = np.array(res)
+    # 暗部 (0, 0) 的色差范围被压缩，降低了多余饱和度
+    orig_shadow_diff = abs(int(arr[0, 0, 0]) - int(arr[0, 0, 1]))
+    res_shadow_diff = abs(int(res_arr[0, 0, 0]) - int(res_arr[0, 0, 1]))
+    assert res_shadow_diff < orig_shadow_diff
+
+

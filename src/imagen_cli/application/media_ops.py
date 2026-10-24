@@ -1816,6 +1816,92 @@ def de_haloing(
     return result_img
 
 
+def surface_blur(
+    image: Image.Image,
+    *,
+    radius: int = 4,
+    threshold: float = 20.0,
+    blend: float = 0.85,
+) -> Image.Image:
+    """表面保边去杂平滑算子：针对二次元插画平涂色块，消除AI杂色噪点并保留线条锐度。"""
+    if radius < 1 or radius > 30:
+        raise ValueError("radius must be between 1 and 30")
+    if not 0.0 <= threshold <= 100.0:
+        raise ValueError("threshold must be between 0.0 and 100.0")
+    if not 0.0 <= blend <= 1.0:
+        raise ValueError("blend must be between 0.0 and 1.0")
+    if blend == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+
+    blurred = np.asarray(rgb.filter(ImageFilter.GaussianBlur(radius)), dtype=np.float32)
+    median_sz = max(3, (radius // 2) * 2 + 1)
+    median_blurred = np.asarray(
+        rgb.filter(ImageFilter.MedianFilter(size=median_sz)), dtype=np.float32
+    )
+
+    diff = np.linalg.norm(arr - blurred, axis=2, keepdims=True)
+    weight = np.exp(-0.5 * (diff / max(1.0, threshold)) ** 2)
+
+    smooth_target = 0.5 * blurred + 0.5 * median_blurred
+    out = arr * (1.0 - weight * blend) + smooth_target * (weight * blend)
+    out_arr = np.clip(out, 0.0, 255.0).astype(np.uint8)
+    result = Image.fromarray(out_arr, mode="RGB")
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def color_purity(
+    image: Image.Image,
+    *,
+    shadow_desat: float = 0.35,
+    shadow_threshold: float = 70.0,
+    vibrance_boost: float = 0.15,
+) -> Image.Image:
+    """动漫色彩提纯与阴影去脏：消除AI在暗部混入的杂乱高饱和色，提升二次元通透感。"""
+    if not 0.0 <= shadow_desat <= 1.0:
+        raise ValueError("shadow_desat must be between 0.0 and 1.0")
+    if not 0.0 <= shadow_threshold <= 255.0:
+        raise ValueError("shadow_threshold must be between 0.0 and 255.0")
+    if not -1.0 <= vibrance_boost <= 1.0:
+        raise ValueError("vibrance_boost must be between -1.0 and 1.0")
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+
+    lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+    gray = np.stack([lum] * 3, axis=-1)
+
+    shadow_mask = np.clip(1.0 - lum / max(1.0, shadow_threshold), 0.0, 1.0)[..., None]
+    desaturated = arr * (1.0 - shadow_mask * shadow_desat) + gray * (shadow_mask * shadow_desat)
+
+    if vibrance_boost != 0.0:
+        max_c = np.max(desaturated, axis=-1, keepdims=True)
+        min_c = np.min(desaturated, axis=-1, keepdims=True)
+        sat = (max_c - min_c) / np.maximum(max_c, 1e-4)
+        vibrance_factor = (1.0 - sat) * vibrance_boost * (1.0 - shadow_mask)
+        desaturated = desaturated + (desaturated - gray) * vibrance_factor
+
+    out_arr = np.clip(desaturated, 0.0, 255.0).astype(np.uint8)
+    result = Image.fromarray(out_arr, mode="RGB")
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
     "resize": resize,
     "crop": crop,
@@ -1893,6 +1979,8 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "anti_checkerboard": anti_checkerboard,
     "subsurface_scattering": subsurface_scattering,
     "de_haloing": de_haloing,
+    "surface_blur": surface_blur,
+    "color_purity": color_purity,
 }
 
 
