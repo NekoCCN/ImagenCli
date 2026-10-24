@@ -10,9 +10,14 @@ from typing import Any
 __all__ = ["color_enabled", "render"]
 
 _STATE_STYLE = {
-    "succeeded": "green", "failed": "red", "unknown": "yellow",
-    "partial_success": "yellow", "save_failed": "red", "conflict": "magenta",
-    "running": "cyan", "queued": "blue",
+    "succeeded": "green",
+    "failed": "red",
+    "unknown": "yellow",
+    "partial_success": "yellow",
+    "save_failed": "red",
+    "conflict": "magenta",
+    "running": "cyan",
+    "queued": "blue",
 }
 _MAX_ROWS = 50
 
@@ -58,9 +63,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         lines.append(f"计划 {plan.get('id')}：{plan.get('operation')} · {plan.get('model')}")
         lines.append(f"摘要：{plan.get('plan_digest')}")
         if plan.get("id") and plan.get("plan_digest"):
-            lines.append(
-                f"下一步：imagen plan approve {plan['id']} --digest {plan['plan_digest']}"
-            )
+            lines.append(f"下一步：imagen plan approve {plan['id']} --digest {plan['plan_digest']}")
     job = data.get("job") or {}
     if job:
         lines.append(
@@ -99,9 +102,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         total = data.get("planned_bytes", sum(item.get("bytes", 0) for item in entries))
         lines.append(f"可回收 {len(entries)} 项，共 {total} 字节")
         for entry in entries[:_MAX_ROWS]:
-            lines.append(
-                f"  {entry.get('kind')} · {entry.get('id')} · {entry.get('bytes')} 字节"
-            )
+            lines.append(f"  {entry.get('kind')} · {entry.get('id')} · {entry.get('bytes')} 字节")
     commands = _rows(data, "commands")
     for row in commands:
         state = "可用" if row.get("available") else "未交付"
@@ -135,8 +136,8 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
                 lines.append(f"  ✦ {key}: {item}")
     if data.get("removed") and data.get("artifact_id"):
         purged_note = "（已回收文件）" if data.get("purged") else ""
-        sess_lbl = data.get('session_id')
-        art_lbl = data.get('artifact_id')
+        sess_lbl = data.get("session_id")
+        art_lbl = data.get("artifact_id")
         lines.append(f"✓ 已从会话 {sess_lbl} 移除产物 {art_lbl}{purged_note}")
     manual = data.get("manual")
     if isinstance(manual, str) and manual:
@@ -180,7 +181,9 @@ def _rich(value: dict[str, Any], width: int) -> str:
     from rich.table import Table
 
     buffer = io.StringIO()
-    console = Console(file=buffer, width=width, force_terminal=True, highlight=False)
+    console = Console(
+        file=buffer, width=width, force_terminal=True, color_system="standard", highlight=False
+    )
     if not value.get("ok"):
         message = (value.get("error") or {}).get("message") or "命令未成功完成。"
         console.print(Panel(message, title="失败", border_style="red"))
@@ -201,13 +204,22 @@ def _rich(value: dict[str, Any], width: int) -> str:
     job = data.get("job") or {}
     if job:
         style = _STATE_STYLE.get(str(job.get("state")), "white")
-        console.print(Panel(
-            f"[bold]{job.get('id')}[/bold]\n"
-            f"状态 [{style}]{job.get('state')}[/{style}] · "
-            f"远端 {job.get('remote_state')} · 本地 {job.get('local_save_state')}",
-            title="任务", border_style=style,
-        ))
-        console.print(_cost_line(job.get("cost") or {}))
+        console.print(
+            Panel(
+                f"[bold]{job.get('id')}[/bold]\n"
+                f"状态 [{style}]{job.get('state')}[/{style}] · "
+                f"远端 {job.get('remote_state')} · 本地 {job.get('local_save_state')}",
+                title="任务",
+                border_style=style,
+            )
+        )
+        cost = job.get("cost") or {}
+        amount = cost.get("actual") if cost.get("actual") is not None else cost.get("estimate")
+        console.print(
+            "[yellow]费用：未知（不视为免费）[/yellow]"
+            if amount is None
+            else f"费用：[bold]{amount}[/bold] {cost.get('currency') or ''}"
+        )
     profile = data.get("profile") or {}
     if profile and profile.get("id"):
         lines.append(
@@ -216,19 +228,25 @@ def _rich(value: dict[str, Any], width: int) -> str:
         )
     profile = data.get("profile") or {}
     if profile and profile.get("id"):
-        console.print(Panel(
-            f"[bold]{profile.get('id')}[/bold] · "
-            f"{profile.get('provider')}/{profile.get('family')}\n"
-            f"{profile.get('model_default')} · revision {profile.get('revision')}",
-            title="Profile", border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold]{profile.get('id')}[/bold] · "
+                f"{profile.get('provider')}/{profile.get('family')}\n"
+                f"{profile.get('model_default')} · revision {profile.get('revision')}",
+                title="Profile",
+                border_style="green",
+            )
+        )
     session = data.get("session") or {}
     if session and session.get("name"):
-        console.print(Panel(
-            f"[bold]{session.get('name')}[/bold] · version {session.get('version')}\n"
-            f"{session.get('id')}",
-            title="会话", border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold]{session.get('name')}[/bold] · version {session.get('version')}\n"
+                f"{session.get('id')}",
+                title="会话",
+                border_style="green",
+            )
+        )
     sessions = _rows(data, "sessions")
     if sessions:
         table = Table(title="会话", header_style="bold")
@@ -244,8 +262,11 @@ def _rich(value: dict[str, Any], width: int) -> str:
             table.add_column(column, overflow="fold")
         for row in profiles[:_MAX_ROWS]:
             table.add_row(
-                str(row.get("id")), str(row.get("provider")), str(row.get("family")),
-                str(row.get("model_default")), str(row.get("revision")),
+                str(row.get("id")),
+                str(row.get("provider")),
+                str(row.get("family")),
+                str(row.get("model_default")),
+                str(row.get("revision")),
             )
         console.print(table)
     models = _rows(data, "models") or _rows(data, "provider_models")
@@ -305,7 +326,8 @@ def _rich(value: dict[str, Any], width: int) -> str:
             table.add_column(column, overflow="fold")
         for turn in turns[:_MAX_ROWS]:
             table.add_row(
-                str(turn.get("id")), str(turn.get("operation")),
+                str(turn.get("id")),
+                str(turn.get("operation")),
                 str(turn.get("creation_state")),
             )
         console.print(table)
@@ -317,8 +339,23 @@ def _rich(value: dict[str, Any], width: int) -> str:
         for index, artifact in enumerate(artifacts, start=1):
             table.add_row(str(index), str(artifact["path"]))
         console.print(table)
-    if not any((plan, job, profile, session, sessions, profiles, models, entries,
-                commands, operations, turns, artifacts, parameters)):
+    if not any(
+        (
+            plan,
+            job,
+            profile,
+            session,
+            sessions,
+            profiles,
+            models,
+            entries,
+            commands,
+            operations,
+            turns,
+            artifacts,
+            parameters,
+        )
+    ):
         console.print(json.dumps(data, ensure_ascii=False))
     return buffer.getvalue()
 

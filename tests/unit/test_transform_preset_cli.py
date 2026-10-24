@@ -101,3 +101,25 @@ def test_cli_ops_specific_preset_details(tmp_path: Path):
     assert "details" in resp["data"]
     matched = next(iter(resp["data"]["details"].values()))
     assert "pipeline" in matched
+
+
+def test_cli_ops_anti_ai_artifacts_suppression_preset(tmp_path: Path):
+    ws = tmp_path / "ws_anti_ai_suppression"
+    ws.mkdir()
+    stdout = io.StringIO()
+    code = main([
+        "--workspace", str(ws),
+        "ops", "--preset", "抗AI生成伪影",
+        "--output", "json",
+    ], stdout=stdout)
+    assert code == 0
+    resp = json.loads(stdout.getvalue())
+    assert resp["ok"] is True
+    assert "details" in resp["data"]
+    matched = next(iter(resp["data"]["details"].values()))
+    assert "pipeline" in matched
+    ops_in_pipeline = [step["op"] for step in matched["pipeline"]]
+    assert "anti_checkerboard" in ops_in_pipeline
+    assert "subsurface_scattering" in ops_in_pipeline
+    assert "de_haloing" in ops_in_pipeline
+

@@ -54,6 +54,19 @@ PRESETS: dict[str, list[dict[str, Any]]] = {
         {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
         {"op": "chromatic_aberration", "params": {"shift": 2, "radial": True}},
     ],
+    "抗AI生成伪影综合治理": [
+        {"op": "anti_checkerboard", "params": {"strength": 0.5, "cutoff": 0.85}},
+        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.6, "threshold": 25}},
+        {
+            "op": "subsurface_scattering",
+            "params": {"radius": 5, "scatter_strength": 0.35, "skin_only": True},
+        },
+        {
+            "op": "filmic_tone",
+            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+        },
+        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
+    ],
     "日系通透空气感": [
         {"op": "color_temperature", "params": {"temperature": 0.15, "tint": -0.05}},
         {

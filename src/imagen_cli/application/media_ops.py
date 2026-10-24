@@ -18,19 +18,63 @@ BAYER = [
 ]
 
 KERNELS: dict[str, list[tuple[int, int, float]]] = {
-    "atkinson": [(1, 0, 1 / 8), (2, 0, 1 / 8), (-1, 1, 1 / 8), (0, 1, 1 / 8),
-                 (1, 1, 1 / 8), (0, 2, 1 / 8)],
-    "jarvis": [(1, 0, 7 / 48), (2, 0, 5 / 48), (-2, 1, 3 / 48), (-1, 1, 5 / 48),
-               (0, 1, 7 / 48), (1, 1, 5 / 48), (2, 1, 3 / 48), (-2, 2, 1 / 48),
-               (-1, 2, 3 / 48), (0, 2, 5 / 48), (1, 2, 3 / 48), (2, 2, 1 / 48)],
-    "stucki": [(1, 0, 8 / 42), (2, 0, 4 / 42), (-2, 1, 2 / 42), (-1, 1, 4 / 42),
-               (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42), (-2, 2, 1 / 42),
-               (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42)],
-    "burkes": [(1, 0, 8 / 32), (2, 0, 4 / 32), (-2, 1, 2 / 32), (-1, 1, 4 / 32),
-               (0, 1, 8 / 32), (1, 1, 4 / 32), (2, 1, 2 / 32)],
-    "sierra": [(1, 0, 5 / 32), (2, 0, 3 / 32), (-2, 1, 2 / 32), (-1, 1, 4 / 32),
-               (0, 1, 5 / 32), (1, 1, 4 / 32), (2, 1, 2 / 32), (-1, 2, 2 / 32),
-               (0, 2, 3 / 32), (1, 2, 2 / 32)],
+    "atkinson": [
+        (1, 0, 1 / 8),
+        (2, 0, 1 / 8),
+        (-1, 1, 1 / 8),
+        (0, 1, 1 / 8),
+        (1, 1, 1 / 8),
+        (0, 2, 1 / 8),
+    ],
+    "jarvis": [
+        (1, 0, 7 / 48),
+        (2, 0, 5 / 48),
+        (-2, 1, 3 / 48),
+        (-1, 1, 5 / 48),
+        (0, 1, 7 / 48),
+        (1, 1, 5 / 48),
+        (2, 1, 3 / 48),
+        (-2, 2, 1 / 48),
+        (-1, 2, 3 / 48),
+        (0, 2, 5 / 48),
+        (1, 2, 3 / 48),
+        (2, 2, 1 / 48),
+    ],
+    "stucki": [
+        (1, 0, 8 / 42),
+        (2, 0, 4 / 42),
+        (-2, 1, 2 / 42),
+        (-1, 1, 4 / 42),
+        (0, 1, 8 / 42),
+        (1, 1, 4 / 42),
+        (2, 1, 2 / 42),
+        (-2, 2, 1 / 42),
+        (-1, 2, 2 / 42),
+        (0, 2, 4 / 42),
+        (1, 2, 2 / 42),
+        (2, 2, 1 / 42),
+    ],
+    "burkes": [
+        (1, 0, 8 / 32),
+        (2, 0, 4 / 32),
+        (-2, 1, 2 / 32),
+        (-1, 1, 4 / 32),
+        (0, 1, 8 / 32),
+        (1, 1, 4 / 32),
+        (2, 1, 2 / 32),
+    ],
+    "sierra": [
+        (1, 0, 5 / 32),
+        (2, 0, 3 / 32),
+        (-2, 1, 2 / 32),
+        (-1, 1, 4 / 32),
+        (0, 1, 5 / 32),
+        (1, 1, 4 / 32),
+        (2, 1, 2 / 32),
+        (-1, 2, 2 / 32),
+        (0, 2, 3 / 32),
+        (1, 2, 2 / 32),
+    ],
 }
 
 
@@ -54,11 +98,19 @@ def _matrix(size: int) -> list[list[int]]:
     raise ValueError("bayer size must be 2, 4 or 8")
 
 
-def resize(image: Image.Image, *, width: int | None = None, height: int | None = None,
-           scale: int | None = None, filter: str = "lanczos") -> Image.Image:
+def resize(
+    image: Image.Image,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    scale: int | None = None,
+    filter: str = "lanczos",
+) -> Image.Image:
     filters = {
-        "nearest": Image.Resampling.NEAREST, "box": Image.Resampling.BOX,
-        "bilinear": Image.Resampling.BILINEAR, "bicubic": Image.Resampling.BICUBIC,
+        "nearest": Image.Resampling.NEAREST,
+        "box": Image.Resampling.BOX,
+        "bilinear": Image.Resampling.BILINEAR,
+        "bicubic": Image.Resampling.BICUBIC,
         "lanczos": Image.Resampling.LANCZOS,
     }
     if filter not in filters:
@@ -79,10 +131,20 @@ def resize(image: Image.Image, *, width: int | None = None, height: int | None =
     return image.resize((width, height), filters[filter])
 
 
-def crop(image: Image.Image, *, left: int = 0, top: int = 0,
-         right: int | None = None, bottom: int | None = None) -> Image.Image:
-    box = (left, top, image.width if right is None else right,
-           image.height if bottom is None else bottom)
+def crop(
+    image: Image.Image,
+    *,
+    left: int = 0,
+    top: int = 0,
+    right: int | None = None,
+    bottom: int | None = None,
+) -> Image.Image:
+    box = (
+        left,
+        top,
+        image.width if right is None else right,
+        image.height if bottom is None else bottom,
+    )
     if box[2] <= box[0] or box[3] <= box[1]:
         raise ValueError("crop box is empty")
     return image.crop(box)
@@ -97,8 +159,10 @@ def trim(image: Image.Image, *, threshold: int = 8) -> Image.Image:
     else:
         rgb = image.convert("RGB")
         background = Image.new("RGB", rgb.size, rgb.getpixel((0, 0)))
-        mask = ImageChops.difference(rgb, background).convert("L").point(
-            lambda value: 255 if value > threshold else 0
+        mask = (
+            ImageChops.difference(rgb, background)
+            .convert("L")
+            .point(lambda value: 255 if value > threshold else 0)
         )
         box = mask.getbbox()
     if box is None:
@@ -106,8 +170,9 @@ def trim(image: Image.Image, *, threshold: int = 8) -> Image.Image:
     return image.crop(box)
 
 
-def pad(image: Image.Image, *, width: int | None = None, height: int | None = None,
-        color: str = "0,0,0") -> Image.Image:
+def pad(
+    image: Image.Image, *, width: int | None = None, height: int | None = None, color: str = "0,0,0"
+) -> Image.Image:
     target = (width or image.width, height or image.height)
     if target[0] < image.width or target[1] < image.height:
         raise ValueError("padding target is smaller than the image")
@@ -160,9 +225,7 @@ def pixelate(image: Image.Image, *, scale: int = 4) -> Image.Image:
 def block_scale(image: Image.Image, *, factor: int = 2) -> Image.Image:
     if factor < 1:
         raise ValueError("factor must be positive")
-    return image.resize(
-        (image.width * factor, image.height * factor), Image.Resampling.NEAREST
-    )
+    return image.resize((image.width * factor, image.height * factor), Image.Resampling.NEAREST)
 
 
 def scale2x(image: Image.Image) -> Image.Image:
@@ -195,16 +258,18 @@ def scale2x(image: Image.Image) -> Image.Image:
     return target
 
 
-def quantize(image: Image.Image, *, colors: int = 16, method: str = "median_cut",
-             dither: bool = False) -> Image.Image:
+def quantize(
+    image: Image.Image, *, colors: int = 16, method: str = "median_cut", dither: bool = False
+) -> Image.Image:
     if not 2 <= colors <= 256:
         raise ValueError("colors must be between 2 and 256")
     if method not in {"median_cut", "octree"}:
         raise ValueError("unknown quantization method")
     dither_method = Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE
     converted = image.convert("RGB").quantize(
-        colors=colors, method=Image.Quantize.MEDIANCUT if method == "median_cut"
-        else Image.Quantize.FASTOCTREE, dither=dither_method,
+        colors=colors,
+        method=Image.Quantize.MEDIANCUT if method == "median_cut" else Image.Quantize.FASTOCTREE,
+        dither=dither_method,
     )
     return converted.convert("RGBA" if image.mode == "RGBA" else "RGB")
 
@@ -261,11 +326,12 @@ def gamma(image: Image.Image, *, value: float = 1.0) -> Image.Image:
 def exposure(image: Image.Image, *, stops: float = 0.0) -> Image.Image:
     if not -4 <= stops <= 4:
         raise ValueError("stops must be between -4 and 4")
-    return brightness(image, factor=2.0 ** stops)
+    return brightness(image, factor=2.0**stops)
 
 
-def levels(image: Image.Image, *, black: int = 0, white: int = 255,
-           midtone: float = 1.0) -> Image.Image:
+def levels(
+    image: Image.Image, *, black: int = 0, white: int = 255, midtone: float = 1.0
+) -> Image.Image:
     if not 0 <= black < white <= 255 or not 0.1 <= midtone <= 5:
         raise ValueError("invalid levels")
     lookup = []
@@ -276,8 +342,9 @@ def levels(image: Image.Image, *, black: int = 0, white: int = 255,
     return image.convert("RGB").point(lookup * 3)
 
 
-def shadows_highlights(image: Image.Image, *, shadows: float = 0.0,
-                       highlights: float = 0.0) -> Image.Image:
+def shadows_highlights(
+    image: Image.Image, *, shadows: float = 0.0, highlights: float = 0.0
+) -> Image.Image:
     if not -1 <= shadows <= 1 or not -1 <= highlights <= 1:
         raise ValueError("shadows and highlights must be between -1 and 1")
     lookup = []
@@ -299,8 +366,10 @@ def white_balance(image: Image.Image, *, method: str = "gray_world") -> Image.Im
         target = sum(means) / 3
         scales = [target / mean if mean else 1.0 for mean in means]
     else:
-        maxima = [max(index for index, count in enumerate(channel.histogram()) if count)
-                  for channel in channels]
+        maxima = [
+            max(index for index, count in enumerate(channel.histogram()) if count)
+            for channel in channels
+        ]
         target = max(maxima)
         scales = [target / peak if peak else 1.0 for peak in maxima]
     balanced = [
@@ -395,8 +464,9 @@ def highpass(image: Image.Image, *, radius: float = 3.0, boost: float = 1.0) -> 
     return difference
 
 
-def unsharp(image: Image.Image, *, radius: float = 2.0, percent: int = 150,
-            threshold: int = 3) -> Image.Image:
+def unsharp(
+    image: Image.Image, *, radius: float = 2.0, percent: int = 150, threshold: int = 3
+) -> Image.Image:
     if not 0 <= radius <= 100 or not 0 <= percent <= 1000 or not 0 <= threshold <= 255:
         raise ValueError("invalid unsharp parameters")
     return image.filter(ImageFilter.UnsharpMask(radius, percent, threshold))
@@ -441,8 +511,15 @@ def transpose(image: Image.Image, *, mode: str = "rotate_90") -> Image.Image:
     return image.transpose(options[mode])
 
 
-def dither(image: Image.Image, *, mode: str = "fs", colors: int = 16,
-           levels: int = 2, size: int = 4, seed: int = 0) -> Image.Image:
+def dither(
+    image: Image.Image,
+    *,
+    mode: str = "fs",
+    colors: int = 16,
+    levels: int = 2,
+    size: int = 4,
+    seed: int = 0,
+) -> Image.Image:
     if not 2 <= levels <= 8:
         raise ValueError("levels must be between 2 and 8")
     algorithms = {"fs", "bayer", "atkinson", "jarvis", "stucki", "burkes", "sierra", "random"}
@@ -515,8 +592,10 @@ def cel_shade(image: Image.Image, *, levels: int = 3, edge_size: int = 3) -> Ima
     if not 2 <= levels <= 6 or not 1 <= edge_size <= 9:
         raise ValueError("invalid cel-shade parameters")
     flat = posterize(blur(image, radius=1.0), levels=levels)
-    edges = image.convert("L").filter(ImageFilter.FIND_EDGES).point(
-        lambda value: 0 if value > 24 else 255
+    edges = (
+        image.convert("L")
+        .filter(ImageFilter.FIND_EDGES)
+        .point(lambda value: 0 if value > 24 else 255)
     )
     if edge_size > 1:
         edges = edges.filter(ImageFilter.MinFilter(edge_size))
@@ -583,8 +662,14 @@ def scanlines(image: Image.Image, *, period: int = 3, strength: float = 0.2) -> 
     return Image.composite(Image.new("RGB", image.size, (0, 0, 0)), image.convert("RGB"), overlay)
 
 
-def watermark(image: Image.Image, *, text: str = "imagen", size: int = 32,
-              position: str = "bottom-right", opacity: float = 0.6) -> Image.Image:
+def watermark(
+    image: Image.Image,
+    *,
+    text: str = "imagen",
+    size: int = 32,
+    position: str = "bottom-right",
+    opacity: float = 0.6,
+) -> Image.Image:
     if not text or len(text) > 200 or not 8 <= size <= 256:
         raise ValueError("invalid watermark parameters")
     if not 0 <= opacity <= 1:
@@ -617,8 +702,9 @@ def orient(image: Image.Image, **_: Any) -> Image.Image:
     return ImageOps.exif_transpose(image)
 
 
-def perspective(image: Image.Image, *, quad: str,
-                width: int | None = None, height: int | None = None) -> Image.Image:
+def perspective(
+    image: Image.Image, *, quad: str, width: int | None = None, height: int | None = None
+) -> Image.Image:
     try:
         points = [float(value) for value in quad.split(",")]
     except ValueError as error:
@@ -674,8 +760,9 @@ def oil_paint(image: Image.Image, *, colors: int = 12, size: int = 3) -> Image.I
     return posterize(quantize(smoothed, colors=colors), levels=3)
 
 
-def palette_map(image: Image.Image, *, palette: str = "000000,ffffff,ff0000,00ff00,0000ff",
-                dither: bool = True) -> Image.Image:
+def palette_map(
+    image: Image.Image, *, palette: str = "000000,ffffff,ff0000,00ff00,0000ff", dither: bool = True
+) -> Image.Image:
     entries = [entry for entry in palette.split(",") if entry]
     if not 1 <= len(entries) <= 256:
         raise ValueError("palette must contain 1 to 256 colours")
@@ -689,8 +776,14 @@ def palette_map(image: Image.Image, *, palette: str = "000000,ffffff,ff0000,00ff
     return quantized.convert("RGBA" if image.mode == "RGBA" else "RGB")
 
 
-def film_grain(image: Image.Image, *, amount: float = 0.05, monochrome: bool = True,
-               shadow_bias: bool = True, seed: int = 42) -> Image.Image:
+def film_grain(
+    image: Image.Image,
+    *,
+    amount: float = 0.05,
+    monochrome: bool = True,
+    shadow_bias: bool = True,
+    seed: int = 42,
+) -> Image.Image:
     """Anti-AI analog grain: organic Gaussian noise with luminance weighting."""
     if not 0.0 <= amount <= 0.5:
         raise ValueError("amount must be between 0.0 and 0.5")
@@ -709,11 +802,14 @@ def film_grain(image: Image.Image, *, amount: float = 0.05, monochrome: bool = T
         r_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
         g_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
         b_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
-        noise_img = Image.merge("RGB", (
-            Image.frombytes("L", (w, h), r_bytes),
-            Image.frombytes("L", (w, h), g_bytes),
-            Image.frombytes("L", (w, h), b_bytes),
-        ))
+        noise_img = Image.merge(
+            "RGB",
+            (
+                Image.frombytes("L", (w, h), r_bytes),
+                Image.frombytes("L", (w, h), g_bytes),
+                Image.frombytes("L", (w, h), b_bytes),
+            ),
+        )
 
     soft = ImageChops.soft_light(rgb, noise_img)
     if shadow_bias:
@@ -729,8 +825,14 @@ def film_grain(image: Image.Image, *, amount: float = 0.05, monochrome: bool = T
     return result
 
 
-def de_ai_bloom(image: Image.Image, *, radius: int = 8, intensity: float = 0.3,
-                threshold: int = 180, preserve_lines: bool = True) -> Image.Image:
+def de_ai_bloom(
+    image: Image.Image,
+    *,
+    radius: int = 8,
+    intensity: float = 0.3,
+    threshold: int = 180,
+    preserve_lines: bool = True,
+) -> Image.Image:
     """Anti-AI / Anime glow: diffuse highlights while preserving line art."""
     if radius < 1 or radius > 100:
         raise ValueError("radius must be between 1 and 100")
@@ -762,8 +864,14 @@ def de_ai_bloom(image: Image.Image, *, radius: int = 8, intensity: float = 0.3,
     return blended
 
 
-def filmic_tone(image: Image.Image, *, lift_black: int = 6, compress_white: int = 245,
-                saturation: float = 0.95, warmth: float = 0.0) -> Image.Image:
+def filmic_tone(
+    image: Image.Image,
+    *,
+    lift_black: int = 6,
+    compress_white: int = 245,
+    saturation: float = 0.95,
+    warmth: float = 0.0,
+) -> Image.Image:
     """Anti-AI filmic tone curve: lift crushed blacks and compress harsh blown highlights."""
     if not 0 <= lift_black <= 50:
         raise ValueError("lift_black must be between 0 and 50")
@@ -779,14 +887,17 @@ def filmic_tone(image: Image.Image, *, lift_black: int = 6, compress_white: int 
     span = compress_white - lift_black
 
     base_lut = [
-        int(lift_black + span * ((i / 255.0) ** 2 * (3.0 - 2.0 * (i / 255.0))))
-        for i in range(256)
+        int(lift_black + span * ((i / 255.0) ** 2 * (3.0 - 2.0 * (i / 255.0)))) for i in range(256)
     ]
 
-    r_lut = [max(0, min(255, int(base_lut[i] + warmth * 10 * (1 - abs(i - 128) / 128.0))))
-             for i in range(256)]
-    b_lut = [max(0, min(255, int(base_lut[i] - warmth * 10 * (1 - abs(i - 128) / 128.0))))
-             for i in range(256)]
+    r_lut = [
+        max(0, min(255, int(base_lut[i] + warmth * 10 * (1 - abs(i - 128) / 128.0))))
+        for i in range(256)
+    ]
+    b_lut = [
+        max(0, min(255, int(base_lut[i] - warmth * 10 * (1 - abs(i - 128) / 128.0))))
+        for i in range(256)
+    ]
     g_lut = base_lut
 
     r, g, b = rgb.split()
@@ -804,8 +915,7 @@ def filmic_tone(image: Image.Image, *, lift_black: int = 6, compress_white: int 
     return graded
 
 
-def chromatic_aberration(image: Image.Image, *, shift: int = 2,
-                         radial: bool = True) -> Image.Image:
+def chromatic_aberration(image: Image.Image, *, shift: int = 2, radial: bool = True) -> Image.Image:
     """Optical chromatic dispersion: slight red/blue fringing towards frame edges."""
     if not 1 <= shift <= 30:
         raise ValueError("shift must be between 1 and 30")
@@ -839,8 +949,9 @@ def chromatic_aberration(image: Image.Image, *, shift: int = 2,
     return result
 
 
-def vignette(image: Image.Image, *, radius: float = 0.75, feather: float = 0.5,
-             darkness: float = 0.5) -> Image.Image:
+def vignette(
+    image: Image.Image, *, radius: float = 0.75, feather: float = 0.5, darkness: float = 0.5
+) -> Image.Image:
     """Lens light falloff / vignette."""
     if not 0.1 <= radius <= 2.0:
         raise ValueError("radius must be between 0.1 and 2.0")
@@ -883,8 +994,9 @@ def vignette(image: Image.Image, *, radius: float = 0.75, feather: float = 0.5,
     return result
 
 
-def color_temperature(image: Image.Image, *, temperature: float = 0.0,
-                      tint: float = 0.0) -> Image.Image:
+def color_temperature(
+    image: Image.Image, *, temperature: float = 0.0, tint: float = 0.0
+) -> Image.Image:
     """Warm/cool and tint color balance."""
     if not -1.0 <= temperature <= 1.0:
         raise ValueError("temperature must be between -1.0 and 1.0")
@@ -916,9 +1028,17 @@ def color_temperature(image: Image.Image, *, temperature: float = 0.0,
     return result
 
 
-def focus_lines(image: Image.Image, *, lines: int = 120, center_x: float = 0.5,
-                center_y: float = 0.5, inner_radius: float = 0.35, max_width: int = 3,
-                line_color: str = "#000000", seed: int = 42) -> Image.Image:
+def focus_lines(
+    image: Image.Image,
+    *,
+    lines: int = 120,
+    center_x: float = 0.5,
+    center_y: float = 0.5,
+    inner_radius: float = 0.35,
+    max_width: int = 3,
+    line_color: str = "#000000",
+    seed: int = 42,
+) -> Image.Image:
     """Manga / anime dramatic radial action lines (集中线 / 速度线)."""
     if not 10 <= lines <= 600:
         raise ValueError("lines must be between 10 and 600")
@@ -968,8 +1088,9 @@ def focus_lines(image: Image.Image, *, lines: int = 120, center_x: float = 0.5,
     return composited if image.mode == "RGBA" else composited.convert("RGB")
 
 
-def screentone(image: Image.Image, *, frequency: int = 40, angle: float = 45.0,
-               contrast: float = 1.2) -> Image.Image:
+def screentone(
+    image: Image.Image, *, frequency: int = 40, angle: float = 45.0, contrast: float = 1.2
+) -> Image.Image:
     """Manga screentone (黑白漫画网点纸)."""
     if not 5 <= frequency <= 150:
         raise ValueError("frequency must be between 5 and 150")
@@ -1009,9 +1130,15 @@ def screentone(image: Image.Image, *, frequency: int = 40, angle: float = 45.0,
     return result
 
 
-def sticker_outline(image: Image.Image, *, width: int = 6, color: str = "#ffffff",
-                    shadow: bool = True, shadow_offset: int = 4,
-                    shadow_blur: int = 4) -> Image.Image:
+def sticker_outline(
+    image: Image.Image,
+    *,
+    width: int = 6,
+    color: str = "#ffffff",
+    shadow: bool = True,
+    shadow_offset: int = 4,
+    shadow_blur: int = 4,
+) -> Image.Image:
     """ACG Die-cut sticker outline with optional drop shadow."""
     if not 1 <= width <= 50:
         raise ValueError("width must be between 1 and 50")
@@ -1043,8 +1170,14 @@ def sticker_outline(image: Image.Image, *, width: int = 6, color: str = "#ffffff
     return canvas
 
 
-def lineart_extract(image: Image.Image, *, radius: float = 1.0, k: float = 1.6,
-                    gamma: float = 0.98, threshold: float = 0.02) -> Image.Image:
+def lineart_extract(
+    image: Image.Image,
+    *,
+    radius: float = 1.0,
+    k: float = 1.6,
+    gamma: float = 0.98,
+    threshold: float = 0.02,
+) -> Image.Image:
     """XDoG (Extended Difference of Gaussians) clean line art extraction."""
     if not 0.2 <= radius <= 10.0:
         raise ValueError("radius must be between 0.2 and 10.0")
@@ -1224,11 +1357,13 @@ def anamorphic_flare(
     streak_arr = np.asarray(streak, dtype=np.float32) / 255.0
     streak_arr = np.minimum(1.0, streak_arr * (len_val * 0.5))
     scale = float(intensity) * 1.5
-    flare_rgb = np.dstack([
-        streak_arr * (tint_rgb[0] * scale),
-        streak_arr * (tint_rgb[1] * scale),
-        streak_arr * (tint_rgb[2] * scale),
-    ])
+    flare_rgb = np.dstack(
+        [
+            streak_arr * (tint_rgb[0] * scale),
+            streak_arr * (tint_rgb[1] * scale),
+            streak_arr * (tint_rgb[2] * scale),
+        ]
+    )
 
     base_arr = np.asarray(rgb, dtype=np.float32)
     blended = np.clip(base_arr + flare_rgb, 0, 255).astype(np.uint8)
@@ -1359,11 +1494,7 @@ def color_balance(
     shift_m = np.array(md, dtype=np.float32) * 0.35
     shift_h = np.array(hl, dtype=np.float32) * 0.35
 
-    delta = (
-        w_s[..., None] * shift_s +
-        w_m[..., None] * shift_m +
-        w_h[..., None] * shift_h
-    )
+    delta = w_s[..., None] * shift_s + w_m[..., None] * shift_m + w_h[..., None] * shift_h
 
     out_arr = np.clip((arr + delta) * 255.0, 0, 255).astype(np.uint8)
     result = Image.fromarray(out_arr, mode="RGB")
@@ -1393,8 +1524,8 @@ def fisheye(image: Image.Image, *, strength: float = 0.3, zoom: float = 1.0) -> 
     norm_x = (2.0 * x_coords - (w - 1)) / max(w, h)
     norm_y = (2.0 * y_coords - (h - 1)) / max(w, h)
 
-    r = np.sqrt(norm_x ** 2 + norm_y ** 2)
-    factor = np.where(r > 1e-6, (1.0 + strength * (r ** 2)) / zoom, 1.0)
+    r = np.sqrt(norm_x**2 + norm_y**2)
+    factor = np.where(r > 1e-6, (1.0 + strength * (r**2)) / zoom, 1.0)
 
     src_norm_x = norm_x * factor
     src_norm_y = norm_y * factor
@@ -1502,34 +1633,232 @@ def diffuse_glow(
     return blended
 
 
-OPS: dict[str, Callable[..., Image.Image]] = {
-    "resize": resize, "crop": crop, "trim": trim, "pad": pad, "seamless": seamless,
-    "orient": orient, "perspective": perspective, "chroma_key": chroma_key,
-    "background_blur": background_blur, "tilt_shift": tilt_shift, "oil_paint": oil_paint,
-    "palette_map": palette_map,
-    "pixelate": pixelate, "mosaic": mosaic, "block_scale": block_scale, "scale2x": scale2x,
-    "quantize": quantize, "posterize": posterize, "grayscale": grayscale,
-    "autocontrast": autocontrast, "equalize": equalize, "invert": invert,
-    "brightness": brightness, "contrast": contrast, "saturation": saturation,
-    "gamma": gamma, "exposure": exposure, "levels": levels,
-    "shadows_highlights": shadows_highlights, "white_balance": white_balance,
-    "sepia": sepia, "duotone": duotone, "blur": blur, "box_blur": box_blur,
-    "motion_blur": motion_blur, "median": median, "minimum": minimum, "maximum": maximum,
-    "mode_filter": mode_filter, "highpass": highpass, "sharpen": sharpen, "unsharp": unsharp,
-    "edge": edge, "rotate": rotate, "flip": flip, "transpose": transpose, "dither": dither,
-    "halftone": halftone, "cel_shade": cel_shade, "ascii": ascii_art, "glitch": glitch,
-    "scanlines": scanlines, "watermark": watermark,
-    "film_grain": film_grain, "de_ai_bloom": de_ai_bloom, "filmic_tone": filmic_tone,
-    "chromatic_aberration": chromatic_aberration, "vignette": vignette,
-    "color_temperature": color_temperature, "focus_lines": focus_lines,
-    "screentone": screentone, "sticker_outline": sticker_outline,
-    "lineart_extract": lineart_extract,
-    "aces_tonemap": aces_tonemap, "guided_filter": guided_filter, "kuwahara": kuwahara,
-    "anamorphic_flare": anamorphic_flare, "color_transfer": color_transfer,
-    "line_color": line_color, "color_balance": color_balance, "fisheye": fisheye,
-    "vibrance": vibrance, "diffuse_glow": diffuse_glow,
-}
+def anti_checkerboard(
+    image: Image.Image,
+    *,
+    strength: float = 0.5,
+    cutoff: float = 0.85,
+) -> Image.Image:
+    """频域网格陷波与混叠抑制：消除生成模型潜空间反卷积引入的周期性棋盘格网格尖峰。"""
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0.0 and 1.0")
+    if not 0.5 <= cutoff <= 1.0:
+        raise ValueError("cutoff must be between 0.5 and 1.0")
+    if strength == 0.0:
+        return image.copy()
 
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+    h, w, c = arr.shape
+
+    u = np.fft.fftfreq(h)
+    v = np.fft.rfftfreq(w)
+    u_grid, v_grid = np.meshgrid(u, v, indexing="ij")
+    freq_radius = np.sqrt(u_grid**2 + v_grid**2)
+    norm_radius = freq_radius / (np.sqrt(0.5**2 + 0.5**2))
+
+    dist_u = np.abs(u_grid)
+    dist_v = np.abs(v_grid)
+    notch_mask = np.ones((h, len(v)), dtype=np.float32)
+    high_freq_zone = norm_radius > cutoff
+    axial_zone = (dist_u > 0.35) | (dist_v > 0.35)
+    target_zone = high_freq_zone & axial_zone
+    notch_mask[target_zone] = 1.0 - strength * 0.75
+
+    filtered_channels = []
+    for ch in range(c):
+        f = np.fft.rfft2(arr[:, :, ch])
+        f_filtered = f * notch_mask
+        restored = np.fft.irfft2(f_filtered, s=(h, w))
+        filtered_channels.append(restored)
+
+    filtered_arr = np.stack(filtered_channels, axis=-1)
+    filtered_arr = np.clip(filtered_arr, 0.0, 255.0).astype(np.uint8)
+    filtered_img = Image.fromarray(filtered_arr, mode="RGB")
+
+    blended = Image.blend(rgb, filtered_img, strength)
+    if alpha is not None:
+        blended = blended.convert("RGBA")
+        blended.putalpha(alpha)
+    return blended
+
+
+def subsurface_scattering(
+    image: Image.Image,
+    *,
+    radius: int = 5,
+    scatter_strength: float = 0.35,
+    skin_only: bool = True,
+) -> Image.Image:
+    """生物次表面散射漫反射模拟：波长依赖性光子扩散消除 AI 均一塑料/蜡质反光。"""
+    if not 1 <= radius <= 30:
+        raise ValueError("radius must be between 1 and 30")
+    if not 0.0 <= scatter_strength <= 1.0:
+        raise ValueError("scatter_strength must be between 0.0 and 1.0")
+    if scatter_strength == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    r, g, b = rgb.split()
+
+    r_diffused = r.filter(ImageFilter.GaussianBlur(radius))
+    g_diffused = g.filter(ImageFilter.GaussianBlur(max(1, radius // 2)))
+    b_diffused = b.filter(ImageFilter.GaussianBlur(max(1, radius // 4)))
+    diffused_rgb = Image.merge("RGB", (r_diffused, g_diffused, b_diffused))
+
+    if skin_only:
+        ycbcr = rgb.convert("YCbCr")
+        _, cb, cr = ycbcr.split()
+        cb_arr = np.asarray(cb, dtype=np.int16)
+        cr_arr = np.asarray(cr, dtype=np.int16)
+        skin_mask = (cb_arr >= 77) & (cb_arr <= 127) & (cr_arr >= 133) & (cr_arr <= 173)
+        mask_img = Image.fromarray((skin_mask * 255).astype(np.uint8), mode="L")
+        mask_img = mask_img.filter(ImageFilter.GaussianBlur(radius=max(1, radius // 2)))
+        scattered = Image.composite(diffused_rgb, rgb, mask_img)
+    else:
+        scattered = diffused_rgb
+
+    blended = Image.blend(rgb, scattered, scatter_strength)
+
+    if alpha is not None:
+        blended = blended.convert("RGBA")
+        blended.putalpha(alpha)
+    return blended
+
+
+def de_haloing(
+    image: Image.Image,
+    *,
+    radius: int = 2,
+    strength: float = 0.6,
+    threshold: int = 25,
+) -> Image.Image:
+    """局部形态学反光晕过冲抑制：抑制高反差边缘由于过度锐化引入的明暗振铃光晕与白边。"""
+    if not 1 <= radius <= 8:
+        raise ValueError("radius must be between 1 and 8")
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0.0 and 1.0")
+    if not 5 <= threshold <= 100:
+        raise ValueError("threshold must be between 5 and 100")
+    if strength == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    size = radius * 2 + 1
+
+    med = rgb.filter(ImageFilter.MedianFilter(size))
+
+    arr_orig = np.asarray(rgb, dtype=np.float32)
+    arr_med = np.asarray(med, dtype=np.float32)
+
+    diff = arr_orig - arr_med
+    overshoot_high = diff > threshold
+    overshoot_low = diff < -threshold
+
+    clamped = arr_orig.copy()
+    clamped[overshoot_high] = (
+        arr_med[overshoot_high] + threshold + (diff[overshoot_high] - threshold) * (1.0 - strength)
+    )
+    clamped[overshoot_low] = (
+        arr_med[overshoot_low] - threshold + (diff[overshoot_low] + threshold) * (1.0 - strength)
+    )
+
+    result_arr = np.clip(clamped, 0.0, 255.0).astype(np.uint8)
+    result_img = Image.fromarray(result_arr, mode="RGB")
+
+    if alpha is not None:
+        result_img = result_img.convert("RGBA")
+        result_img.putalpha(alpha)
+    return result_img
+
+
+OPS: dict[str, Callable[..., Image.Image]] = {
+    "resize": resize,
+    "crop": crop,
+    "trim": trim,
+    "pad": pad,
+    "seamless": seamless,
+    "orient": orient,
+    "perspective": perspective,
+    "chroma_key": chroma_key,
+    "background_blur": background_blur,
+    "tilt_shift": tilt_shift,
+    "oil_paint": oil_paint,
+    "palette_map": palette_map,
+    "pixelate": pixelate,
+    "mosaic": mosaic,
+    "block_scale": block_scale,
+    "scale2x": scale2x,
+    "quantize": quantize,
+    "posterize": posterize,
+    "grayscale": grayscale,
+    "autocontrast": autocontrast,
+    "equalize": equalize,
+    "invert": invert,
+    "brightness": brightness,
+    "contrast": contrast,
+    "saturation": saturation,
+    "gamma": gamma,
+    "exposure": exposure,
+    "levels": levels,
+    "shadows_highlights": shadows_highlights,
+    "white_balance": white_balance,
+    "sepia": sepia,
+    "duotone": duotone,
+    "blur": blur,
+    "box_blur": box_blur,
+    "motion_blur": motion_blur,
+    "median": median,
+    "minimum": minimum,
+    "maximum": maximum,
+    "mode_filter": mode_filter,
+    "highpass": highpass,
+    "sharpen": sharpen,
+    "unsharp": unsharp,
+    "edge": edge,
+    "rotate": rotate,
+    "flip": flip,
+    "transpose": transpose,
+    "dither": dither,
+    "halftone": halftone,
+    "cel_shade": cel_shade,
+    "ascii": ascii_art,
+    "glitch": glitch,
+    "scanlines": scanlines,
+    "watermark": watermark,
+    "film_grain": film_grain,
+    "de_ai_bloom": de_ai_bloom,
+    "filmic_tone": filmic_tone,
+    "chromatic_aberration": chromatic_aberration,
+    "vignette": vignette,
+    "color_temperature": color_temperature,
+    "focus_lines": focus_lines,
+    "screentone": screentone,
+    "sticker_outline": sticker_outline,
+    "lineart_extract": lineart_extract,
+    "aces_tonemap": aces_tonemap,
+    "guided_filter": guided_filter,
+    "kuwahara": kuwahara,
+    "anamorphic_flare": anamorphic_flare,
+    "color_transfer": color_transfer,
+    "line_color": line_color,
+    "color_balance": color_balance,
+    "fisheye": fisheye,
+    "vibrance": vibrance,
+    "diffuse_glow": diffuse_glow,
+    "anti_checkerboard": anti_checkerboard,
+    "subsurface_scattering": subsurface_scattering,
+    "de_haloing": de_haloing,
+}
 
 
 def _optional_ops() -> dict[str, Callable[..., Image.Image]]:
@@ -1549,9 +1878,16 @@ OPS.update(_optional_ops())
 FORMATS = {"png": "PNG", "jpeg": "JPEG", "jpg": "JPEG", "webp": "WEBP", "avif": "AVIF"}
 
 
-def encode(image: Image.Image, *, format: str = "png", quality: int = 90,
-           progressive: bool = False, optimize: bool = True,
-           lossless: bool = False, target_bytes: int | None = None) -> bytes:
+def encode(
+    image: Image.Image,
+    *,
+    format: str = "png",
+    quality: int = 90,
+    progressive: bool = False,
+    optimize: bool = True,
+    lossless: bool = False,
+    target_bytes: int | None = None,
+) -> bytes:
     name = FORMATS.get(format.lower())
     if name is None:
         raise ValueError("unknown output format")
@@ -1566,11 +1902,13 @@ def encode(image: Image.Image, *, format: str = "png", quality: int = 90,
         if target_bytes is not None:
             raise ValueError("target byte size requires a lossy format")
     elif name == "JPEG":
-        options = {"quality": quality, "progressive": progressive,
-                   "subsampling": 0 if quality >= 90 else 2}
+        options = {
+            "quality": quality,
+            "progressive": progressive,
+            "subsampling": 0 if quality >= 90 else 2,
+        }
     elif name == "WEBP":
-        options = {"quality": 100 if lossless else quality, "lossless": lossless,
-                   "method": 4}
+        options = {"quality": 100 if lossless else quality, "lossless": lossless, "method": 4}
     else:
         options = {"quality": quality}
     if target_bytes is None:
