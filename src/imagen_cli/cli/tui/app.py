@@ -1530,6 +1530,8 @@ class WorkbenchApp(App[None]):
         self.film_index = -1
         self.planning = False
         self.meta_base = ""
+        self._preview_cache: dict[tuple[str, int, int, float], str] = {}
+        self._preview_request_id: int = 0
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
@@ -1553,9 +1555,8 @@ class WorkbenchApp(App[None]):
                     ("g", "生成"),
                     ("m", "编辑"),
                     ("t", "变换"),
-                    ("n", "新建"),
-                    ("v", "配置"),
-                    ("x", "删除"),
+                    ("d", "删图"),
+                    ("x", "删除会话"),
                     ("[ ]", "产物"),
                     (":", "命令"),
                     ("?", "帮助"),
@@ -1742,13 +1743,49 @@ class WorkbenchApp(App[None]):
         width, height = artifact.get("width"), artifact.get("height")
         size = f"{width}×{height}" if width and height else ""
         self.meta.update(" · ".join(part for part in (self.meta_base, size) if part))
-        if preview.supported():
-            frame = self.query_one("#preview-frame")
-            cols = max(20, frame.size.width - 2)
-            rows = max(5, frame.size.height - 2)
-            self.preview.update(Text.from_ansi(preview.ansi_blocks(path, cols=cols, rows=rows)))
-        else:
+        if not preview.supported():
             self.preview.update(preview.describe(artifact, path))
+            return
+
+        frame = self.query_one("#preview-frame")
+        cols = max(20, frame.size.width - 2)
+        rows = max(5, frame.size.height - 2)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+
+        cache_key = (str(path), cols, rows, mtime)
+        if cache_key in self._preview_cache:
+            self.preview.update(Text.from_ansi(self._preview_cache[cache_key]))
+            return
+
+        self._preview_request_id += 1
+        req_id = self._preview_request_id
+        # 轻量占位符，UI 立即响应
+        self.preview.update(Text(f"\n\n正在加载图像预览…\n{size}", justify="center"))
+        self._load_preview_async(req_id, path, cols, rows, mtime)
+
+    @work(thread=True, group="preview_render", exclusive=True)
+    def _load_preview_async(
+        self, req_id: int, path: Path, cols: int, rows: int, mtime: float
+    ) -> None:
+        try:
+            ansi_str = preview.ansi_blocks(path, cols=cols, rows=rows)
+        except Exception:
+            return
+        self.call_from_thread(self._on_preview_loaded, req_id, ansi_str, path, cols, rows, mtime)
+
+    def _on_preview_loaded(
+        self, req_id: int, ansi_str: str, path: Path, cols: int, rows: int, mtime: float
+    ) -> None:
+        if req_id != self._preview_request_id:
+            return
+        cache_key = (str(path), cols, rows, mtime)
+        if len(self._preview_cache) > 128:
+            self._preview_cache.clear()
+        self._preview_cache[cache_key] = ansi_str
+        self.preview.update(Text.from_ansi(ansi_str))
 
     def show_detail(self) -> None:
         if self.current is None:

@@ -265,7 +265,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise ValueError("unexpected positional arguments")
         validate(parameters, discover(command)["input_schema"])
         return command, parameters, options
-    if command == "asset show":
+    if command in {"asset show", "asset delete", "asset remove"}:
         if len(words) != 1:
             raise ValueError("one artifact identity required")
         parameters["artifact"] = words[0]

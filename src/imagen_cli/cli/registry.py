@@ -72,6 +72,8 @@ COMMANDS = {
                 ("batch wait", "有界等待批次汇总；不重试子任务"),
                 ("asset gc", "dry-run 列出未被引用的受管产物；--plan --yes 仅确认该清单"),
                 ("asset show", "查看单个产物的路径、归属与来源事实"),
+                ("asset delete", "永久删除指定产物实体并清理本地文件"),
+                ("asset remove", "永久删除指定产物实体（同 asset delete）"),
                 ("asset open", "用系统默认程序打开产物图片，或 --folder 打开所在目录"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
@@ -283,7 +285,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "second": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
         }
         required = ("first", "second")
-    elif name == "asset show":
+    elif name in {"asset show", "asset delete", "asset remove"}:
         properties = {"artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}}
         required = ("artifact",)
     elif name == "asset open":
@@ -473,6 +475,11 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "candidates": {"type": "array", "items": {"type": "object"}},
             "deleted": {"type": "array", "items": {"type": "string"}},
         }, ("dry_run", "plan", "candidates", "deleted"))
+    if command.name in {"asset delete", "asset remove"}:
+        return _object({
+            "artifact_id": {"type": "string"},
+            "deleted": {"type": "boolean"},
+        }, ("artifact_id", "deleted"))
     if command.name.startswith("session "):
         row = {"type": "object"}
         rows = {"type": "array", "items": row}

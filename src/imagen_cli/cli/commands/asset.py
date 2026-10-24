@@ -43,3 +43,16 @@ def show_(
             {"command": f"asset open {artifact}", "creates_paid_request": False},
         ],
     }
+
+
+def delete_(
+    repositories: Repositories, store: ArtifactStore, artifact: str,
+) -> tuple[str, dict[str, Any]]:
+    from imagen_cli.application.cleanup_service import delete_artifact
+
+    try:
+        data = delete_artifact(repositories, store, artifact)
+    except KeyError:
+        return "not_found", {}
+    return "succeeded", data
+

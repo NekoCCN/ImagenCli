@@ -130,3 +130,32 @@ def test_asset_open_uses_the_platform_opener(tmp_path, png_bytes, monkeypatch):
         missing = container.execute("asset open", {"artifact_id": "art_" + "2" * 32})
         assert missing[0] == "not_found"
     assert [folder for _, folder in calls] == [False, True]
+
+
+def test_asset_delete_removes_file_and_links(tmp_path, png_bytes):
+    identity = "art_" + "7" * 32
+    session = "ses_" + "8" * 32
+    command, args, _ = _parse(["asset", "delete", identity])
+    assert command == "asset delete"
+    assert args == {"artifact": identity}
+
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.artifact_store.stage(identity, png_bytes)
+        container.artifact_store.publish(identity)
+        container.repositories.insert("sessions", {
+            "id": session, "name": "del-test", "version": 0,
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        })
+        container.repositories.insert("artifact_links", {
+            "session_id": session, "artifact_id": identity, "role": "output",
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        })
+        assert container.artifact_store.get(identity) is not None
+        status, data = container.execute("asset delete", {"artifact": identity})
+        assert status == "succeeded"
+        assert data["deleted"] is True
+        assert data["artifact_id"] == identity
+        assert container.artifact_store.get(identity) is None
+        assert container.repositories.get("artifacts", identity) is None
+        assert not container.repositories.list("artifact_links", artifact_id=identity)
+

@@ -121,3 +121,35 @@ def remove_session_artifact(
         "purged": purged,
     }
 
+
+def delete_artifact(
+    repositories: Repositories,
+    store: ArtifactStore,
+    artifact_id: str,
+) -> dict[str, Any]:
+    """永久删除指定产物实体及其本地物理文件，级联清理所有关联。"""
+    art_row = repositories.get("artifacts", artifact_id, include_private=True)
+    if art_row is None:
+        raise KeyError(artifact_id)
+    with repositories.transaction():
+        repositories.connection.execute(
+            'DELETE FROM "artifact_links" WHERE artifact_id=?',
+            (artifact_id,),
+        )
+        repositories.connection.execute(
+            'DELETE FROM "artifact_references" WHERE artifact_id=?',
+            (artifact_id,),
+        )
+        managed_rel = art_row.get("managed_relpath")
+        if managed_rel:
+            safe_path(store.root, managed_rel).unlink(missing_ok=True)
+        staging_rel = art_row.get("staging_relpath")
+        if staging_rel:
+            safe_path(store.root, staging_rel).unlink(missing_ok=True)
+        repositories.delete("artifacts", artifact_id)
+    return {
+        "artifact_id": artifact_id,
+        "deleted": True,
+    }
+
+

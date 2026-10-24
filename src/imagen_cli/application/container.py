@@ -435,12 +435,16 @@ class Container:
                 dry_run=args.get("dry_run") is True, plan=args.get("plan"),
                 yes=args.get("yes") is True,
             )
-        if command == "asset show":
+        if command in {"asset show", "asset delete", "asset remove"}:
             from jsonschema import validate
 
             from imagen_cli.cli.commands import asset
 
             validate(args, discover(command)["input_schema"])
+            if command in {"asset delete", "asset remove"}:
+                return asset.delete_(
+                    self.repositories, self.artifact_store, args["artifact"],
+                )
             return asset.show_(
                 self.repositories, self.artifact_store, args["artifact"],
             )
