@@ -102,7 +102,29 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     "通用超分辨率 4x (General SR)": [
         {"op": "superres", "params": {"model": "realesrgan-x4plus", "tile": 256, "overlap": 16}},
     ],
+    "日系治愈空气柔光 (Anime Soft Glow)": [
+        {"op": "diffuse_glow", "params": {"intensity": 0.4, "radius": 20, "threshold": 175}},
+        {"op": "vibrance", "params": {"amount": 0.25}},
+        {"op": "line_color", "params": {"strength": 0.7, "darkness": 0.4}},
+    ],
+    "大魄力动感鱼眼 (Anime Fisheye)": [
+        {"op": "fisheye", "params": {"strength": 0.35, "zoom": 1.05}},
+        {"op": "focus_lines", "params": {"lines": 60, "inner_radius": 0.35, "max_width": 2}},
+    ],
+    "橙青影视色彩平衡 (Teal & Orange)": [
+        {
+            "op": "color_balance",
+            "params": {
+                "shadows": [-0.15, -0.05, 0.2],
+                "highlights": [0.2, 0.05, -0.15],
+            },
+        },
+        {"op": "filmic_tone", "params": {"lift_black": 8, "compress_white": 242}},
+        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True}},
+    ],
 }
+
+PRESETS = PRESET_PIPELINES
 
 OPERATORS: list[OperatorItem] = [
     # --- Anti-AI ---
@@ -721,6 +743,158 @@ OPERATORS: list[OperatorItem] = [
             ),
         ],
     ),
+    OperatorItem(
+        key="line_color",
+        name="线稿自适应染色 (Line Color)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="自适应环境色软化硬黑线稿，消除AI生硬僵黑轮廓",
+        default_op="line_color",
+        default_params={"strength": 0.8, "darkness": 0.5},
+        parameters=[
+            Parameter(
+                "strength",
+                "染色强度",
+                "float",
+                0.8,
+                min_value=0.0,
+                max_value=1.0,
+                description="线稿融入周围环境色的程度 (0.0~1.0)",
+            ),
+            Parameter(
+                "darkness",
+                "暗度保留",
+                "float",
+                0.5,
+                min_value=0.0,
+                max_value=1.0,
+                description="染色后的线稿深度 (0.0极浅~1.0深沉)",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="color_balance",
+        name="影调色彩平衡 (Color Balance)",
+        category="photo",
+        category_label=CATEGORIES["photo"],
+        description="影视工业级阴影/中间调/高光三段式色彩偏移微调",
+        default_op="color_balance",
+        default_params={
+            "shadows": [0.0, 0.0, 0.0],
+            "midtones": [0.0, 0.0, 0.0],
+            "highlights": [0.0, 0.0, 0.0],
+        },
+        parameters=[
+            Parameter(
+                "shadows",
+                "阴影偏移",
+                "str",
+                "0.0,0.0,0.0",
+                description="暗部RGB偏移 (-1.0~1.0)",
+            ),
+            Parameter(
+                "midtones",
+                "中间调偏移",
+                "str",
+                "0.0,0.0,0.0",
+                description="中间调RGB偏移 (-1.0~1.0)",
+            ),
+            Parameter(
+                "highlights",
+                "高光偏移",
+                "str",
+                "0.0,0.0,0.0",
+                description="亮部RGB偏移 (-1.0~1.0)",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="fisheye",
+        name="鱼眼广角透视 (Fisheye Lens)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="极坐标径向透镜畸变，呈现大魄力二次元广角视觉冲击",
+        default_op="fisheye",
+        default_params={"strength": 0.35, "zoom": 1.0},
+        parameters=[
+            Parameter(
+                "strength",
+                "畸变强度",
+                "float",
+                0.35,
+                min_value=-0.8,
+                max_value=1.0,
+                description="正数为鱼眼桶形，负数为枕形",
+            ),
+            Parameter(
+                "zoom",
+                "视场缩放",
+                "float",
+                1.0,
+                min_value=0.5,
+                max_value=2.0,
+                description="画面缩放倍数",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="vibrance",
+        name="智能自然饱和度 (Vibrance)",
+        category="photo",
+        category_label=CATEGORIES["photo"],
+        description="提升低饱和区域纯度，动态保护高饱和度与人物肤色防溢出",
+        default_op="vibrance",
+        default_params={"amount": 0.3},
+        parameters=[
+            Parameter(
+                "amount",
+                "自然饱和度",
+                "float",
+                0.3,
+                min_value=-1.0,
+                max_value=1.0,
+                description="增益系数 (-1.0~1.0)",
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="diffuse_glow",
+        name="日漫扩散柔光 (Diffuse Glow)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="新海诚式高光多尺度漫射，营造空气感梦幻通透氛围",
+        default_op="diffuse_glow",
+        default_params={"threshold": 180, "radius": 20, "intensity": 0.4},
+        parameters=[
+            Parameter(
+                "threshold",
+                "高光阈值",
+                "int",
+                180,
+                min_value=0,
+                max_value=255,
+                description="发光起始亮度 (0~255)",
+            ),
+            Parameter(
+                "radius",
+                "光晕半径",
+                "int",
+                20,
+                min_value=1,
+                max_value=100,
+                description="柔光扩散范围 (1~100)",
+            ),
+            Parameter(
+                "intensity",
+                "柔光浓度",
+                "float",
+                0.4,
+                min_value=0.0,
+                max_value=1.0,
+                description="叠加不透明度 (0.0~1.0)",
+            ),
+        ],
+    ),
 ]
 
 OPERATORS_BY_OP: dict[str, OperatorItem] = {item.default_op: item for item in OPERATORS}
@@ -856,6 +1030,54 @@ INTROS: dict[str, dict[str, str]] = {
         "summary": "基于 RealESRGAN 通用写实模型的 4 倍细节超分重建",
         "principle": "深度神经网络纹理超分辨率重构，兼顾真实细节与清晰度",
         "scenarios": "真实摄影照片、写实人像与宏大场景 4K 放大",
+    },
+    "日系治愈空气柔光": {
+        "title": "日系治愈空气柔光 (Anime Soft Glow)",
+        "summary": "通透高光漫射、自然微饱和度与线稿自适应融入，呈现治愈系光晕",
+        "principle": "高光滤色扩散 + 自然饱和度肤色保护 + 局部环境色线稿软化",
+        "scenarios": "少女漫画、日常治愈立绘、逆光发丝与晨光场景",
+    },
+    "大魄力动感鱼眼": {
+        "title": "大魄力动感鱼眼 (Anime Fisheye)",
+        "summary": "广角鱼眼桶形畸变与动感放射集中线复合，产生强烈画面冲击力",
+        "principle": "极坐标空间径向逆向映射 + 视角焦点放射线发射",
+        "scenarios": "战斗动作、俯冲运镜、情绪高潮与震撼透视构图",
+    },
+    "橙青影视色彩平衡": {
+        "title": "橙青影视色彩平衡 (Teal & Orange)",
+        "summary": "好莱坞与大片级经典冷暖对冲色彩，暗部偏青、亮部偏橙金",
+        "principle": "三段影调亮度权重分离 + 胶片高光滚降 + 微有机噪点",
+        "scenarios": "赛博朋克、夜景霓虹、电影质感大片海报与人像",
+    },
+    "line_color": {
+        "title": "线稿自适应染色 (Line Color)",
+        "summary": "提取黑白硬边并按周围基底颜色进行平滑变色融入",
+        "principle": "局部暗度掩模加权 + 邻域高斯基底色彩插值",
+        "scenarios": "消除AI生硬死黑线、让角色线条自然融入发色与肤色",
+    },
+    "color_balance": {
+        "title": "影调色彩平衡 (Color Balance)",
+        "summary": "阴影、中间调、高光三段式独立色彩偏移控制",
+        "principle": "基于 Luma 分区的三次多项式平滑权重过渡曲线",
+        "scenarios": "日系冷青、夕阳暖金、赛博橙青等精细影视调色",
+    },
+    "fisheye": {
+        "title": "鱼眼广角透视 (Fisheye Lens)",
+        "summary": "光学镜头径向桶形/枕形畸变模拟",
+        "principle": "Brown-Conrady 径向畸变模型 + 双线性重采样",
+        "scenarios": "近距离大视角、冲击力构图、夸张广角透视",
+    },
+    "vibrance": {
+        "title": "智能自然饱和度 (Vibrance)",
+        "summary": "保护高饱和与暖色皮肤，优先提升平淡灰暗区域的鲜活度",
+        "principle": "反饱和度增益曲线 + HSV 肤色空间自适应衰减保护",
+        "scenarios": "拯救灰暗平淡画面、提亮人物气色且绝不爆红爆色",
+    },
+    "diffuse_glow": {
+        "title": "日漫扩散柔光 (Diffuse Glow)",
+        "summary": "多尺度漫反射滤色光晕，营造轻盈空气感与梦幻光斑",
+        "principle": "亮度阈值提取 + 大半径高斯漫射 + 滤色(Screen)柔光复合",
+        "scenarios": "动漫逆光、浪漫场景、眼眸高光与法术发光特效",
     },
 }
 

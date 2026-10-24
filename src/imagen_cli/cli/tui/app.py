@@ -109,6 +109,26 @@ PRESETS: dict[str, list[dict[str, Any]]] = {
     "通用超分辨率 4x": [
         {"op": "superres", "params": {"model": "realesrgan-x4plus", "tile": 256, "overlap": 16}},
     ],
+    "日系治愈空气柔光": [
+        {"op": "diffuse_glow", "params": {"intensity": 0.4, "radius": 20, "threshold": 175}},
+        {"op": "vibrance", "params": {"amount": 0.25}},
+        {"op": "line_color", "params": {"strength": 0.7, "darkness": 0.4}},
+    ],
+    "大魄力动感鱼眼": [
+        {"op": "fisheye", "params": {"strength": 0.35, "zoom": 1.05}},
+        {"op": "focus_lines", "params": {"lines": 60, "inner_radius": 0.35, "max_width": 2}},
+    ],
+    "橙青影视色彩平衡": [
+        {
+            "op": "color_balance",
+            "params": {
+                "shadows": [-0.15, -0.05, 0.2],
+                "highlights": [0.2, 0.05, -0.15],
+            },
+        },
+        {"op": "filmic_tone", "params": {"lift_black": 8, "compress_white": 242}},
+        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True}},
+    ],
 }
 
 
@@ -1394,6 +1414,8 @@ class WorkbenchApp(App[None]):
         Binding("g", "generate", "生成"),
         Binding("m", "edit", "编辑"),
         Binding("x", "delete", "删除会话"),
+        Binding("d", "delete_artifact", "删除图片"),
+        Binding("delete", "delete_artifact", "删除图片", show=False),
         Binding("f", "fork", "分支会话"),
         Binding("e", "export", "导出会话"),
         Binding("t", "transform", "变换"),
@@ -1700,7 +1722,8 @@ class WorkbenchApp(App[None]):
             self._say("执行器不可用", "error")
             return
         fields, optional = command_fields(command)
-        if not fields:
+        required = [f for f in fields if f[0] not in optional]
+        if not required:
             self._run_command(command, {})
             return
 
@@ -1989,6 +2012,36 @@ class WorkbenchApp(App[None]):
             self._say(f"已删除会话：{name}", "ok")
 
         self.push_screen(ConfirmScreen(f"输入 {name} 确认删除", name), finished)
+
+    def action_delete_artifact(self) -> None:
+        target = self._current_artifact()
+        if target is None or self.current is None:
+            self._say("当前会话没有选中的图片", "info")
+            return
+        art_id, _ = target
+        num = self.film_index + 1
+        total = len(self.film_items)
+
+        def finished(confirmed: bool | None) -> None:
+            if not confirmed or self.current is None:
+                return
+            try:
+                from imagen_cli.application.cleanup_service import remove_session_artifact
+
+                remove_session_artifact(
+                    self.deps.repositories, self.deps.store, self.current, art_id, purge=True
+                )
+            except Exception as error:
+                self._say("删除图片失败：" + _sanitize(error), "error")
+                return
+            self.refresh_rows()
+            self.show_detail()
+            self._say(f"已从会话中移除图片 {art_id}", "ok")
+
+        self.push_screen(
+            ConfirmScreen(f"确认从当前会话中移除第 {num}/{total} 张图片？输入 yes 确认", "yes"),
+            finished,
+        )
 
     def action_fork(self) -> None:
         if self.current is None or self.deps.fork is None:

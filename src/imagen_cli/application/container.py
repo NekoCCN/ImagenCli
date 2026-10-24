@@ -261,7 +261,10 @@ class Container:
             validate(args, discover(command)["input_schema"])
             return postprocess.transform_(
                 self.repositories, self.artifact_store, args["artifact"],
-                pipeline=args.get("pipeline"), op=args.get("op"), session=args.get("session"),
+                pipeline=args.get("pipeline"),
+                op=args.get("op"),
+                preset=args.get("preset"),
+                session=args.get("session"),
             )
         if command.startswith("superres "):
             from jsonschema import validate
@@ -284,9 +287,43 @@ class Container:
                 tile=int(args.get("tile", 256)), overlap=int(args.get("overlap", 16)),
             )
         if command == "ops":
-            from imagen_cli.application import media_ops
+            from imagen_cli.application import media_ops, operator_catalog
 
-            return "succeeded", {"operations": sorted(media_ops.OPS)}
+            data: dict[str, Any] = {
+                "operations": sorted(media_ops.OPS),
+                "presets": sorted(operator_catalog.PRESET_PIPELINES),
+            }
+            target_op = args.get("op")
+            target_preset = args.get("preset")
+            verbose = args.get("verbose") is True
+            if target_op or target_preset or verbose:
+                details: dict[str, Any] = {}
+                if target_op:
+                    if target_op in operator_catalog.INTROS:
+                        details[target_op] = operator_catalog.INTROS[target_op]
+                    elif op_item := operator_catalog.get_operator_item(target_op):
+                        details[target_op] = {
+                            "title": op_item.name,
+                            "summary": op_item.description,
+                            "principle": op_item.category_label,
+                            "scenarios": "CLI / TUI 交互调参",
+                        }
+                elif target_preset:
+                    match_key = next(
+                        (k for k in operator_catalog.PRESET_PIPELINES
+                         if target_preset.lower() in k.lower()),
+                        None,
+                    )
+                    if match_key:
+                        intro_data = operator_catalog.INTROS.get(match_key) or {}
+                        details[match_key] = {
+                            "pipeline": operator_catalog.PRESET_PIPELINES[match_key],
+                            "intro": intro_data,
+                        }
+                else:
+                    details = dict(operator_catalog.INTROS)
+                data["details"] = details
+            return "succeeded", data
         if command == "sheet":
             from jsonschema import validate
 
@@ -341,14 +378,13 @@ class Container:
                     self.repositories, self.private_state_store,
                     args["profile"], args["key_file"],
                 )
+            profile_data: dict[str, Any] | None = None
             if "config_file" in args:
-                data = profile.read_config(args["config_file"], args["profile"])
+                profile_data = profile.read_config(args["config_file"], args["profile"])
             elif command == "profile set":
-                data = profile.build_set(args)
-            else:
-                data = None
+                profile_data = profile.build_set(args)
             return profile.execute(
-                self.repositories, command, profile=args.get("profile"), data=data,
+                self.repositories, command, profile=args.get("profile"), data=profile_data,
                 limit=self.options.limit, cursor=self.options.cursor,
             )
         if command in {"providers", "models"}:
@@ -362,13 +398,20 @@ class Container:
                 limit=self.options.limit, cursor=self.options.cursor,
             )
         if command in {
-            "session fork", "session export", "session import", "session delete", "asset gc",
+            "session fork", "session export", "session import", "session delete",
+            "session remove-artifact", "session remove-image", "asset gc",
         }:
             from jsonschema import validate
 
             from imagen_cli.cli.commands import history
 
             validate(args, discover(command)["input_schema"])
+            if command in {"session remove-artifact", "session remove-image"}:
+                return history.remove_artifact_(
+                    self.repositories, self.artifact_store,
+                    args["session"], args["artifact"],
+                    purge=args.get("purge") is not False,
+                )
             if command == "session fork":
                 return history.fork_(
                     self.repositories, args["session"],

@@ -71,3 +71,53 @@ def collect(
             repositories.delete("artifacts", row["id"])
         deleted.append(row["id"])
     return {"dry_run": False, "candidates": preview, "deleted": deleted}
+
+
+def remove_session_artifact(
+    repositories: Repositories,
+    store: ArtifactStore,
+    session_id: str,
+    artifact_id: str,
+    *,
+    purge: bool = True,
+) -> dict[str, Any]:
+    session = repositories.get("sessions", session_id)
+    if session is None:
+        raise KeyError(session_id)
+
+    links = repositories.list("artifact_links", session_id=session_id, artifact_id=artifact_id)
+    refs = repositories.list("artifact_references", session_id=session_id, artifact_id=artifact_id)
+    if not links and not refs:
+        raise KeyError(f"artifact {artifact_id} not in session {session_id}")
+
+    with repositories.transaction():
+        repositories.connection.execute(
+            'DELETE FROM "artifact_links" WHERE session_id=? AND artifact_id=?',
+            (session_id, artifact_id),
+        )
+        repositories.connection.execute(
+            'DELETE FROM "artifact_references" WHERE session_id=? AND artifact_id=?',
+            (session_id, artifact_id),
+        )
+
+    purged = False
+    if purge and artifact_id not in queries.live_references(repositories):
+        art_row = repositories.get("artifacts", artifact_id, include_private=True)
+        if art_row is not None:
+            managed_rel = art_row.get("managed_relpath")
+            if managed_rel:
+                safe_path(store.root, managed_rel).unlink(missing_ok=True)
+            staging_rel = art_row.get("staging_relpath")
+            if staging_rel:
+                safe_path(store.root, staging_rel).unlink(missing_ok=True)
+            with repositories.transaction():
+                repositories.delete("artifacts", artifact_id)
+        purged = True
+
+    return {
+        "session_id": session_id,
+        "artifact_id": artifact_id,
+        "removed": True,
+        "purged": purged,
+    }
+

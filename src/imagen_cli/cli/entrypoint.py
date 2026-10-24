@@ -47,7 +47,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "count", "size", "provider-params-file", "digest", "scope", "concurrency",
                 "to", "from-turn", "artifact", "name", "plan",
                 "provider", "family", "base-url", "model-default", "credential-ref",
-                "revision", "pipeline", "op", "send-credential", "id", "first", "second",
+                "revision", "pipeline", "op", "preset", "verbose", "purge",
+                "send-credential", "id", "first", "second",
                 "artifacts", "columns", "cell", "backend", "tile", "overlap", "accept",
                 "key-file", "folder", "skill", "force",
             }
@@ -62,7 +63,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 raise ValueError("duplicate option")
             value: Any = raw_value
             boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
-                "send-credential", "accept", "folder", "force",
+                "send-credential", "accept", "folder", "force", "verbose", "purge",
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
@@ -129,9 +130,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         "batch wait": {"timeout"},
         "plan execute": {"timeout"},
         "session delete": {"yes"},
+        "session remove-artifact": {"purge"},
+        "session remove-image": {"purge"},
         "asset gc": {"dry_run", "yes"},
         "cache purge": {"plan", "yes"},
-        "transform": {"pipeline", "op", "session"},
+        "transform": {"pipeline", "op", "preset", "session"},
+        "ops": {"op", "preset", "verbose"},
         "models refresh": {"profile", "send_credential"},
         "models add": {"profile", "id"},
         "models list": {"profile"},
@@ -200,6 +204,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters["yes"] = True
         validate(parameters, schema)
         return command, parameters, options
+    if command in {"session remove-artifact", "session remove-image"}:
+        if len(words) != 2:
+            raise ValueError("session and artifact identities required")
+        parameters["session"] = words[0]
+        parameters["artifact"] = words[1]
+        validate(parameters, schema)
+        return command, parameters, options
     if command == "session import":
         if len(words) != 1 or parameters:
             raise ValueError("one archive path required")
@@ -210,8 +221,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         if len(words) != 1:
             raise ValueError("one artifact identity required")
         parameters["artifact"] = words[0]
-        if "pipeline" not in parameters and "op" not in parameters:
-            raise ValueError("pipeline or op is required")
+        if "pipeline" not in parameters and "op" not in parameters and "preset" not in parameters:
+            raise ValueError("pipeline, op or preset is required")
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("models "):
@@ -236,7 +247,16 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters["yes"] = True
         validate(parameters, schema)
         return command, parameters, options
-    if command in {"ops", "superres models"}:
+    if command == "ops":
+        if len(words) > 1:
+            raise ValueError("unexpected positional arguments")
+        if words:
+            if "op" in parameters:
+                raise ValueError("duplicate option")
+            parameters["op"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command == "superres models":
         if words or parameters:
             raise ValueError("unexpected arguments")
         return command, {}, options

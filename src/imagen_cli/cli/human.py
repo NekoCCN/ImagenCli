@@ -112,6 +112,32 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
     operations = data.get("operations")
     if isinstance(operations, list) and operations:
         lines.append("操作：" + "、".join(str(item) for item in operations))
+    presets = data.get("presets")
+    if isinstance(presets, list) and presets:
+        lines.append("预设：" + "、".join(str(item) for item in presets))
+    details = data.get("details")
+    if isinstance(details, dict) and details:
+        lines.append("知识库与原理说明：")
+        for key, item in details.items():
+            if isinstance(item, dict):
+                title = item.get("title", key)
+                summary = item.get("summary", "")
+                principle = item.get("principle", "")
+                scenarios = item.get("scenarios", "")
+                lines.append(f"  ✦ {title}")
+                if summary:
+                    lines.append(f"    说明：{summary}")
+                if principle:
+                    lines.append(f"    原理：{principle}")
+                if scenarios:
+                    lines.append(f"    适用：{scenarios}")
+            else:
+                lines.append(f"  ✦ {key}: {item}")
+    if data.get("removed") and data.get("artifact_id"):
+        purged_note = "（已回收文件）" if data.get("purged") else ""
+        sess_lbl = data.get('session_id')
+        art_lbl = data.get('artifact_id')
+        lines.append(f"✓ 已从会话 {sess_lbl} 移除产物 {art_lbl}{purged_note}")
     manual = data.get("manual")
     if isinstance(manual, str) and manual:
         lines.append(manual)

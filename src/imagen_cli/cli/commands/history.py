@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any, cast
 
-from imagen_cli.application.cleanup_service import collect, delete_session
+from imagen_cli.application.cleanup_service import collect, delete_session, remove_session_artifact
 from imagen_cli.application.export_service import _rows, export_session
 from imagen_cli.application.fork_service import fork
 from imagen_cli.application.import_service import import_archive
@@ -135,3 +135,22 @@ def gc_(
         "candidates": preview["candidates"],
         "deleted": applied["deleted"],
     }
+
+
+def remove_artifact_(
+    repositories: Repositories,
+    store: ArtifactStore,
+    session_id: str,
+    artifact_id: str,
+    *,
+    purge: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    try:
+        real_session_id = _identity(repositories, session_id)
+        data = remove_session_artifact(
+            repositories, store, real_session_id, artifact_id, purge=purge
+        )
+    except KeyError:
+        return "not_found", {}
+    return "succeeded", data
+

@@ -1292,6 +1292,216 @@ def color_transfer(
     return res
 
 
+def line_color(image: Image.Image, *, strength: float = 0.8, darkness: float = 0.5) -> Image.Image:
+    """Adaptive lineart recoloring: soften harsh dark lines with ambient base colors."""
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0.0 and 1.0")
+    if not 0.0 <= darkness <= 1.0:
+        raise ValueError("darkness must be between 0.0 and 1.0")
+    if strength == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+
+    blur_rad = max(2, min(w, h) // 20)
+    blurred = rgb.filter(ImageFilter.GaussianBlur(blur_rad))
+
+    orig_arr = np.array(rgb, dtype=np.float32)
+    base_arr = np.array(blurred, dtype=np.float32)
+
+    lum = 0.299 * orig_arr[..., 0] + 0.587 * orig_arr[..., 1] + 0.114 * orig_arr[..., 2]
+    line_weight = np.clip((140.0 - lum) / 140.0, 0.0, 1.0) * strength
+
+    tinted_line = base_arr * (darkness * 0.6 + 0.15)
+    blended = orig_arr * (1.0 - line_weight[..., None]) + tinted_line * line_weight[..., None]
+    result = Image.fromarray(np.clip(blended, 0, 255).astype(np.uint8), mode="RGB")
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def color_balance(
+    image: Image.Image,
+    *,
+    shadows: tuple[float, float, float] | list[float] = (0.0, 0.0, 0.0),
+    midtones: tuple[float, float, float] | list[float] = (0.0, 0.0, 0.0),
+    highlights: tuple[float, float, float] | list[float] = (0.0, 0.0, 0.0),
+) -> Image.Image:
+    """Three-way color balance across shadows, midtones, and highlights."""
+    import numpy as np
+
+    sh = [float(v) for v in shadows]
+    md = [float(v) for v in midtones]
+    hl = [float(v) for v in highlights]
+    if len(sh) != 3 or len(md) != 3 or len(hl) != 3:
+        raise ValueError("shadows, midtones, and highlights must each have 3 components (RGB)")
+    for component_arr in (sh, md, hl):
+        for v in component_arr:
+            if not -1.0 <= v <= 1.0:
+                raise ValueError("color balance shift values must be between -1.0 and 1.0")
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.array(rgb, dtype=np.float32) / 255.0
+
+    lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+    w_s = np.clip((0.5 - lum) / 0.5, 0.0, 1.0) ** 1.5
+    w_h = np.clip((lum - 0.5) / 0.5, 0.0, 1.0) ** 1.5
+    w_m = np.clip(1.0 - np.abs(lum - 0.5) / 0.5, 0.0, 1.0) ** 1.5
+
+    shift_s = np.array(sh, dtype=np.float32) * 0.35
+    shift_m = np.array(md, dtype=np.float32) * 0.35
+    shift_h = np.array(hl, dtype=np.float32) * 0.35
+
+    delta = (
+        w_s[..., None] * shift_s +
+        w_m[..., None] * shift_m +
+        w_h[..., None] * shift_h
+    )
+
+    out_arr = np.clip((arr + delta) * 255.0, 0, 255).astype(np.uint8)
+    result = Image.fromarray(out_arr, mode="RGB")
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def fisheye(image: Image.Image, *, strength: float = 0.3, zoom: float = 1.0) -> Image.Image:
+    """Lens radial distortion (barrel/fisheye if strength > 0, pincushion if < 0)."""
+    if not -0.8 <= strength <= 1.0:
+        raise ValueError("strength must be between -0.8 and 1.0")
+    if not 0.5 <= zoom <= 2.5:
+        raise ValueError("zoom must be between 0.5 and 2.5")
+    if strength == 0.0 and zoom == 1.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    arr = np.array(rgb)
+
+    y_coords, x_coords = np.mgrid[0:h, 0:w]
+    norm_x = (2.0 * x_coords - (w - 1)) / max(w, h)
+    norm_y = (2.0 * y_coords - (h - 1)) / max(w, h)
+
+    r = np.sqrt(norm_x ** 2 + norm_y ** 2)
+    factor = np.where(r > 1e-6, (1.0 + strength * (r ** 2)) / zoom, 1.0)
+
+    src_norm_x = norm_x * factor
+    src_norm_y = norm_y * factor
+
+    src_x = (src_norm_x * max(w, h) + (w - 1)) / 2.0
+    src_y = (src_norm_y * max(w, h) + (h - 1)) / 2.0
+
+    x0 = np.floor(src_x).astype(np.int32)
+    x1 = x0 + 1
+    y0 = np.floor(src_y).astype(np.int32)
+    y1 = y0 + 1
+
+    x0_c = np.clip(x0, 0, w - 1)
+    x1_c = np.clip(x1, 0, w - 1)
+    y0_c = np.clip(y0, 0, h - 1)
+    y1_c = np.clip(y1, 0, h - 1)
+
+    wx = (src_x - x0)[..., None]
+    wy = (src_y - y0)[..., None]
+
+    val_00 = arr[y0_c, x0_c]
+    val_01 = arr[y0_c, x1_c]
+    val_10 = arr[y1_c, x0_c]
+    val_11 = arr[y1_c, x1_c]
+
+    top = val_00 * (1.0 - wx) + val_01 * wx
+    bottom = val_10 * (1.0 - wx) + val_11 * wx
+    interpolated = top * (1.0 - wy) + bottom * wy
+
+    in_bounds = (src_x >= 0) & (src_x < w) & (src_y >= 0) & (src_y < h)
+    out_arr = np.where(in_bounds[..., None], interpolated, 0).astype(np.uint8)
+
+    result = Image.fromarray(out_arr, mode="RGB")
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def vibrance(image: Image.Image, *, amount: float = 0.3) -> Image.Image:
+    """Smart saturation boosting muted tones while protecting saturated colors and skin tones."""
+    if not -1.0 <= amount <= 1.0:
+        raise ValueError("amount must be between -1.0 and 1.0")
+    if amount == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.array(rgb, dtype=np.float32)
+
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+
+    sat = np.where(max_c > 1e-4, (max_c - min_c) / (max_c + 1e-4), 0.0)
+    gain = (1.0 - sat) * amount
+
+    skin_mask = (r > g) & (g > b) & ((r - b) > 20)
+    gain = np.where(skin_mask, gain * 0.5, gain)
+
+    out_arr = luma[..., None] + (arr - luma[..., None]) * (1.0 + gain[..., None])
+    result = Image.fromarray(np.clip(out_arr, 0, 255).astype(np.uint8), mode="RGB")
+
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def diffuse_glow(
+    image: Image.Image,
+    *,
+    threshold: int = 180,
+    radius: int = 20,
+    intensity: float = 0.4,
+) -> Image.Image:
+    """Ethereal diffuse glow / bloom for anime & dreamlike highlight diffusion."""
+    if not 0 <= threshold <= 255:
+        raise ValueError("threshold must be between 0 and 255")
+    if not 1 <= radius <= 100:
+        raise ValueError("radius must be between 1 and 100")
+    if not 0.0 <= intensity <= 1.0:
+        raise ValueError("intensity must be between 0.0 and 1.0")
+    if intensity == 0.0:
+        return image.copy()
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    lum = rgb.convert("L")
+
+    denom = max(1, 255 - threshold)
+    mask = lum.point(lambda v: int(255 * ((v - threshold) / denom) ** 1.3) if v > threshold else 0)
+    highlights = Image.composite(rgb, Image.new("RGB", rgb.size, (0, 0, 0)), mask)
+    glow = highlights.filter(ImageFilter.GaussianBlur(radius))
+
+    screened = ImageChops.screen(rgb, glow)
+    blended = Image.blend(rgb, screened, intensity)
+
+    if alpha is not None:
+        blended = blended.convert("RGBA")
+        blended.putalpha(alpha)
+    return blended
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
     "resize": resize, "crop": crop, "trim": trim, "pad": pad, "seamless": seamless,
     "orient": orient, "perspective": perspective, "chroma_key": chroma_key,
@@ -1316,7 +1526,10 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "lineart_extract": lineart_extract,
     "aces_tonemap": aces_tonemap, "guided_filter": guided_filter, "kuwahara": kuwahara,
     "anamorphic_flare": anamorphic_flare, "color_transfer": color_transfer,
+    "line_color": line_color, "color_balance": color_balance, "fisheye": fisheye,
+    "vibrance": vibrance, "diffuse_glow": diffuse_glow,
 }
+
 
 
 def _optional_ops() -> dict[str, Callable[..., Image.Image]]:

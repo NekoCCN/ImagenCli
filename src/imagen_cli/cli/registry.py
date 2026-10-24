@@ -57,6 +57,8 @@ COMMANDS = {
                 ("session export", "导出不含秘密的可移植 ZIP；不发送请求"),
                 ("session import", "校验 ZIP 并事务导入，重映射全部标识"),
                 ("session delete", "逻辑删除 session；需显式 --yes"),
+                ("session remove-artifact", "从会话中移除指定的产物图片"),
+                ("session remove-image", "从会话中移除指定的产物图片（同 remove-artifact）"),
                 ("job get", "查看持久任务事实"),
                 ("job wait", "有界等待本地任务状态；不轮询供应商"),
                 ("job fetch", "从本地持久响应补存内联图片或安全下载结果；不重新生成"),
@@ -194,6 +196,10 @@ def _input_schema(name: str) -> dict[str, Any]:
         elif name == "session delete":
             properties["yes"] = {"const": True}
             required += ("yes",)
+        elif name in {"session remove-artifact", "session remove-image"}:
+            properties["artifact"] = {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}
+            properties["purge"] = {"type": "boolean", "default": True}
+            required += ("artifact",)
     elif name == "session import":
         properties, required = {"archive": text}, ("archive",)
     elif name.startswith("cache "):
@@ -237,6 +243,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
             "pipeline": text,
             "op": text,
+            "preset": text,
             "session": text,
         }
         required = ("artifact",)
@@ -249,7 +256,11 @@ def _input_schema(name: str) -> dict[str, Any]:
         }
         required = ("artifacts",)
     elif name == "ops":
-        properties = {}
+        properties = {
+            "op": text,
+            "preset": text,
+            "verbose": {"type": "boolean"},
+        }
         required = ()
     elif name == "superres models":
         properties = {}
@@ -320,8 +331,11 @@ def _data_schema(command: Command) -> dict[str, Any]:
                         "results": {"type": "array", "items": {"type": "object"}}},
                        ("artifact", "reference", "results"))
     if command.name == "ops":
-        return _object({"operations": {"type": "array", "items": {"type": "string"}}},
-                       ("operations",))
+        return _object({
+            "operations": {"type": "array", "items": {"type": "string"}},
+            "presets": {"type": "array", "items": {"type": "string"}},
+            "details": {"type": "object"},
+        }, ("operations",))
     if command.name == "compare":
         return _object({
             "first": {"type": "string"}, "second": {"type": "string"},
@@ -430,6 +444,13 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "deleted": {"type": "boolean"},
             "exported_files_untouched": {"type": "boolean"},
         }, ("session", "deleted", "exported_files_untouched"))
+    if command.name in {"session remove-artifact", "session remove-image"}:
+        return _object({
+            "session_id": {"type": "string"},
+            "artifact_id": {"type": "string"},
+            "removed": {"type": "boolean"},
+            "purged": {"type": "boolean"},
+        }, ("session_id", "artifact_id", "removed"))
     if command.name == "asset open":
         return _object({
             "artifact": {"type": "string"}, "path": {"type": "string"},

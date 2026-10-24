@@ -964,3 +964,62 @@ def test_worker_executor_uses_an_isolated_workspace(tmp_path):
         repositories.connection.close()
     assert status == "succeeded"
     assert "pixelate" in data["operations"]
+
+
+def test_tui_delete_artifact_key_binding(deps):
+    import io
+
+    from imagen_cli.cli.tui.app import ConfirmScreen
+
+    deps_value, _ = deps
+    repositories = deps_value.repositories
+    store = deps_value.store
+    session_id = "ses_00000000000000000000000000000000"
+    art_id = "art_" + "d" * 32
+
+    img = Image.new("RGB", (16, 16), (200, 100, 100))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw = buf.getvalue()
+
+    store.stage(art_id, raw)
+    store.publish(art_id)
+    repositories.insert("artifact_links", {
+        "session_id": session_id,
+        "artifact_id": art_id,
+        "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            # Select first session
+            app.current = session_id
+            app.show_detail()
+            await pilot.pause()
+            assert len(app.film_items) >= 1
+            assert str(app.film_items[0]["id"]) == art_id
+
+            # Press 'd' to open ConfirmScreen
+            await pilot.press("d")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmScreen)
+
+            # Type 'yes' and enter to confirm removal
+            for ch in "yes":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # ConfirmScreen dismissed, film_items empty
+            assert not isinstance(app.screen, ConfirmScreen)
+            assert len(app.film_items) == 0
+            # Database link removed
+            links = repositories.list("artifact_links", session_id=session_id, artifact_id=art_id)
+            assert len(links) == 0
+
+    asyncio.run(run())
+

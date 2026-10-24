@@ -81,6 +81,13 @@ CASES = {
     "kuwahara": {"size": 3},
     "anamorphic_flare": {"threshold": 180, "length": 10, "tint": "#4a90e2", "intensity": 0.5},
     "color_transfer": {"style": "anime_sky", "strength": 0.8},
+    "line_color": {"strength": 0.5, "darkness": 0.4},
+    "color_balance": {
+        "shadows": [0.1, 0.0, -0.1], "midtones": [0.0, 0.1, 0.0], "highlights": [-0.1, 0.0, 0.1]
+    },
+    "fisheye": {"strength": 0.2, "zoom": 1.0},
+    "vibrance": {"amount": 0.3},
+    "diffuse_glow": {"threshold": 160, "radius": 4, "intensity": 0.3},
 }
 
 

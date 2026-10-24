@@ -41,6 +41,7 @@ def transform_(
     *,
     pipeline: str | None = None,
     op: str | None = None,
+    preset: str | None = None,
     session: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     steps: list[dict[str, Any]]
@@ -50,7 +51,21 @@ def transform_(
         steps = cast(list[dict[str, Any]], read_json(pipeline))
     elif op is not None:
         steps = [parse_op(op)]
+    elif preset is not None:
+        from imagen_cli.application.operator_catalog import PRESET_PIPELINES
+
+        match = None
+        if preset in PRESET_PIPELINES:
+            match = PRESET_PIPELINES[preset]
+        else:
+            for k, v in PRESET_PIPELINES.items():
+                if preset.lower() in k.lower():
+                    match = v
+                    break
+        if match is None:
+            raise ValueError(f"preset '{preset}' not found")
+        steps = match
     else:
-        raise ValueError("pipeline or op is required")
+        raise ValueError("pipeline, op or preset is required")
     row = apply(repositories, store, artifact, steps, session_id=session)
     return "succeeded", {"artifact": row, "source": artifact}
