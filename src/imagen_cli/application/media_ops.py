@@ -779,45 +779,64 @@ def palette_map(
 def film_grain(
     image: Image.Image,
     *,
-    amount: float = 0.05,
+    amount: float = 0.03,
+    grain_size: float = 1.2,
     monochrome: bool = True,
     shadow_bias: bool = True,
     seed: int = 42,
 ) -> Image.Image:
-    """Anti-AI analog grain: organic Gaussian noise with luminance weighting."""
+    """标准物理胶片微粒模拟：基于银盐晶体团簇与照度加权，杜绝单像素数码噪点。"""
     if not 0.0 <= amount <= 0.5:
         raise ValueError("amount must be between 0.0 and 0.5")
     if amount == 0.0:
         return image.copy()
+
+    import numpy as np
+
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
-    w, h = image.size
-    rng = random.Random(seed)
+    w, h = rgb.size
+    rng = np.random.default_rng(seed)
 
-    table = [max(0, min(255, int(128 + rng.gauss(0, amount * 255 * 0.9)))) for _ in range(4096)]
-    if monochrome:
-        noise_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
-        noise_img = Image.frombytes("L", (w, h), noise_bytes).convert("RGB")
+    if grain_size > 1.0:
+        small_w = max(1, int(w / grain_size))
+        small_h = max(1, int(h / grain_size))
+        if monochrome:
+            noise_small = rng.normal(0.0, 1.0, (small_h, small_w)).astype(np.float32)
+            noise_pil = Image.fromarray(
+                ((noise_small * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8), mode="L"
+            )
+            noise_resized = noise_pil.resize((w, h), Image.Resampling.BILINEAR)
+            noise = (np.asarray(noise_resized, dtype=np.float32) / 255.0 - 0.5) * 2.0
+            noise = np.stack([noise] * 3, axis=-1)
+        else:
+            noise_channels = []
+            for _ in range(3):
+                ns = rng.normal(0.0, 1.0, (small_h, small_w)).astype(np.float32)
+                npil = Image.fromarray(
+                    ((ns * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8), mode="L"
+                )
+                nr = npil.resize((w, h), Image.Resampling.BILINEAR)
+                noise_channels.append((np.asarray(nr, dtype=np.float32) / 255.0 - 0.5) * 2.0)
+            noise = np.stack(noise_channels, axis=-1)
     else:
-        r_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
-        g_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
-        b_bytes = bytes(table[rng.getrandbits(12)] for _ in range(w * h))
-        noise_img = Image.merge(
-            "RGB",
-            (
-                Image.frombytes("L", (w, h), r_bytes),
-                Image.frombytes("L", (w, h), g_bytes),
-                Image.frombytes("L", (w, h), b_bytes),
-            ),
-        )
+        if monochrome:
+            ns = rng.normal(0.0, 1.0, (h, w)).astype(np.float32)
+            noise = np.stack([ns] * 3, axis=-1)
+        else:
+            noise = rng.normal(0.0, 1.0, (h, w, 3)).astype(np.float32)
 
-    soft = ImageChops.soft_light(rgb, noise_img)
+    arr = np.asarray(rgb, dtype=np.float32) / 255.0
+    lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+
     if shadow_bias:
-        lum = rgb.convert("L")
-        mask = lum.point(lambda v: 255 if v <= 160 else max(0, 255 - (v - 160) * 3))
-        result = Image.composite(soft, rgb, mask)
+        weight = np.clip(1.0 - (lum / 0.85) ** 1.5, 0.0, 1.0)[..., None]
     else:
-        result = soft
+        weight = 1.0
+
+    noisy = arr + noise * weight * (amount * 0.4)
+    out_arr = np.clip(noisy * 255.0, 0.0, 255.0).astype(np.uint8)
+    result = Image.fromarray(out_arr, mode="RGB")
 
     if alpha is not None:
         result = result.convert("RGBA")
@@ -828,12 +847,12 @@ def film_grain(
 def de_ai_bloom(
     image: Image.Image,
     *,
-    radius: int = 8,
-    intensity: float = 0.3,
-    threshold: int = 180,
+    radius: int = 6,
+    intensity: float = 0.12,
+    threshold: int = 220,
     preserve_lines: bool = True,
 ) -> Image.Image:
-    """Anti-AI / Anime glow: diffuse highlights while preserving line art."""
+    """高光漫反射保边微光晕：聚焦极高光强点，微量漫射光泽，防止画面大面积泛白。"""
     if radius < 1 or radius > 100:
         raise ValueError("radius must be between 1 and 100")
     if not 0.0 <= intensity <= 1.0:
@@ -847,7 +866,7 @@ def de_ai_bloom(
     lum = rgb.convert("L")
 
     denom = max(1, 255 - threshold)
-    mask = lum.point(lambda v: int(255 * ((v - threshold) / denom) ** 1.5) if v > threshold else 0)
+    mask = lum.point(lambda v: int(255 * ((v - threshold) / denom) ** 2.0) if v > threshold else 0)
     highlights = Image.composite(rgb, Image.new("RGB", rgb.size, (0, 0, 0)), mask)
     glow = highlights.filter(ImageFilter.GaussianBlur(radius))
 
@@ -867,12 +886,12 @@ def de_ai_bloom(
 def filmic_tone(
     image: Image.Image,
     *,
-    lift_black: int = 6,
-    compress_white: int = 245,
-    saturation: float = 0.95,
+    lift_black: int = 3,
+    compress_white: int = 246,
+    saturation: float = 0.98,
     warmth: float = 0.0,
 ) -> Image.Image:
-    """Anti-AI filmic tone curve: lift crushed blacks and compress harsh blown highlights."""
+    """真实胶片色阶响应：高光软肩平滑滚降压制死白，微量垫起暗部，中间调严格保持自然曝光。"""
     if not 0 <= lift_black <= 50:
         raise ValueError("lift_black must be between 0 and 50")
     if not 150 <= compress_white <= 255:
@@ -884,21 +903,29 @@ def filmic_tone(
 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
-    span = compress_white - lift_black
 
-    base_lut = [
-        int(lift_black + span * ((i / 255.0) ** 2 * (3.0 - 2.0 * (i / 255.0)))) for i in range(256)
-    ]
+    lut = []
+    for i in range(256):
+        x = i / 255.0
+        lift = (lift_black / 255.0) * max(0.0, 1.0 - x / 0.2) ** 2
+        if x > 0.75:
+            excess = (x - 0.75) / 0.25
+            max_comp = 1.0 - (compress_white / 255.0)
+            comp = max_comp * (excess**1.6)
+        else:
+            comp = 0.0
+        val = int(max(0, min(255, round((x + lift - comp) * 255.0))))
+        lut.append(val)
 
     r_lut = [
-        max(0, min(255, int(base_lut[i] + warmth * 10 * (1 - abs(i - 128) / 128.0))))
+        int(max(0, min(255, round(lut[i] + warmth * 5.0 * (1.0 - abs(i - 128) / 128.0)))))
         for i in range(256)
     ]
     b_lut = [
-        max(0, min(255, int(base_lut[i] - warmth * 10 * (1 - abs(i - 128) / 128.0))))
+        int(max(0, min(255, round(lut[i] - warmth * 5.0 * (1.0 - abs(i - 128) / 128.0)))))
         for i in range(256)
     ]
-    g_lut = base_lut
+    g_lut = lut
 
     r, g, b = rgb.split()
     r = r.point(r_lut)
@@ -1504,10 +1531,10 @@ def color_balance(
     return result
 
 
-def fisheye(image: Image.Image, *, strength: float = 0.3, zoom: float = 1.0) -> Image.Image:
-    """Lens radial distortion (barrel/fisheye if strength > 0, pincushion if < 0)."""
-    if not -0.8 <= strength <= 1.0:
-        raise ValueError("strength must be between -0.8 and 1.0")
+def fisheye(image: Image.Image, *, strength: float = 0.35, zoom: float = 1.0) -> Image.Image:
+    """标准广角透镜桶形畸变模拟：四角自适应归一化，视场完整，杜绝四周黑色死区。"""
+    if not -0.8 <= strength <= 1.5:
+        raise ValueError("strength must be between -0.8 and 1.5")
     if not 0.5 <= zoom <= 2.5:
         raise ValueError("zoom must be between 0.5 and 2.5")
     if strength == 0.0 and zoom == 1.0:
@@ -1518,46 +1545,46 @@ def fisheye(image: Image.Image, *, strength: float = 0.3, zoom: float = 1.0) -> 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
     w, h = rgb.size
-    arr = np.array(rgb)
+    arr = np.asarray(rgb, dtype=np.float32)
 
     y_coords, x_coords = np.mgrid[0:h, 0:w]
-    norm_x = (2.0 * x_coords - (w - 1)) / max(w, h)
-    norm_y = (2.0 * y_coords - (h - 1)) / max(w, h)
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+    max_r = np.sqrt(cx**2 + cy**2)
 
+    norm_x = (x_coords - cx) / max_r
+    norm_y = (y_coords - cy) / max_r
     r = np.sqrt(norm_x**2 + norm_y**2)
-    factor = np.where(r > 1e-6, (1.0 + strength * (r**2)) / zoom, 1.0)
+
+    if strength > 0:
+        factor = (1.0 + strength * (r**2)) / ((1.0 + strength) * zoom)
+    else:
+        factor = (1.0 + strength * (r**2)) / zoom
 
     src_norm_x = norm_x * factor
     src_norm_y = norm_y * factor
 
-    src_x = (src_norm_x * max(w, h) + (w - 1)) / 2.0
-    src_y = (src_norm_y * max(w, h) + (h - 1)) / 2.0
+    src_x = np.clip(src_norm_x * max_r + cx, 0.0, w - 1.0001)
+    src_y = np.clip(src_norm_y * max_r + cy, 0.0, h - 1.0001)
 
     x0 = np.floor(src_x).astype(np.int32)
-    x1 = x0 + 1
+    x1 = np.minimum(x0 + 1, w - 1)
     y0 = np.floor(src_y).astype(np.int32)
-    y1 = y0 + 1
-
-    x0_c = np.clip(x0, 0, w - 1)
-    x1_c = np.clip(x1, 0, w - 1)
-    y0_c = np.clip(y0, 0, h - 1)
-    y1_c = np.clip(y1, 0, h - 1)
+    y1 = np.minimum(y0 + 1, h - 1)
 
     wx = (src_x - x0)[..., None]
     wy = (src_y - y0)[..., None]
 
-    val_00 = arr[y0_c, x0_c]
-    val_01 = arr[y0_c, x1_c]
-    val_10 = arr[y1_c, x0_c]
-    val_11 = arr[y1_c, x1_c]
+    val_00 = arr[y0, x0]
+    val_01 = arr[y0, x1]
+    val_10 = arr[y1, x0]
+    val_11 = arr[y1, x1]
 
     top = val_00 * (1.0 - wx) + val_01 * wx
     bottom = val_10 * (1.0 - wx) + val_11 * wx
     interpolated = top * (1.0 - wy) + bottom * wy
 
-    in_bounds = (src_x >= 0) & (src_x < w) & (src_y >= 0) & (src_y < h)
-    out_arr = np.where(in_bounds[..., None], interpolated, 0).astype(np.uint8)
-
+    out_arr = np.clip(interpolated, 0.0, 255.0).astype(np.uint8)
     result = Image.fromarray(out_arr, mode="RGB")
     if alpha is not None:
         result = result.convert("RGBA")
@@ -1689,8 +1716,8 @@ def anti_checkerboard(
 def subsurface_scattering(
     image: Image.Image,
     *,
-    radius: int = 5,
-    scatter_strength: float = 0.35,
+    radius: int = 4,
+    scatter_strength: float = 0.15,
     skin_only: bool = True,
 ) -> Image.Image:
     """生物次表面散射漫反射模拟：波长依赖性光子扩散消除 AI 均一塑料/蜡质反光。"""
@@ -1714,10 +1741,18 @@ def subsurface_scattering(
 
     if skin_only:
         ycbcr = rgb.convert("YCbCr")
-        _, cb, cr = ycbcr.split()
+        lum_ch, cb, cr = ycbcr.split()
+        lum_arr = np.asarray(lum_ch, dtype=np.int16)
         cb_arr = np.asarray(cb, dtype=np.int16)
         cr_arr = np.asarray(cr, dtype=np.int16)
-        skin_mask = (cb_arr >= 77) & (cb_arr <= 127) & (cr_arr >= 133) & (cr_arr <= 173)
+        # 排除镜面强反光区（高光不参与内部 SSS 漫射，防止冲白）
+        skin_mask = (
+            (cb_arr >= 77)
+            & (cb_arr <= 127)
+            & (cr_arr >= 133)
+            & (cr_arr <= 173)
+            & (lum_arr < 240)
+        )
         mask_img = Image.fromarray((skin_mask * 255).astype(np.uint8), mode="L")
         mask_img = mask_img.filter(ImageFilter.GaussianBlur(radius=max(1, radius // 2)))
         scattered = Image.composite(diffused_rgb, rgb, mask_img)

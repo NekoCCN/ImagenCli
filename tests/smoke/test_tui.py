@@ -342,6 +342,15 @@ def test_transform_intro_display(deps):
             await pilot.pause()
             new_intro = str(screen.intro_view.render())
             assert len(new_intro) > 0
+
+            # 按 c 键切换分类筛选
+            await pilot.press("c")
+            await pilot.pause()
+            assert screen.current_category_idx != 0
+            assert len(screen.filtered_names) > 0
+            cat_intro = str(screen.intro_view.render())
+            assert len(cat_intro) > 0
+
             await pilot.press("escape")
             await pilot.pause()
 

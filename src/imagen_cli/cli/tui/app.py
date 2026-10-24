@@ -45,27 +45,33 @@ PRESETS: dict[str, list[dict[str, Any]]] = {
     "去AI塑料感": [
         {
             "op": "filmic_tone",
-            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
         },
         {
             "op": "de_ai_bloom",
-            "params": {"radius": 6, "intensity": 0.25, "threshold": 190, "preserve_lines": True},
+            "params": {"radius": 6, "intensity": 0.12, "threshold": 220, "preserve_lines": True},
         },
-        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
-        {"op": "chromatic_aberration", "params": {"shift": 2, "radial": True}},
+        {
+            "op": "film_grain",
+            "params": {"amount": 0.03, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
+        },
+        {"op": "chromatic_aberration", "params": {"shift": 1, "radial": True}},
     ],
     "抗AI生成伪影综合治理": [
-        {"op": "anti_checkerboard", "params": {"strength": 0.5, "cutoff": 0.85}},
-        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.6, "threshold": 25}},
+        {"op": "anti_checkerboard", "params": {"strength": 0.3, "cutoff": 0.85}},
+        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.5, "threshold": 25}},
         {
             "op": "subsurface_scattering",
-            "params": {"radius": 5, "scatter_strength": 0.35, "skin_only": True},
+            "params": {"radius": 4, "scatter_strength": 0.15, "skin_only": True},
         },
         {
             "op": "filmic_tone",
-            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
         },
-        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
+        {
+            "op": "film_grain",
+            "params": {"amount": 0.025, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
+        },
     ],
     "日系通透空气感": [
         {"op": "color_temperature", "params": {"temperature": 0.15, "tint": -0.05}},
@@ -602,6 +608,7 @@ class TransformScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("up", "cursor_up", "上一个", show=False),
         Binding("down", "cursor_down", "下一个", show=False),
+        Binding("c", "toggle_category", "切换分类"),
         Binding("p", "edit_params", "参数调节"),
         Binding("enter", "apply", "应用"),
         Binding("escape", "cancel", "取消"),
@@ -613,7 +620,10 @@ class TransformScreen(ModalScreen[bool]):
         self.artifact = artifact
         self.session = session
         self.path = path
-        self.names = list(PRESETS)
+        self.all_names = list(PRESETS)
+        self.filtered_names = list(self.all_names)
+        self.names = self.filtered_names
+        self.current_category_idx = 0
         self.pipelines: dict[str, list[dict[str, Any]]] = {
             k: [dict(step, params=dict(step.get("params", {}))) for step in v]
             for k, v in PRESETS.items()
@@ -623,10 +633,11 @@ class TransformScreen(ModalScreen[bool]):
         self.view = Static("")
         self.intro_view = Static("", id="transform-intro-view")
         self.params_view = Static("", id="transform-params-view")
+        self.header_title = Static("变换预设与后处理工作室", classes="panel-title")
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="transform"):
-            yield Static("变换预设与后处理工作室", classes="panel-title")
+            yield self.header_title
             with Horizontal():
                 yield self.table
                 with Vertical(id="transform-preview-col"):
@@ -634,17 +645,49 @@ class TransformScreen(ModalScreen[bool]):
                     yield self.intro_view
                     yield self.params_view
                     yield self.status
-            yield Static("↑↓ 切换 · p 调参 · enter 应用 · esc 取消", classes="panel-hint")
+            yield Static(
+                "↑↓ 切换 · c 切换分类 · p 调参 · enter 应用 · esc 取消", classes="panel-hint"
+            )
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
-        self.table.add_columns("预设")
-        for name in self.names:
-            self.table.add_row(name)
+        self.table.add_columns("分类", "预设")
+        self._populate_table()
         self.table.can_focus = False
         self.table.move_cursor(row=0)
         self.set_focus(None)
         self.render_preview()
+
+    def _populate_table(self) -> None:
+        from imagen_cli.application.operator_catalog import PRESET_CATEGORIES
+
+        self.table.clear()
+        for name in self.filtered_names:
+            cat = PRESET_CATEGORIES.get(name, "🌟 预设")
+            self.table.add_row(cat, name)
+
+    def action_toggle_category(self) -> None:
+        from imagen_cli.application.operator_catalog import CATEGORIES_LIST, PRESET_CATEGORIES
+
+        self.current_category_idx = (self.current_category_idx + 1) % len(CATEGORIES_LIST)
+        cat_filter = CATEGORIES_LIST[self.current_category_idx]
+        if cat_filter == "全部":
+            self.filtered_names = list(self.all_names)
+            self.header_title.update("变换预设与后处理工作室")
+        else:
+            self.filtered_names = [
+                n for n in self.all_names if PRESET_CATEGORIES.get(n) == cat_filter
+            ]
+            self.header_title.update(f"变换预设与后处理工作室  [dim magenta]({cat_filter})[/]")
+        self.names = self.filtered_names
+        self._populate_table()
+        if self.names:
+            self.table.move_cursor(row=0)
+            self.render_preview()
+        else:
+            self.view.update("")
+            self.intro_view.update("[dim]该分类下无匹配预设[/]")
+            self.params_view.update("")
 
     def action_cursor_up(self) -> None:
         self._move(-1)
@@ -653,6 +696,8 @@ class TransformScreen(ModalScreen[bool]):
         self._move(1)
 
     def _move(self, delta: int) -> None:
+        if not self.names:
+            return
         row = min(len(self.names) - 1, max(0, self.table.cursor_row + delta))
         self.table.move_cursor(row=row)
         self.render_preview()
@@ -1399,8 +1444,8 @@ class WorkbenchApp(App[None]):
     #providers DataTable, #palette DataTable, #model-picker DataTable {
         height: 1fr; width: 1fr;
     }
-    #transform { width: 90%; max-width: 104; height: 90%; overflow: hidden; }
-    #transform DataTable { width: 32; height: 1fr; }
+    #transform { width: 90%; max-width: 110; height: 90%; overflow: hidden; }
+    #transform DataTable { width: 40; height: 1fr; }
     #transform-preview-col { width: 1fr; margin-left: 2; height: 1fr; }
     #transform-intro-view {
         height: auto; max-height: 5; overflow-y: auto; color: #ddd8d4;

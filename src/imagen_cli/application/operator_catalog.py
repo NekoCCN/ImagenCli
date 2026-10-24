@@ -50,27 +50,33 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     "去AI塑料感 (Anti-AI Organic)": [
         {
             "op": "filmic_tone",
-            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
         },
         {
             "op": "de_ai_bloom",
-            "params": {"radius": 6, "intensity": 0.25, "threshold": 190, "preserve_lines": True},
+            "params": {"radius": 6, "intensity": 0.12, "threshold": 220, "preserve_lines": True},
         },
-        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
-        {"op": "chromatic_aberration", "params": {"shift": 2, "radial": True}},
+        {
+            "op": "film_grain",
+            "params": {"amount": 0.03, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
+        },
+        {"op": "chromatic_aberration", "params": {"shift": 1, "radial": True}},
     ],
     "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": [
-        {"op": "anti_checkerboard", "params": {"strength": 0.5, "cutoff": 0.85}},
-        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.6, "threshold": 25}},
+        {"op": "anti_checkerboard", "params": {"strength": 0.3, "cutoff": 0.85}},
+        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.5, "threshold": 25}},
         {
             "op": "subsurface_scattering",
-            "params": {"radius": 5, "scatter_strength": 0.35, "skin_only": True},
+            "params": {"radius": 4, "scatter_strength": 0.15, "skin_only": True},
         },
         {
             "op": "filmic_tone",
-            "params": {"lift_black": 6, "compress_white": 245, "saturation": 0.95},
+            "params": {"lift_black": 3, "compress_white": 246, "saturation": 0.98},
         },
-        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True, "shadow_bias": True}},
+        {
+            "op": "film_grain",
+            "params": {"amount": 0.025, "grain_size": 1.2, "monochrome": True, "shadow_bias": True},
+        },
     ],
     "日系通透空气感 (Shinkai Airy)": [
         {"op": "color_temperature", "params": {"temperature": 0.15, "tint": -0.05}},
@@ -299,7 +305,7 @@ OPERATORS: list[OperatorItem] = [
     ),
     OperatorItem(
         key="anti_checkerboard",
-        name="频域陷波与混叠抑制 (Spectral Notch Anti-Aliasing)",
+        name="网格去混叠 (Anti-Checkerboard)",
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
@@ -331,7 +337,7 @@ OPERATORS: list[OperatorItem] = [
     ),
     OperatorItem(
         key="subsurface_scattering",
-        name="生物次表面散射漫反射 (Subsurface Scattering Approximation)",
+        name="次表面散射 (Subsurface Scatter)",
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
@@ -370,7 +376,7 @@ OPERATORS: list[OperatorItem] = [
     ),
     OperatorItem(
         key="de_haloing",
-        name="局部形态学反光晕过冲抑制 (Morphological De-Haloing Filter)",
+        name="去边缘白边光晕 (De-Haloing)",
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
@@ -1051,7 +1057,7 @@ def get_operator_item(op: str) -> OperatorItem | None:
 INTROS: dict[str, dict[str, str]] = {
     # --- 基础与风格化滤波 ---
     "像素化": {
-        "title": "像素化空间点阵量化 (Pixelate Spatial Downsampling)",
+        "title": "像素化 (Pixelate)",
         "summary": (
             "本算子通过邻域块均值采样与重构，将连续图像离散化为规则的像素"
             "网格点阵。"
@@ -1060,7 +1066,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于复古像素风格艺术创作与局部敏感信息脱敏处理流程。",
     },
     "调色板": {
-        "title": "色彩空间量化与误差扩散 (Color Palette Quantization & Dithering)",
+        "title": "调色板减色 (Color Palette)",
         "summary": (
             "本算子通过中值切分聚类提取代表性色彩空间，并利用误差扩散完成"
             "低位深着色。"
@@ -1069,7 +1075,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于有限调色板限制的插画设计与复古显示介质效果模拟。",
     },
     "线稿": {
-        "title": "经典高反差边缘提取 (Classic High-Contrast Edge Lineart)",
+        "title": "手绘线稿提取 (Lineart)",
         "summary": (
             "本算子通过高通滤波与动态阈值反转，提取图像的高频轮廓结构并生"
             "成黑白线稿。"
@@ -1081,7 +1087,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于手绘线稿底图提取、结构线临摹与着色填色练习流程。",
     },
     "抖动": {
-        "title": "有序空间误差扩散抖动 (Ordered Spatial Error Diffusion Dithering)",
+        "title": "有序抖动 (Ordered Dither)",
         "summary": "本算子通过预设误差矩阵离散化连续色阶，在有限色阶下重建视觉连续灰度。",
         "principle": (
             "基于 Atkinson 与 Floyd-Steinberg 空间误差扩散转移矩阵，将量"
@@ -1090,7 +1096,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于单色点阵印刷模拟、赛博终端视觉重构与复古介质渲染。",
     },
     "锐化": {
-        "title": "高斯反虚光掩模锐化 (Unsharp Masking Edge Enhancement)",
+        "title": "反虚光锐化 (Unsharp Mask)",
         "summary": (
             "本算子通过分离并强化微观高频边缘分量，提升图像整体视觉反差与"
             "边缘聚焦度。"
@@ -1102,7 +1108,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于补偿光学镜头软化、提高小尺寸图像的视觉微观辨识度。",
     },
     "赛璐璐": {
-        "title": "分段阶梯亮度着色 (Bilevel Quantized Cel Shading)",
+        "title": "赛璐璐分色 (Cel Shading)",
         "summary": (
             "本算子将连续光影照度离散化为分段阶梯分布，结合索贝尔算子生成"
             "硬边赛璐璐风格。"
@@ -1112,7 +1118,7 @@ INTROS: dict[str, dict[str, str]] = {
     },
     # --- 抗AI生成伪影专项 ---
     "去AI塑料感": {
-        "title": "生成模型基础伪影抑制 (Anti-AI Organic Look)",
+        "title": "去AI塑料感 (Anti-AI Organic)",
         "summary": (
             "本预设管线复合胶片非线性色阶映射、漫反射保边光晕与感光噪点，"
             "抑制生成模型的均一塑料质感。"
@@ -1127,7 +1133,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "抗AI生成伪影综合治理": {
-        "title": "生成模型综合伪影深度抑制 (Comprehensive Anti-AI Artifacts Suppression)",
+        "title": "抗AI伪影综合 (Anti-AI Artifacts)",
         "summary": (
             "本预设管线结合频域陷波滤波、次表面漫反射、反锐化光晕约束与胶"
             "片色阶，多维度消除生成伪影。"
@@ -1142,7 +1148,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "anti_checkerboard": {
-        "title": "频域陷波与混叠抑制 (Spectral Notch Anti-Aliasing)",
+        "title": "网格去混叠 (Anti-Checkerboard)",
         "summary": (
             "本算子通过二维离散傅里叶变换与高频陷波掩模，衰减潜空间转置卷"
             "积引入的周期性棋盘格网格尖峰。"
@@ -1157,7 +1163,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "subsurface_scattering": {
-        "title": "生物次表面散射漫反射 (Subsurface Scattering Approximation)",
+        "title": "次表面散射 (Subsurface Scatter)",
         "summary": (
             "本算子通过波长依赖性光子扩散模型与非线性肤色色度掩模，消除生"
             "成模型表面的均一塑料反光质感。"
@@ -1172,7 +1178,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "de_haloing": {
-        "title": "局部形态学反光晕过冲抑制 (Morphological De-Haloing Filter)",
+        "title": "去边缘白边光晕 (De-Haloing)",
         "summary": (
             "本算子通过局部中值滤波与极值形态学夹紧约束，抑制高反差边缘处"
             "由采样器过度锐化引入的振铃白边与暗光晕伪影。"
@@ -1187,7 +1193,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "film_grain": {
-        "title": "银盐微粒与泊松感光噪声 (Silver Halide Grain Simulation)",
+        "title": "胶片微粒 (Film Grain)",
         "summary": (
             "本算子通过照度加权的微观噪点合成，模拟传统感光胶片与数字传感"
             "器在弱光下的光子散粒噪声。"
@@ -1199,7 +1205,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于打破 AI 图像中过于平滑均一的合成表面，建立微观物理纹理基底。",
     },
     "de_ai_bloom": {
-        "title": "高光漫反射保边光晕 (Highlight Diffuse Bloom)",
+        "title": "柔和漫射光晕 (Diffuse Bloom)",
         "summary": (
             "本算子通过照度阈值分割与多尺度高斯漫射核，在保全暗部轮廓的同"
             "时模拟镜头微光晕溢出。"
@@ -1214,7 +1220,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "filmic_tone": {
-        "title": "分段 Hermite 色阶与高光压制 (Filmic Tone Mapping)",
+        "title": "胶片高光压制 (Filmic Tone)",
         "summary": (
             "本算子通过分段平滑 S 曲线抬升基底黑电平并平缓压缩高光，建立"
             "胶片级动态范围滚降响应。"
@@ -1226,7 +1232,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于修复高动态范围反差失衡、解决画面高光死白与暗部死黑问题。",
     },
     "chromatic_aberration": {
-        "title": "光学透镜横向几何色差 (Lateral Chromatic Aberration)",
+        "title": "镜头边缘色差 (Chromatic Aberration)",
         "summary": (
             "本算子通过红蓝通道径向空间离散错位，模拟透镜材料折射率随光波"
             "长变化引起的横向色散现象。"
@@ -1242,7 +1248,7 @@ INTROS: dict[str, dict[str, str]] = {
     },
     # --- 电影级与色彩空间变换 ---
     "ACES电影级色调": {
-        "title": "ACES 电影级色调映射 (ACES Filmic Tone Mapping)",
+        "title": "ACES电影色调 (ACES Filmic)",
         "summary": (
             "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精"
             "确映射至标准显示色彩空间。"
@@ -1257,7 +1263,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "aces_tonemap": {
-        "title": "ACES 电影级色调映射 (ACES Filmic Tone Mapping)",
+        "title": "ACES电影色调 (ACES Filmic)",
         "summary": (
             "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精"
             "确映射至标准显示色彩空间。"
@@ -1272,7 +1278,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "引导滤波细节增强": {
-        "title": "局部线性平移不变引导滤波 (Local Linear Guided Filter)",
+        "title": "细节增强 (Guided Filter)",
         "summary": (
             "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现"
             "无振铃效应的细节增强。"
@@ -1287,7 +1293,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "guided_filter": {
-        "title": "局部线性平移不变引导滤波 (Local Linear Guided Filter)",
+        "title": "细节增强 (Guided Filter)",
         "summary": (
             "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现"
             "无振铃效应的细节增强。"
@@ -1302,7 +1308,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "桑原二次元平涂": {
-        "title": "各向异性四象限桑原滤波 (Anisotropic Kuwahara Filter)",
+        "title": "动漫平涂滤波 (Kuwahara Filter)",
         "summary": (
             "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯"
             "净的平面手绘插画质感。"
@@ -1314,7 +1320,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于二次元插画背景平涂、厚涂笔触离散化以及去除高频噪点伪影。",
     },
     "kuwahara": {
-        "title": "各向异性四象限桑原滤波 (Anisotropic Kuwahara Filter)",
+        "title": "动漫平涂滤波 (Kuwahara Filter)",
         "summary": (
             "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯"
             "净的平面手绘插画质感。"
@@ -1326,7 +1332,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于二次元插画背景平涂、厚涂笔触离散化以及去除高频噪点伪影。",
     },
     "剧场版宽银幕眩光": {
-        "title": "各向异性横向衍射眩光 (Anamorphic Transverse Flare)",
+        "title": "宽银幕眩光 (Anamorphic Flare)",
         "summary": (
             "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽"
             "银幕镜头的水平光斑条纹。"
@@ -1341,7 +1347,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "anamorphic_flare": {
-        "title": "各向异性横向衍射眩光 (Anamorphic Transverse Flare)",
+        "title": "宽银幕眩光 (Anamorphic Flare)",
         "summary": (
             "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽"
             "银幕镜头的水平光斑条纹。"
@@ -1356,7 +1362,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "日系晴空色彩迁移": {
-        "title": "Lab 色彩空间统计矩迁移 (Lab Statistical Moment Transfer)",
+        "title": "色彩风格迁移 (Color Transfer)",
         "summary": (
             "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参"
             "考图像色彩风格的全局迁移。"
@@ -1371,7 +1377,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "color_transfer": {
-        "title": "Lab 色彩空间统计矩迁移 (Lab Statistical Moment Transfer)",
+        "title": "色彩风格迁移 (Color Transfer)",
         "summary": (
             "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参"
             "考图像色彩风格的全局迁移。"
@@ -1386,7 +1392,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "日系通透空气感": {
-        "title": "高调环境光漫射与暗角衰减 (High-Key Airy Glow)",
+        "title": "通透空气感 (Airy Glow)",
         "summary": (
             "本预设管线复合微暖色温偏移、高光滤色漫射与四次余弦暗角，模拟"
             "通透清澈的环境空气透视感。"
@@ -1401,7 +1407,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "热血集中线": {
-        "title": "极坐标角向离散射线生成 (Polar Angular Focus Rays)",
+        "title": "漫画集中线 (Focus Rays)",
         "summary": (
             "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣"
             "中心的动态放射构图。"
@@ -1413,7 +1419,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于强调动作瞬间、视觉中心引导与夸张冲击力构图表达。",
     },
     "focus_lines": {
-        "title": "极坐标角向离散射线生成 (Polar Angular Focus Rays)",
+        "title": "漫画集中线 (Focus Rays)",
         "summary": (
             "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣"
             "中心的动态放射构图。"
@@ -1425,7 +1431,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于强调动作瞬间、视觉中心引导与夸张冲击力构图表达。",
     },
     "黑白漫画网点": {
-        "title": "调频空间网格半色调光栅 (Halftone Screentone Rasterization)",
+        "title": "漫画网点 (Manga Screentone)",
         "summary": (
             "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体"
             "黑白漫画与印刷光栅工艺。"
@@ -1437,7 +1443,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于黑白漫画出版、同人印刷品预览与报纸版画非真实感风格化。",
     },
     "screentone": {
-        "title": "调频空间网格半色调光栅 (Halftone Screentone Rasterization)",
+        "title": "漫画网点 (Manga Screentone)",
         "summary": (
             "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体"
             "黑白漫画与印刷光栅工艺。"
@@ -1449,7 +1455,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于黑白漫画出版、同人印刷品预览与报纸版画非真实感风格化。",
     },
     "立绘贴纸白边": {
-        "title": "欧氏距离场形态学包络线 (Distance Field Morphological Envelope)",
+        "title": "贴纸白边 (Sticker Outline)",
         "summary": (
             "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，"
             "生成立绘裁切轮廓边框。"
@@ -1461,7 +1467,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于透明背景立绘衍生品预览、贴纸裁切设计与图形界面标识突出。",
     },
     "sticker_outline": {
-        "title": "欧氏距离场形态学包络线 (Distance Field Morphological Envelope)",
+        "title": "贴纸白边 (Sticker Outline)",
         "summary": (
             "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，"
             "生成立绘裁切轮廓边框。"
@@ -1473,7 +1479,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于透明背景立绘衍生品预览、贴纸裁切设计与图形界面标识突出。",
     },
     "XDoG动漫线稿": {
-        "title": "扩展高斯差分边缘检测 (Extended Difference of Gaussians)",
+        "title": "XDoG动漫线稿 (XDoG Lineart)",
         "summary": (
             "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅"
             "笔质感的连续边缘线稿。"
@@ -1485,7 +1491,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于从复杂色彩画面中提取纯净手绘级线稿结构与填色底稿制作。",
     },
     "lineart_extract": {
-        "title": "扩展高斯差分边缘检测 (Extended Difference of Gaussians)",
+        "title": "XDoG动漫线稿 (XDoG Lineart)",
         "summary": (
             "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅"
             "笔质感的连续边缘线稿。"
@@ -1497,7 +1503,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于从复杂色彩画面中提取纯净手绘级线稿结构与填色底稿制作。",
     },
     "复古90年代胶片": {
-        "title": "复古暖调胶片与暗角模拟 (Vintage 90s Film Emulation)",
+        "title": "90年代复古胶片 (90s Film)",
         "summary": (
             "本预设管线复合暖色色温偏移、暗部电平抬升、四次余弦暗角与银盐"
             "颗粒，还原 90 年代胶片成像特性。"
@@ -1509,7 +1515,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于人像写真与怀旧摄影，重构传统胶片相机沉稳、温暖的物理质感。",
     },
     "动漫超分辨率 4x": {
-        "title": "二次元深度残差密集超分辨率重建 (Anime Deep Residual Super-Resolution)",
+        "title": "动漫超分 4x (Anime SR)",
         "summary": (
             "本算子采用专精动漫图像的深度神经网络，以 4 倍放大比例无损重"
             "构清晰边缘与纯净色块。"
@@ -1521,7 +1527,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于动漫截图高清化、二次元插画大尺寸输出与印刷级高分辨率重构。",
     },
     "通用超分辨率 4x": {
-        "title": "通用写实深度神经网络超分辨率 (General Deep Neural Super-Resolution)",
+        "title": "通用超分 4x (General SR)",
         "summary": (
             "本算子采用高保真深度生成网络，以 4 倍比例重构自然图像的高频"
             "微观纹理与结构细节。"
@@ -1533,7 +1539,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于真实摄影照片、复杂写实人像与宏大风景图像的高清分辨率重建。",
     },
     "日系治愈空气柔光": {
-        "title": "高光扩散柔光 (Highlight Diffuse Glow)",
+        "title": "扩散柔光 (Diffuse Glow)",
         "summary": (
             "本预设管线结合高光多尺度滤色扩散、自然饱和度保护与线稿自适应"
             "染色，营造柔美清澈的视觉调性。"
@@ -1545,7 +1551,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于插画人物特写、顺光/逆光风景原画以及需要柔和光感渲染的场景。",
     },
     "大魄力动感鱼眼": {
-        "title": "广角鱼眼透视畸变 (Wide-Angle Fisheye Distortion)",
+        "title": "鱼眼广角透视 (Fisheye Lens)",
         "summary": (
             "本预设管线结合 Brown-Conrady 径向透镜畸变与极坐标聚焦射线，"
             "构建强烈的广角动感透视构图。"
@@ -1557,7 +1563,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于动作特写镜头、运动俯冲视角以及具有极度张力的视觉构图表现。",
     },
     "橙青影视色彩平衡": {
-        "title": "冷暖对冲影视色彩平衡 (Teal & Orange Cinematic Balance)",
+        "title": "橙青影视平衡 (Teal & Orange)",
         "summary": (
             "本预设管线采用经典影视冷暖互补调色理论，建立暗部偏青、高光偏"
             "橙金的电影级色彩对冲关系。"
@@ -1569,7 +1575,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于城市夜景、霓虹街景、赛博朋克风格渲染与电影感人像调色。",
     },
     "line_color": {
-        "title": "低照度自适应基底染色 (Adaptive Low-Light Line Tinging)",
+        "title": "线稿自适应染色 (Line Color)",
         "summary": (
             "本算子通过提取暗部边缘轮廓并依据邻域低频色彩进行平滑加权染色"
             "，消除生硬的死黑线条。"
@@ -1584,7 +1590,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "color_balance": {
-        "title": "分段亮度权重色彩平衡 (Segmented Luminance Color Balance)",
+        "title": "三段色彩平衡 (Color Balance)",
         "summary": (
             "本算子通过亮度区间平滑权重分割，独立调节阴影、中间调与高光区"
             "域的三通道色彩偏移量。"
@@ -1596,7 +1602,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于精细校正画面色偏、构建特定影视调色风格与冷暖色调对冲布局。",
     },
     "fisheye": {
-        "title": "Brown-Conrady 径向透镜畸变 (Brown-Conrady Radial Distortion)",
+        "title": "鱼眼广角透视 (Fisheye Lens)",
         "summary": (
             "本算子通过高阶多项式坐标逆映射，模拟真实超广角与鱼眼镜头产生"
             "的桶形或枕形几何畸变。"
@@ -1608,7 +1614,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于模拟超广角与鱼眼镜头透视、夸张画面纵深与边缘视场拉伸效果。",
     },
     "vibrance": {
-        "title": "反饱和度加权自然饱和度 (Perceptual Vibrance Enhancement)",
+        "title": "自然饱和度 (Vibrance)",
         "summary": (
             "本算子依据像素现有饱和度反向加权增益并保护暖色皮肤，非线性提"
             "升画面灰暗平淡区域的色彩鲜活度。"
@@ -1623,7 +1629,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "diffuse_glow": {
-        "title": "高光扩散柔光 (Highlight Diffuse Glow)",
+        "title": "扩散柔光 (Diffuse Glow)",
         "summary": (
             "本算子通过亮度阈值分割与多尺度高斯核滤色混合，模拟强光源在光"
             "学介质中的漫反射光晕现象。"
@@ -1638,7 +1644,7 @@ INTROS: dict[str, dict[str, str]] = {
         ),
     },
     "vignette": {
-        "title": "径向四次余弦暗角衰减 (Radial Cosine Quartic Vignetting)",
+        "title": "镜头暗角 (Vignette)",
         "summary": (
             "本算子通过距视口中心的径向距离多项式衰减，模拟真实光学镜头孔"
             "径引起的自然边缘照度衰减。"
@@ -1650,7 +1656,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于聚焦画面主体、模拟大光圈镜头光学特征与增强画面构图沉浸感。",
     },
     "color_temperature": {
-        "title": "黑体辐射色彩通道偏移 (Planckian Blackbody Temperature Shift)",
+        "title": "色温微调 (Color Temperature)",
         "summary": (
             "本算子通过沿普朗克黑体辐射轨迹调整红蓝通道比例，实现物理准确"
             "的色温与色彩微调。"
@@ -1662,7 +1668,7 @@ INTROS: dict[str, dict[str, str]] = {
         "scenarios": "适用于校正拍摄白平衡失衡、营造温暖黄昏或清冷蓝调光照环境。",
     },
     "superres": {
-        "title": "深度残差密集神经超分辨率 (Deep Residual Dense Super-Resolution)",
+        "title": "神经超分辨率 (Super-Resolution)",
         "summary": (
             "本算子采用轻量化 ONNX 深度残差卷积神经网络，实现 4 倍分辨率"
             "下的结构保持超分重建。"
@@ -1676,12 +1682,54 @@ INTROS: dict[str, dict[str, str]] = {
 }
 
 
+PRESET_CATEGORIES: dict[str, str] = {
+    "像素化": "📐 风格滤波",
+    "调色板": "📐 风格滤波",
+    "线稿": "🎨 二次元动漫",
+    "抖动": "📐 风格滤波",
+    "锐化": "📐 风格滤波",
+    "赛璐璐": "🎨 二次元动漫",
+    "去AI塑料感": "🧬 去AI感",
+    "抗AI生成伪影综合治理": "🧬 去AI感",
+    "日系通透空气感": "🎨 二次元动漫",
+    "热血集中线": "🎨 二次元动漫",
+    "黑白漫画网点": "🎨 二次元动漫",
+    "立绘贴纸白边": "📐 风格滤波",
+    "XDoG动漫线稿": "🎨 二次元动漫",
+    "ACES电影级色调": "🌈 色彩光影",
+    "引导滤波细节增强": "📐 风格滤波",
+    "桑原二次元平涂": "🎨 二次元动漫",
+    "剧场版宽银幕眩光": "🎨 二次元动漫",
+    "日系晴空色彩迁移": "🌈 色彩光影",
+    "复古90年代胶片": "🌈 色彩光影",
+    "动漫超分辨率 4x": "🚀 超分辨率",
+    "通用超分辨率 4x": "🚀 超分辨率",
+    "日系治愈空气柔光": "🎨 二次元动漫",
+    "大魄力动感鱼眼": "🎨 二次元动漫",
+    "橙青影视色彩平衡": "🌈 色彩光影",
+}
+
+CATEGORIES_LIST: list[str] = [
+    "全部",
+    "🧬 去AI感",
+    "🎨 二次元动漫",
+    "🌈 色彩光影",
+    "📐 风格滤波",
+    "🚀 超分辨率",
+]
+
+
 def get_intro_text(key: str) -> str:
     """Return formatted introductory text for TUI transform screen."""
     item = INTROS.get(key)
+    category_badge = ""
+    for k, cat in PRESET_CATEGORIES.items():
+        if k in key:
+            category_badge = f" [bold magenta][{cat}][/]"
+            break
     if item:
         return (
-            f"[bold cyan]✦ {item['title']}[/]\n"
+            f"[bold cyan]✦ {item['title']}[/]{category_badge}\n"
             f"[white]{item['summary']}[/]\n"
             f"[dim]原理：{item['principle']}[/]\n"
             f"[dim green]适用：{item['scenarios']}[/]"
@@ -1690,7 +1738,7 @@ def get_intro_text(key: str) -> str:
     op_item = get_operator_item(key)
     if op_item:
         return (
-            f"[bold cyan]✦ {op_item.name}[/]\n"
+            f"[bold cyan]✦ {op_item.name}[/] [bold magenta][{op_item.category_label}][/]\n"
             f"[white]{op_item.description}[/]\n"
             f"[dim]分类：{op_item.category_label}[/]"
         )
