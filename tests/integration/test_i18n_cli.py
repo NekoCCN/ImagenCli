@@ -64,15 +64,15 @@ def test_lang_flag_overrides_environment(tmp_path, monkeypatch):
 
 def test_operation_intro_is_english_by_default(tmp_path):
     _, text = invoke(tmp_path, "ops", "--op", "guided_smooth")
-    assert "说明：" not in text
-    assert "Summary:" in text
+    assert "操作：" not in text
+    assert "Operation:" in text
     assert "Guided edge-preserving smoothing" in text
     assert "引导保边平滑" not in text
 
 
 def test_operation_intro_is_chinese_with_lang(tmp_path):
     _, text = invoke(tmp_path, "--lang=zh-CN", "ops", "--op", "guided_smooth")
-    assert "说明：" in text
+    assert "操作：" in text
     assert "引导保边平滑" in text
 
 

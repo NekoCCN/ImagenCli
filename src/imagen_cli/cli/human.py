@@ -183,24 +183,32 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
                 title = item.get("title", key)
                 summary = item.get("summary", "")
                 principle = item.get("principle", "")
-                scenarios = item.get("scenarios", "")
                 lines.append(f"  ✦ {title}")
                 if summary:
-                    lines.append(t(f"    Summary: {summary}", f"    说明：{summary}"))
-                if principle:
-                    lines.append(t(f"    Principle: {principle}", f"    原理：{principle}"))
-                if scenarios:
-                    lines.append(
-                        t(f"    Effect and limits: {scenarios}", f"    作用与限制：{scenarios}")
-                    )
+                    lines.append(t(f"    Operation: {summary}", f"    操作：{summary}"))
                 if item.get("benefit"):
                     lines.append(
-                        t(f"    May provide: {item['benefit']}", f"    可能带来：{item['benefit']}")
+                        t(
+                            f"    Possible advantages: {item['benefit']}",
+                            f"    可能的优势：{item['benefit']}",
+                        )
                     )
                 if item.get("loss"):
                     lines.append(
-                        t(f"    May lose: {item['loss']}", f"    可能失去：{item['loss']}")
+                        t(
+                            f"    Possible drawbacks: {item['loss']}",
+                            f"    可能的缺点：{item['loss']}",
+                        )
                     )
+                if item.get("use_case"):
+                    lines.append(
+                        t(
+                            f"    May be useful for: {item['use_case']}",
+                            f"    可能用来：{item['use_case']}",
+                        )
+                    )
+                if principle:
+                    lines.append(t(f"    How: {principle}", f"    原理：{principle}"))
             else:
                 lines.append(f"  ✦ {key}: {item}")
     if data.get("removed") and data.get("artifact_id"):

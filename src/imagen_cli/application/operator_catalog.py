@@ -2815,6 +2815,129 @@ for _key, _pipeline in PRESET_PIPELINES.items():
     INTROS[_key.split(" (", 1)[0]] = _intro
 
 
+# Practical "may be useful for" notes, kept separate from the technical intros.
+_USE_CASES = {
+    "local_laplacian_sampled": "整理跨尺度的明暗细节，压低或增强小幅纹理",
+    "weighted_guided_smooth": "平滑色块同时保住轮廓，适合处理噪点和压缩痕迹",
+    "wls_detail": "分尺度调整明暗细节，减轻灰雾或补回纹理",
+    "periodic_notch_auto": "去除网纹、织物和建筑栅格等周期性干扰",
+    "fast_guided_smooth": "快速做大面积柔化，适合先看效果再细调",
+    "weighted_median": "清理局部杂点和脉冲噪声，同时保留主要边缘",
+    "rtv_smooth": "减少纹理和皮肤噪点，尽量留住主要边缘",
+    "periodic_notch": "手动压制已知频率的周期性伪影",
+    "illumination_correct": "校正不均匀照明和暗角，让亮度更均匀",
+    "l0_smooth": "强平滑同时保留强边缘，适合去噪和简化色块",
+    "domain_transform": "做保边递归平滑，压低细节噪点",
+    "wls_smooth": "保边平滑，减少细小纹理和噪点",
+    "chroma_transfer": "把参考图的整体色调迁移到当前图",
+    "像素化": "做像素风、马赛克或低分辨率效果",
+    "调色板": "限制颜色数量，做复古或海报化配色",
+    "线稿": "提取轮廓，做线稿或漫画底稿",
+    "抖动": "用点阵近似色阶，做复古印刷质感",
+    "锐化": "增强边缘和细节，让画面更利落",
+    "赛璐璐": "压平色块并叠加轮廓，做动画赛璐璐风格",
+    "去AI塑料感": "降低生成模型感，柔化皮肤和高光",
+    "抗AI生成伪影综合治理": "降低生成模型感，抑制高频伪影和塑料质感",
+    "二次元平涂去杂": "让平涂更干净，去掉杂色和细碎噪点",
+    "动漫色彩提纯": "让暗部更干净、颜色更鲜明",
+    "anti_checkerboard": "消除棋盘格和网格状的高频伪影",
+    "subsurface_scattering": "做皮肤或半透明材质的柔和透光感",
+    "de_haloing": "减轻锐化或 HDR 产生的白边光晕",
+    "film_grain": "增加胶片颗粒，削弱数码感和生成感",
+    "de_ai_bloom": "扩散高光，做柔和发光的空气感",
+    "filmic_tone": "压出电影感的黑白端和层次",
+    "chromatic_aberration": "模拟镜头边缘色散，增加摄影感",
+    "ACES电影级色调": "做电影级的高光压缩和暗部过渡",
+    "引导滤波细节增强": "增强局部细节和纹理，减少过度涂抹感",
+    "桑原二次元平涂": "做动漫平涂和色块化，压低照片细节",
+    "剧场版宽银幕眩光": "加横向眩光，做剧场版镜头感",
+    "日系晴空色彩迁移": "迁移日系晴空的明快色彩",
+    "日系通透空气感": "做通透、明亮的日系空气感",
+    "热血集中线": "叠加径向集中线，做漫画冲击力",
+    "focus_lines": "叠加径向集中线，做漫画冲击力",
+    "黑白漫画网点": "把明暗转成漫画网点",
+    "screentone": "把明暗转成漫画网点",
+    "立绘贴纸白边": "给透明立绘加白边和投影，做贴纸效果",
+    "sticker_outline": "给透明立绘加白边和投影，做贴纸效果",
+    "XDoG动漫线稿": "提取动漫线稿，强调轮廓和手绘感",
+    "lineart_extract": "用高斯差分提取线稿，做干净的手绘底稿",
+    "复古90年代胶片": "做 90 年代胶片色偏、暗角和颗粒",
+    "动漫超分辨率 4x": "把插画放大四倍，补回线条和色块",
+    "通用超分辨率 4x": "把照片或混合图像放大四倍",
+    "日系治愈空气柔光": "做柔和高光、通透色彩和暖线稿",
+    "大魄力动感鱼眼": "做鱼眼畸变和放射线，增强动感",
+    "橙青影视色彩平衡": "做橙青电影调色和胶片颗粒",
+    "line_color": "调整暗线颜色，让线稿融入画面",
+    "color_balance": "按亮度区间调整色彩偏移",
+    "fisheye": "做径向畸变的鱼眼效果",
+    "vibrance": "提升饱和度，同时尽量保护肤色",
+    "diffuse_glow": "给高光加柔光扩散",
+    "vignette": "压暗四周，把视线集中到主体",
+    "color_temperature": "调整冷暖色温和色调偏移",
+    "superres": "用模型推理放大图像",
+    "二次元线条强化与描墨": "强化并加深动漫线稿",
+    "二次元赛璐珞顶级精修": "做平滑、描墨和降饱和的赛璐璐精修",
+    "anime_line_enhance": "强化动漫线条和描墨",
+    "guided_smooth": "保边平滑，压低噪点和生成纹理",
+    "rolling_guidance": "迭代平滑纹理，减少细碎噪点",
+    "flow_line": "沿轮廓方向提线，做流动感线稿",
+    "kuwahara_anisotropic": "做方向性色块平滑，保留边缘",
+    "bounded_sharpen": "锐化但避免明显白边和过冲",
+    "multiscale_detail": "按尺度增减细节，控制纹理强度",
+    "linear_resize": "在透明边缘下做线性光缩放",
+    "quantize": "减少颜色数量，做色调分离",
+    "dither": "用误差扩散补足量化后的色阶",
+    "sharpen": "增强高频，让边缘更清楚",
+    "grayscale": "转成灰度图",
+    "autocontrast": "拉伸直方图，增加对比度",
+    "highpass": "提取高频细节，做锐化或纹理层",
+    "surface_blur": "按色差平滑局部颜色，减少杂色",
+    "color_purity": "让暗部降饱和，颜色更纯",
+    "cel_shade": "做色阶量化加轮廓的赛璐璐效果",
+    "pixelate": "做块状像素化",
+    "赛璐璐手绘": "做手绘赛璐璐风格",
+    "像素复古风": "做复古像素风",
+}
+_NOTES = {
+    "local_laplacian_sampled": ["跨尺度整理细节，幅度可控", "不能承诺无光晕或保色相"],
+    "weighted_guided_smooth": ["平滑色块同时保护轮廓", "不保证消除所有光晕，可能削弱细线"],
+    "wls_detail": ["分尺度控制明暗细节", "强增益可能损伤细线"],
+    "periodic_notch_auto": ["自动找到并压低窄带周期污染", "网纹、织物、栅格也可能被误删"],
+    "fast_guided_smooth": ["大尺度平滑更快", "结果不保证与完整滤波一致"],
+    "weighted_median": ["清理局部杂点和脉冲", "窄范围会保留强离群点，可能改变颜色组合"],
+    "rtv_smooth": ["减少纹理并保留主要边缘", "迭代不足或参数过强会损失边缘"],
+    "periodic_notch": ["精确压制已知频率伪影", "也会移除该频率上的有意图案"],
+    "illumination_correct": ["改善不均匀照明和暗角", "可能抹平材质明暗并放大噪声"],
+    "l0_smooth": ["强平滑且保留强边缘", "可能合并细线与纹理"],
+    "domain_transform": ["保边平滑，减少细节噪点", "可能削弱小结构"],
+    "wls_smooth": ["分离缓慢结构与细节", "大图求解可能较慢"],
+    "chroma_transfer": ["快速迁移参考图配色", "相对亮度不是 Lab 感知明度，迁移结果可能偏差"],
+    "chromatic_aberration": ["增加真实广角镜头的边缘色散", "可能让边缘发虚或出现彩边"],
+    "ACES电影级色调": ["平滑高光肩部和暗部过渡", "会改变整体对比和色彩，需要重新调色"],
+    "引导滤波细节增强": ["恢复发丝、皮肤和布料纹理", "增强过度会放大噪点和锐化痕迹"],
+    "桑原二次元平涂": ["平涂背景、离散厚涂笔触", "可能抹掉小结构和高频细节"],
+    "剧场版宽银幕眩光": ["增加宽银幕横向眩光和镜头感", "强光附近可能过曝或出现条纹"],
+    "日系晴空色彩迁移": ["快速把灰暗画面调得明快", "整体偏色可能影响肤色和品牌色"],
+    "XDoG动漫线稿": ["从彩色画面提取干净线稿", "复杂纹理可能被当成线条"],
+    "guided_smooth": ["平滑平涂色块并保护边缘", "低对比细线可能被减弱"],
+    "rolling_guidance": ["减少细碎纹理", "小文字和排线可能被抹去"],
+    "flow_line": ["沿轮廓提取流动感线条", "交叉点、细线和末端容易断裂"],
+    "kuwahara_anisotropic": ["方向性色块抽象并保留边缘", "可能改变小结构形状"],
+    "bounded_sharpen": ["受控锐化，抑制过冲", "可能削弱真实高光或放大纹理"],
+    "multiscale_detail": ["按尺度调整对比和细节", "增强高频会放大噪声"],
+    "linear_resize": ["透明边缘缩放更干净", "非学习型细节恢复，倍率与尺寸互斥"],
+}
+for _name in INTROS:
+    _base = operator_catalog_en.ALIASES.get(_name, _name).split(" (", 1)[0]
+    if _base not in _USE_CASES:
+        _base = _name.split(" (", 1)[0]
+    if _base in _USE_CASES:
+        INTROS[_name]["use_case"] = _USE_CASES[_base]
+    _note = _NOTES.get(_base)
+    if _note:
+        INTROS[_name]["benefit"], INTROS[_name]["loss"] = _note
+
+
 def get_intro_text(key: str) -> str:
     """Return formatted introductory text for TUI transform screen."""
     item = localized_intro(key)
@@ -2827,16 +2950,14 @@ def get_intro_text(key: str) -> str:
     if item:
         return (
             f"[bold cyan]{item['title']}[/]{category_badge}\n"
-            + i18n.t("What it does: ", "做什么：")
+            + i18n.t("Operation: ", "操作：")
             + f"[white]{item['summary']}[/]\n"
-            + i18n.t("How: ", "怎么做：")
-            + f"[dim]{item['principle']}[/]\n"
-            + i18n.t("May provide: ", "可能带来：")
-            + f"[dim green]{item.get('benefit', item['scenarios'])}[/]\n"
-            + i18n.t("May lose: ", "可能失去：")
-            + "[dim yellow]"
-            + item.get("loss", item["scenarios"])
-            + "[/]"
+            + i18n.t("Possible advantages: ", "可能的优势：")
+            + f"[dim green]{item['benefit']}[/]\n"
+            + i18n.t("Possible drawbacks: ", "可能的缺点：")
+            + f"[dim yellow]{item['loss']}[/]\n"
+            + i18n.t("May be useful for: ", "可能用来：")
+            + f"[green]{item['use_case']}[/]"
         )
     # Fallback to operator item if key matches op
     op_item = get_operator_item(key)
@@ -2844,7 +2965,8 @@ def get_intro_text(key: str) -> str:
         op_shown = localized_operator(op_item)
         return (
             f"[bold cyan]{op_shown.name}[/] [bold cyan][{op_shown.category_label}][/]\n"
-            f"[white]{op_shown.description}[/]\n"
+            + i18n.t("Operation: ", "操作：")
+            + f"[white]{op_shown.description}[/]\n"
             + i18n.t("Category: ", "分类：")
             + f"{op_shown.category_label}[/]"
         )

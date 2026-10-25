@@ -86,6 +86,7 @@ def test_cli_ops_specific_op_details(tmp_path: Path):
     assert detail["principle"]
     assert detail["benefit"]
     assert detail["loss"]
+    assert detail["use_case"]
 
 
 def test_cli_transform_with_anime_presets(tmp_path: Path):

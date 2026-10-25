@@ -456,9 +456,10 @@ def test_transform_intro_display(deps):
             assert isinstance(screen, TransformScreen)
             intro_text = str(screen.intro_view.render())
             assert "像素化" in intro_text or "Pixelate" in intro_text
-            assert "怎么做" in intro_text
-            assert "可能带来" in intro_text
-            assert "可能失去" in intro_text
+            assert "操作：" in intro_text
+            assert "可能的优势：" in intro_text
+            assert "可能的缺点：" in intro_text
+            assert "可能用来：" in intro_text
 
             await pilot.press("down")
             await pilot.pause()

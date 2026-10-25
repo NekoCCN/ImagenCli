@@ -1656,6 +1656,200 @@ ALIASES = {
 }
 
 
+_USE_CASES = {
+    "local_laplacian_sampled": (
+        "Tune fine detail across scales, lowering or boosting small textures"
+    ),
+    "weighted_guided_smooth": (
+        "Smooth color areas while keeping edges; "
+        "useful for noise and compression artifacts"
+    ),
+    "wls_detail": "Adjust brightness detail by scale; cut haze or restore texture",
+    "periodic_notch_auto": "Remove periodic interference such as screentones, fabric and grids",
+    "fast_guided_smooth": "Quick large-area softening for a first look before fine tuning",
+    "weighted_median": "Clean local speckles and impulse noise while keeping main edges",
+    "rtv_smooth": "Reduce texture and skin noise while preserving main edges",
+    "periodic_notch": "Suppress periodic artifacts at known frequencies",
+    "illumination_correct": "Correct uneven lighting and vignetting",
+    "l0_smooth": "Strong smoothing that keeps strong edges; useful for cleanup and flat color",
+    "domain_transform": "Edge-aware recursive smoothing that lowers fine noise",
+    "wls_smooth": "Edge-preserving smoothing that reduces fine texture",
+    "chroma_transfer": "Transfer the overall color cast of a reference image",
+    "像素化": "Pixel art, mosaic or low-resolution looks",
+    "调色板": "Limit colors for retro or poster-like palettes",
+    "线稿": "Extract contours for line art or manga drafts",
+    "抖动": "Approximate color steps with dots for a printed look",
+    "锐化": "Boost edges and detail for a crisper image",
+    "赛璐璐": "Flatten color areas and add contours for a cel-shaded look",
+    "去AI塑料感": "Reduce the AI-generated look; soften skin and highlights",
+    "抗AI生成伪影综合治理": (
+        "Reduce the AI-generated look; "
+        "suppress high-frequency artifacts and plastic texture"
+    ),
+    "二次元平涂去杂": "Clean flat color and remove stray color and fine noise",
+    "动漫色彩提纯": "Clean shadows and make colors more vivid",
+    "anti_checkerboard": "Remove checkerboard and grid-like high-frequency artifacts",
+    "subsurface_scattering": "Add soft translucency to skin or translucent materials",
+    "de_haloing": "Reduce white halos from sharpening or HDR",
+    "film_grain": "Add film grain to reduce the digital or generated look",
+    "de_ai_bloom": "Diffuse highlights for a soft glow",
+    "filmic_tone": "Add filmic blacks, whites and tonal roll-off",
+    "chromatic_aberration": "Simulate lens-edge dispersion for a photographic feel",
+    "ACES电影级色调": "Film-style highlight compression and shadow roll-off",
+    "引导滤波细节增强": "Restore fine detail and texture; reduce over-smoothed areas",
+    "桑原二次元平涂": "Flat anime color and color blocking; suppress photo detail",
+    "剧场版宽银幕眩光": "Add horizontal anamorphic flare for a cinematic look",
+    "日系晴空色彩迁移": "Transfer a bright, clear sky-like palette",
+    "日系通透空气感": "Create a bright, airy Japanese-style look",
+    "热血集中线": "Overlay radial action lines for manga impact",
+    "focus_lines": "Overlay radial action lines for manga impact",
+    "黑白漫画网点": "Turn light and shadow into manga screentones",
+    "screentone": "Turn light and shadow into manga screentones",
+    "立绘贴纸白边": "Add a white outline and shadow to a transparent cutout",
+    "sticker_outline": "Add a white outline and shadow to a transparent cutout",
+    "XDoG动漫线稿": "Extract anime line art with a hand-drawn feel",
+    "lineart_extract": "Extract line art with a difference of Gaussians",
+    "复古90年代胶片": "Add 90s film color shift, vignette and grain",
+    "动漫超分辨率 4x": "Upscale illustrations 4× and recover lines and color areas",
+    "通用超分辨率 4x": "Upscale photos or mixed images 4×",
+    "日系治愈空气柔光": "Soft highlights, clear color and warm line art",
+    "大魄力动感鱼眼": "Fisheye distortion and radial lines for a dynamic look",
+    "橙青影视色彩平衡": "Teal-and-orange grading with film grain",
+    "line_color": "Adjust dark line color so line art blends in",
+    "color_balance": "Shift color per brightness range",
+    "fisheye": "Radial fisheye distortion",
+    "vibrance": "Raise saturation while protecting skin tones",
+    "diffuse_glow": "Blur and screen highlights for a glow",
+    "vignette": "Darken the edges to focus on the subject",
+    "color_temperature": "Adjust warm/cool temperature and tint",
+    "superres": "Upscale with model inference",
+    "二次元线条强化与描墨": "Strengthen and darken anime lines",
+    "二次元赛璐珞顶级精修": "Smooth, ink and desaturate for a finished cel look",
+    "anime_line_enhance": "Strengthen anime lines and inking",
+    "guided_smooth": "Edge-preserving smoothing that lowers noise and generated texture",
+    "rolling_guidance": "Iterative texture smoothing to remove fine noise",
+    "flow_line": "Trace lines along contours for a flowing line-art look",
+    "kuwahara_anisotropic": "Directional color-area smoothing that keeps edges",
+    "bounded_sharpen": "Sharpen with limited overshoot",
+    "multiscale_detail": "Adjust detail by scale and control texture strength",
+    "linear_resize": "Resize transparent edges in linear light",
+    "quantize": "Reduce color count for posterization",
+    "dither": "Use error diffusion to restore color steps",
+    "sharpen": "Boost high frequencies for clearer edges",
+    "grayscale": "Convert to grayscale",
+    "autocontrast": "Stretch the histogram for more contrast",
+    "highpass": "Extract high-frequency detail for sharpening or texture",
+    "surface_blur": "Smooth local color by color distance to reduce stray color",
+    "color_purity": "Desaturate shadows for purer color",
+    "cel_shade": "Quantize levels and add contours for cel shading",
+    "pixelate": "Blocky pixelation",
+    "赛璐璐手绘": "Quantize levels and add contours for a hand-drawn cel look",
+    "像素复古风": "Retro pixel-art look",
+}
+_NOTES = {
+    "local_laplacian_sampled": [
+        "Adjusts detail across scales",
+        "Does not guarantee halo-free or hue-preserving output",
+    ],
+    "weighted_guided_smooth": [
+        "Smooths color areas while protecting edges",
+        "Halos and thin-line loss are still possible",
+    ],
+    "wls_detail": [
+        "Controls brightness detail at each scale",
+        "Strong gains can damage thin lines",
+    ],
+    "periodic_notch_auto": [
+        "Finds and suppresses narrowband periodic noise",
+        "Screentones, fabric and grids can be removed too",
+    ],
+    "fast_guided_smooth": ["Faster large-area smoothing", "May differ from the full filter"],
+    "weighted_median": [
+        "Cleans local speckles and impulses",
+        "Strong outliers remain at narrow radii; colors can shift",
+    ],
+    "rtv_smooth": [
+        "Reduces texture while keeping main edges",
+        "Too few iterations or strong settings can erode edges",
+    ],
+    "periodic_notch": [
+        "Targets known periodic artifacts",
+        "Also removes intended patterns at that frequency",
+    ],
+    "illumination_correct": [
+        "Evens out uneven lighting and vignetting",
+        "Can flatten material shading and amplify noise",
+    ],
+    "l0_smooth": [
+        "Strong smoothing with strong-edge preservation",
+        "Thin lines and texture can merge",
+    ],
+    "domain_transform": [
+        "Edge-aware smoothing with less fine noise",
+        "Small structures can weaken",
+    ],
+    "wls_smooth": ["Separates slow structure from detail", "Large images can be slow to solve"],
+    "chroma_transfer": [
+        "Quickly transfers a reference palette",
+        "Relative luminance is not perceptual Lab lightness",
+    ],
+    "chromatic_aberration": [
+        "Adds realistic edge dispersion",
+        "Edges can soften or show color fringes",
+    ],
+    "ACES电影级色调": [
+        "Smooth highlight shoulder and shadow roll-off",
+        "Changes overall contrast and color, so regrading is needed",
+    ],
+    "引导滤波细节增强": [
+        "Restores hair, skin and fabric texture",
+        "Too much amplification also boosts noise and sharpening artifacts",
+    ],
+    "桑原二次元平涂": [
+        "Flattens backgrounds and thick brush strokes",
+        "Small structures and high-frequency detail can disappear",
+    ],
+    "剧场版宽银幕眩光": [
+        "Adds horizontal flare and a cinematic feel",
+        "Bright areas can clip or show streaks",
+    ],
+    "日系晴空色彩迁移": [
+        "Brightens dull images quickly",
+        "Global color shift can affect skin tones and brand colors",
+    ],
+    "XDoG动漫线稿": [
+        "Extracts clean line art from color images",
+        "Complex textures can be read as lines",
+    ],
+    "guided_smooth": [
+        "Smooths flat color while protecting edges",
+        "Low-contrast thin lines can weaken",
+    ],
+    "rolling_guidance": ["Reduces fine texture", "Small text and hatching can be erased"],
+    "flow_line": ["Traces lines along contours", "Crossings, thin lines and line ends can break"],
+    "kuwahara_anisotropic": [
+        "Directional color abstraction with edge retention",
+        "Small structures can change shape",
+    ],
+    "bounded_sharpen": [
+        "Controlled sharpening with less overshoot",
+        "Real highlights can weaken and texture can amplify",
+    ],
+    "multiscale_detail": [
+        "Adjusts contrast and detail by scale",
+        "High-frequency boosts also amplify noise",
+    ],
+    "linear_resize": [
+        "Cleaner transparent-edge resizing",
+        "Not a learned detail recovery; scale and size are exclusive",
+    ],
+}
+for _name, _text in _USE_CASES.items():
+    INTROS[_name]["use_case"] = _text
+for _name, _note in _NOTES.items():
+    INTROS[_name]["benefit"], INTROS[_name]["loss"] = _note
+
+
 def intro_en(key: str) -> dict[str, str] | None:
     """English intro text for a catalog key, or None when no translation exists."""
     target = ALIASES.get(key, key)
