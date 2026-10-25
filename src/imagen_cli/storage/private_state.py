@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,7 +35,7 @@ class PrivateStateStore:
     def _directory(self) -> Iterator[None]:
         if _WINDOWS:
             security = _WindowsSecurity()
-            handle = security.open(self.root)
+            handle = security.open(self.root, share_delete=True)
             try:
                 security.verify(handle, directory=True)
                 yield
@@ -44,12 +45,15 @@ class PrivateStateStore:
             self._check(self.root)
             yield
 
-    def _open(self, path: Path, *, create: bool) -> int:
+    def _open(self, path: Path, *, create: bool, share_delete: bool = False) -> int:
         if _WINDOWS:
             import msvcrt
 
             security = _WindowsSecurity()
-            handle = security.create(path, directory=False) if create else security.open(path)
+            handle = (
+                security.create(path, directory=False, share_delete=share_delete)
+                if create else security.open(path)
+            )
             assert handle is not None
             try:
                 security.verify(handle, directory=False)
@@ -133,13 +137,21 @@ class PrivateStateStore:
             path = safe_path(self.root, name)
             temporary = safe_path(self.root, name + ".tmp")
             temporary.unlink(missing_ok=True)
-            fd = self._open(temporary, create=True)
+            fd = self._open(temporary, create=True, share_delete=True)
             try:
                 with os.fdopen(fd, "wb") as target:
                     target.write(data)
                     target.flush()
                     os.fsync(target.fileno())
-                os.replace(temporary, path)
+                # Windows scanners can briefly hold the just-written file.
+                for delay in (0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0, 1.0, None):
+                    try:
+                        os.replace(temporary, path)
+                        break
+                    except PermissionError:
+                        if not _WINDOWS or delay is None:
+                            raise
+                        time.sleep(delay)
                 fsync_directory(self.root)
             except BaseException:
                 temporary.unlink(missing_ok=True)

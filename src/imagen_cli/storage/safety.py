@@ -294,7 +294,7 @@ class _WindowsSecurity:
         finally:
             self.kernel.LocalFree(text)
 
-    def create(self, path: Path, *, directory: bool) -> int | None:
+    def create(self, path: Path, *, directory: bool, share_delete: bool = False) -> int | None:
         descriptor = wintypes.LPVOID()
         flags = "OICI" if directory else ""
         sddl = f"O:{self.user}D:P(A;{flags};FA;;;{self.user})"
@@ -309,7 +309,8 @@ class _WindowsSecurity:
                 self._ok(self.kernel.CreateDirectoryW(str(path), ctypes.byref(attributes)))
                 return None
             handle = self.kernel.CreateFileW(
-                str(path), 0xC0020000, 0, ctypes.byref(attributes), 1, 0x00200000, None
+                str(path), 0xC0020000, 4 if share_delete else 0,
+                ctypes.byref(attributes), 1, 0x00200000, None
             )
             if handle == ctypes.c_void_p(-1).value:
                 error = getattr(ctypes, "get_last_error")()  # noqa: B009
@@ -335,10 +336,11 @@ class _WindowsSecurity:
         finally:
             self.kernel.LocalFree(descriptor)
 
-    def open(self, path: Path) -> int:
+    def open(self, path: Path, *, share_delete: bool = False) -> int:
         handle = self.kernel.CreateFileW(
-            str(path), 0x80020000, 1, None, 3, 0x02200000, None
-        )  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS; no write/delete sharing.
+            str(path), 0x80020000, 7 if share_delete else 1,
+            None, 3, 0x02200000, None
+        )  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS; delete sharing only for rename.
         if handle == ctypes.c_void_p(-1).value:
             self._ok(False)
         return int(handle)
