@@ -5,6 +5,7 @@ from functools import cached_property, partial
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
+from imagen_cli import i18n
 from imagen_cli.cli.options import SharedOptions
 
 if TYPE_CHECKING:
@@ -60,7 +61,10 @@ class Container:
                 connection.close()
         finally:
             for name in (
-                "repositories", "artifact_store", "private_state_store", "resolved_workspace"
+                "repositories",
+                "artifact_store",
+                "private_state_store",
+                "resolved_workspace",
             ):
                 self.__dict__.pop(name, None)
 
@@ -109,7 +113,9 @@ class Container:
                 if command == "batch get":
                     return batch.get_(batch_service, args["batch_id"])
                 return batch.wait_(
-                    batch_service, args["batch_id"], timeout=self.options.timeout,
+                    batch_service,
+                    args["batch_id"],
+                    timeout=self.options.timeout,
                 )
             from imagen_cli.application.planning_service import PlanningService
             from imagen_cli.application.preflight import plan_creation
@@ -117,7 +123,9 @@ class Container:
 
             def prepare(creation: CreationInput) -> dict[str, Any]:
                 status, data = plan_creation(
-                    self.repositories, self.artifact_store, creation,
+                    self.repositories,
+                    self.artifact_store,
+                    creation,
                     asynchronous=self.options.async_,
                 )
                 if status != "approval_required" or "plan" not in data:
@@ -131,7 +139,8 @@ class Container:
             def run(plan: dict[str, Any], index: int) -> str:
                 # Each child gets its own connection; the parent connection stays single-threaded.
                 with Container(
-                    workspace=str(self.resolved_workspace.root), options=self.options,
+                    workspace=str(self.resolved_workspace.root),
+                    options=self.options,
                 ) as child:
                     _, data = child.execute("plan execute", {"plan_id": plan["id"]})
                 job = data.get("job")
@@ -144,7 +153,8 @@ class Container:
 
             return batch.submit(
                 BatchService(self.repositories, prepare=prepare, run=run),
-                args["requests"], args.get("concurrency", 2),
+                args["requests"],
+                args.get("concurrency", 2),
             )
         if command == "plan execute":
             from imagen_cli.application.artifact_service import ArtifactService
@@ -158,17 +168,23 @@ class Container:
             if row is None:
                 return "not_found", {}
             executor = ForegroundExecutor(
-                self.repositories, ConfiguredAdapter(
-                    self.repositories, timeout=self.options.timeout,
+                self.repositories,
+                ConfiguredAdapter(
+                    self.repositories,
+                    timeout=self.options.timeout,
                     private_store=self.private_state_store,
                 ),
                 ArtifactService(self.repositories, self.artifact_store),
-                OutcomeService(self.repositories), self.private_state_store,
+                OutcomeService(self.repositories),
+                self.private_state_store,
             )
             facts = ExecutionService(
-                self.repositories, self.artifact_store, executor,
+                self.repositories,
+                self.artifact_store,
+                executor,
             ).execute_approved(
-                row["id"], row["plan_digest"],
+                row["id"],
+                row["plan_digest"],
                 model_revision=row["target_snapshot"]["model_revision"],
                 input_artifact_ids=tuple(row["portable_context"].get("input_artifact_ids", [])),
                 mask_artifact_id=row["portable_context"].get("mask_artifact_id"),
@@ -192,18 +208,18 @@ class Container:
                 return "not_found", {}
             jobs = self.repositories.list("jobs", plan_id=row["id"])
             if jobs and (
-                jobs[0].get("state") not in {"failed", "canceled"}
-                or jobs[0].get("accepted_maybe")
+                jobs[0].get("state") not in {"failed", "canceled"} or jobs[0].get("accepted_maybe")
             ):
                 # A succeeded, unknown or in-flight attempt must not be rebuilt implicitly.
                 existing = jobs[0]
                 return "conflict", {
                     "job": existing,
                     "next_actions": [
-                        {"command": f"job get {existing['id']}",
-                         "creates_paid_request": False},
-                        {"command": f"job reconcile {existing['id']}",
-                         "creates_paid_request": False},
+                        {"command": f"job get {existing['id']}", "creates_paid_request": False},
+                        {
+                            "command": f"job reconcile {existing['id']}",
+                            "creates_paid_request": False,
+                        },
                     ],
                 }
             context = row.get("portable_context") or {}
@@ -211,16 +227,23 @@ class Container:
             count = parameters.pop("count", 1)
             size = parameters.pop("size", None)
             creation = CreationInput(
-                schema_version=1, operation=row["operation"], session=session_row["name"],
+                schema_version=1,
+                operation=row["operation"],
+                session=session_row["name"],
                 prompt=row["prompt_snapshot"],
-                profile=row["target_snapshot"]["profile_identity"], model=row["model"],
+                profile=row["target_snapshot"]["profile_identity"],
+                model=row["model"],
                 inputs=["artifact:" + item for item in context.get("input_artifact_ids", [])],
-                count=count, provider_params=parameters,
+                count=count,
+                provider_params=parameters,
                 **({"size": size} if size is not None else {}),
             )
             return plan_creation(
-                self.repositories, self.artifact_store, creation,
-                dry_run=self.options.dry_run, asynchronous=self.options.async_,
+                self.repositories,
+                self.artifact_store,
+                creation,
+                dry_run=self.options.dry_run,
+                asynchronous=self.options.async_,
             )
         if command in {"plan show", "plan approve"}:
             from imagen_cli.cli.commands import plan
@@ -234,8 +257,11 @@ class Container:
             if creation.operation != command:
                 raise ValueError("operation does not match command")
             return plan_creation(
-                self.repositories, self.artifact_store, creation,
-                dry_run=self.options.dry_run, asynchronous=self.options.async_,
+                self.repositories,
+                self.artifact_store,
+                creation,
+                dry_run=self.options.dry_run,
+                asynchronous=self.options.async_,
             )
         if command == "tui":
             try:
@@ -244,7 +270,8 @@ class Container:
                 raise ValueError("tui extra is not installed") from error
             WorkbenchApp(
                 Deps(
-                    self.repositories, self.artifact_store,
+                    self.repositories,
+                    self.artifact_store,
                     execute=self.execute,
                     private_store=self.private_state_store,
                     workspace_root=self.resolved_workspace.root,
@@ -260,7 +287,9 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             return postprocess.transform_(
-                self.repositories, self.artifact_store, args["artifact"],
+                self.repositories,
+                self.artifact_store,
+                args["artifact"],
                 pipeline=args.get("pipeline"),
                 op=args.get("op"),
                 preset=args.get("preset"),
@@ -276,15 +305,18 @@ class Container:
                 return "succeeded", superres.catalog()
             if command == "superres fetch":
                 return "succeeded", superres.fetch(
-                    args["model"], accept=args.get("accept") is True,
+                    args["model"],
+                    accept=args.get("accept") is True,
                 )
-            selected = [
-                item.strip() for item in args["model"].split(",") if item.strip()
-            ]
+            selected = [item.strip() for item in args["model"].split(",") if item.strip()]
             return "succeeded", superres.benchmark(
-                self.repositories, self.artifact_store, args["artifact"], selected,
+                self.repositories,
+                self.artifact_store,
+                args["artifact"],
+                selected,
                 backend=args.get("backend"),
-                tile=int(args.get("tile", 256)), overlap=int(args.get("overlap", 16)),
+                tile=int(args.get("tile", 256)),
+                overlap=int(args.get("overlap", 16)),
             )
         if command == "ops":
             from imagen_cli.application import media_ops, operator_catalog
@@ -299,29 +331,39 @@ class Container:
             if target_op or target_preset or verbose:
                 details: dict[str, Any] = {}
                 if target_op:
-                    if target_op in operator_catalog.INTROS:
-                        details[target_op] = operator_catalog.INTROS[target_op]
+                    intro = operator_catalog.localized_intro(target_op)
+                    if intro is not None:
+                        details[target_op] = intro
                     elif op_item := operator_catalog.get_operator_item(target_op):
+                        shown = operator_catalog.localized_operator(op_item)
                         details[target_op] = {
-                            "title": op_item.name,
-                            "summary": op_item.description,
-                            "principle": op_item.category_label,
-                            "scenarios": "CLI / TUI 交互调参",
+                            "title": shown.name,
+                            "summary": shown.description,
+                            "principle": shown.category_label,
+                            "scenarios": "CLI / TUI interactive parameter tuning"
+                            if not i18n.is_chinese()
+                            else "CLI / TUI 交互调参",
                         }
                 elif target_preset:
                     match_key = next(
-                        (k for k in operator_catalog.PRESET_PIPELINES
-                         if target_preset.lower() in k.lower()),
+                        (
+                            k
+                            for k in operator_catalog.PRESET_PIPELINES
+                            if target_preset.lower() in k.lower()
+                        ),
                         None,
                     )
                     if match_key:
-                        intro_data = operator_catalog.INTROS.get(match_key) or {}
+                        intro_data = operator_catalog.localized_intro(match_key) or {}
                         details[match_key] = {
                             "pipeline": operator_catalog.PRESET_PIPELINES[match_key],
                             "intro": intro_data,
                         }
                 else:
-                    details = dict(operator_catalog.INTROS)
+                    details = {
+                        key: operator_catalog.localized_intro(key) or {}
+                        for key in operator_catalog.INTROS
+                    }
                 data["details"] = details
             return "succeeded", data
         if command == "sheet":
@@ -332,9 +374,12 @@ class Container:
             validate(args, discover(command)["input_schema"])
             sources = [item.strip() for item in args["artifacts"].split(",") if item.strip()]
             return "succeeded", build_sheet(
-                self.repositories, self.artifact_store, sources,
+                self.repositories,
+                self.artifact_store,
+                sources,
                 session=args.get("session"),
-                columns=int(args.get("columns", 3)), cell=int(args.get("cell", 256)),
+                columns=int(args.get("columns", 3)),
+                cell=int(args.get("cell", 256)),
             )
         if command == "compare":
             from jsonschema import validate
@@ -356,7 +401,8 @@ class Container:
                 from imagen_cli.execution.configured import resolve_credential
 
                 return models.refresh_(
-                    self.repositories, identity,
+                    self.repositories,
+                    identity,
                     send_credential=args.get("send_credential") is True,
                     resolve_credential=partial(
                         resolve_credential, private_store=self.private_state_store
@@ -375,8 +421,10 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command == "profile secret":
                 return profile.secret(
-                    self.repositories, self.private_state_store,
-                    args["profile"], args["key_file"],
+                    self.repositories,
+                    self.private_state_store,
+                    args["profile"],
+                    args["key_file"],
                 )
             profile_data: dict[str, Any] | None = None
             if "config_file" in args:
@@ -384,8 +432,12 @@ class Container:
             elif command == "profile set":
                 profile_data = profile.build_set(args)
             return profile.execute(
-                self.repositories, command, profile=args.get("profile"), data=profile_data,
-                limit=self.options.limit, cursor=self.options.cursor,
+                self.repositories,
+                command,
+                profile=args.get("profile"),
+                data=profile_data,
+                limit=self.options.limit,
+                cursor=self.options.cursor,
             )
         if command in {"providers", "models"}:
             from jsonschema import validate
@@ -394,12 +446,20 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             return discovery.list_(
-                self.repositories, command, **args,
-                limit=self.options.limit, cursor=self.options.cursor,
+                self.repositories,
+                command,
+                **args,
+                limit=self.options.limit,
+                cursor=self.options.cursor,
             )
         if command in {
-            "session fork", "session export", "session import", "session delete",
-            "session remove-artifact", "session remove-image", "asset gc",
+            "session fork",
+            "session export",
+            "session import",
+            "session delete",
+            "session remove-artifact",
+            "session remove-image",
+            "asset gc",
         }:
             from jsonschema import validate
 
@@ -408,31 +468,44 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command in {"session remove-artifact", "session remove-image"}:
                 return history.remove_artifact_(
-                    self.repositories, self.artifact_store,
-                    args["session"], args["artifact"],
+                    self.repositories,
+                    self.artifact_store,
+                    args["session"],
+                    args["artifact"],
                     purge=args.get("purge") is not False,
                 )
             if command == "session fork":
                 return history.fork_(
-                    self.repositories, args["session"],
-                    turn_id=args["from_turn"], name=args["name"],
+                    self.repositories,
+                    args["session"],
+                    turn_id=args["from_turn"],
+                    name=args["name"],
                     artifact_ids=(args["artifact"],) if "artifact" in args else (),
                 )
             if command == "session export":
                 return history.export_(
-                    self.repositories, self.artifact_store, args["session"], args["to"],
+                    self.repositories,
+                    self.artifact_store,
+                    args["session"],
+                    args["to"],
                 )
             if command == "session import":
                 return history.import_(
-                    self.repositories, self.artifact_store, args["archive"],
+                    self.repositories,
+                    self.artifact_store,
+                    args["archive"],
                 )
             if command == "session delete":
                 return history.delete_(
-                    self.repositories, args["session"], yes=args.get("yes") is True,
+                    self.repositories,
+                    args["session"],
+                    yes=args.get("yes") is True,
                 )
             return history.gc_(
-                self.repositories, self.artifact_store,
-                dry_run=args.get("dry_run") is True, plan=args.get("plan"),
+                self.repositories,
+                self.artifact_store,
+                dry_run=args.get("dry_run") is True,
+                plan=args.get("plan"),
                 yes=args.get("yes") is True,
             )
         if command in {"asset show", "asset delete", "asset remove"}:
@@ -443,10 +516,14 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command in {"asset delete", "asset remove"}:
                 return asset.delete_(
-                    self.repositories, self.artifact_store, args["artifact"],
+                    self.repositories,
+                    self.artifact_store,
+                    args["artifact"],
                 )
             return asset.show_(
-                self.repositories, self.artifact_store, args["artifact"],
+                self.repositories,
+                self.artifact_store,
+                args["artifact"],
             )
         if command == "asset open":
             from jsonschema import validate
@@ -461,7 +538,8 @@ class Container:
             folder = args.get("folder") is True
             open_path(path, folder=folder)
             return "succeeded", {
-                "artifact": row["id"], "path": str(path.parent if folder else path),
+                "artifact": row["id"],
+                "path": str(path.parent if folder else path),
                 "opened": "folder" if folder else "image",
             }
         if command.startswith("cache "):
@@ -472,11 +550,15 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command == "cache audit":
                 return "succeeded", cache.audit_(
-                    self.repositories, self.artifact_store, self.private_state_store,
+                    self.repositories,
+                    self.artifact_store,
+                    self.private_state_store,
                 )
             return "succeeded", cache.purge_(
-                self.repositories, self.artifact_store,
-                plan=args.get("plan"), yes=args.get("yes") is True,
+                self.repositories,
+                self.artifact_store,
+                plan=args.get("plan"),
+                yes=args.get("yes") is True,
                 private_store=self.private_state_store,
             )
         if command.startswith("skills "):
@@ -486,15 +568,31 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             if command == "skills list":
-                return skills.list_()
+                return skills.list_(agents=args.get("target"), scope=args.get("scope"))
+            if command == "skills uninstall":
+                return skills.uninstall_(
+                    args.get("skill"),
+                    scope=args.get("scope", "project"),
+                    force=args.get("force") is True,
+                    yes=args.get("yes") is True,
+                    agents=args.get("target"),
+                )
             return skills.install_(
                 args.get("skill"),
                 scope=args.get("scope", "project"),
                 force=args.get("force") is True,
+                agents=args.get("target"),
             )
         if command not in {
-            "session create", "session list", "session show", "session resume",
-            "job get", "job wait", "job fetch", "job reconcile", "job cancel",
+            "session create",
+            "session list",
+            "session show",
+            "session resume",
+            "job get",
+            "job wait",
+            "job fetch",
+            "job reconcile",
+            "job cancel",
         }:
             return "unsupported_capability", {}
 

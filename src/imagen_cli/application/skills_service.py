@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
+import tempfile
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
+
+from imagen_cli.application import skill_targets
 
 BUNDLED = Path(__file__).resolve().parent.parent / "bundled_skills"
 SCOPES = ("project", "global")
@@ -29,11 +35,13 @@ def available() -> list[dict[str, str]]:
         if not file.is_file():
             continue
         meta = _metadata(file.read_text(encoding="utf-8"))
-        skills.append({
-            "name": meta.get("name", folder.name),
-            "description": meta.get("description", ""),
-            "path": str(folder),
-        })
+        skills.append(
+            {
+                "name": meta.get("name", folder.name),
+                "description": meta.get("description", ""),
+                "path": str(folder),
+            }
+        )
     return skills
 
 
@@ -45,47 +53,236 @@ def root_for(scope: str) -> Path:
     raise ValueError("scope must be project or global")
 
 
-def _installed(scope: str, name: str) -> bool:
-    return (root_for(scope) / name / "SKILL.md").is_file()
+def _roots(
+    scope: str, agents: list[str] | None, *, deduplicate: bool = True
+) -> list[tuple[str, Path]]:
+    names = agents or ["claude-code"]
+    if "all" in names:
+        names = [row["name"] for row in skill_targets.targets() if row.get(scope)]
+    roots = []
+    seen: set[Path] = set()
+    for agent in names:
+        root = skill_targets.root_for(agent, scope)
+        if root in seen and deduplicate:
+            continue
+        seen.add(root)
+        roots.append((agent, root))
+    return roots
 
 
-def list_() -> tuple[str, dict[str, Any]]:
+def _safe(path: Path) -> bool:
+    return not any(item.is_symlink() for item in (path, *path.parents)) and (
+        not path.is_dir() or not any(item.is_symlink() for item in path.rglob("*"))
+    )
+
+
+def _managed(folder: Path, name: str) -> dict[str, Any] | None:
+    if not _safe(folder):
+        return None
+    try:
+        value = json.loads((folder / ".imagen-install.json").read_text(encoding="utf-8"))
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != 1
+            or value.get("skill") != name
+            or not isinstance(value.get("files"), dict)
+            or 'SKILL.md' not in value.get('files', {})
+            or not isinstance(value.get('package_version'), str)
+            or not value.get('package_version')
+            or any(
+                not isinstance(path, str)
+                or Path(path).is_absolute()
+                or ".." in Path(path).parts
+                or not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in '0123456789abcdef' for character in digest)
+                for path, digest in value.get("files", {}).items()
+            )
+        ):
+            return None
+        return value
+    except (OSError, ValueError):
+        return None
+
+
+def _manifest(folder: Path, name: str) -> dict[str, Any]:
+    files = {}
+    for file in sorted(folder.rglob("*")):
+        if file.is_file() and file != folder / ".imagen-install.json":
+            files[str(file.relative_to(folder))] = hashlib.sha256(file.read_bytes()).hexdigest()
+    return {
+        "schema_version": 1,
+        "skill": name,
+        "package_version": version("imagen-cli"),
+        "files": files,
+    }
+
+
+def _installed(scope: str, name: str, agents: list[str] | None = None) -> bool:
+    return any((root / name / "SKILL.md").is_file() for _, root in _roots(scope, agents))
+
+
+def list_(
+    *, agents: list[str] | None = None, scope: str | None = None
+) -> tuple[str, dict[str, Any]]:
     rows = []
+    scopes = (scope,) if scope else SCOPES
     for entry in available():
-        rows.append({
-            "name": entry["name"],
-            "description": entry["description"],
-            "installed": {scope: _installed(scope, entry["name"]) for scope in SCOPES},
-        })
+        installed: dict[str, Any]
+        if agents is None and scope is None:
+            installed = {
+                current: _installed(current, entry["name"], ["claude-code"]) for current in scopes
+            }
+        else:
+            installed = {
+                current: {
+                    agent: (root / entry["name"] / "SKILL.md").is_file()
+                    for agent, root in _roots(current, agents, deduplicate=False)
+                }
+                for current in scopes
+            }
+        rows.append(
+            {"name": entry["name"], "description": entry["description"], "installed": installed}
+        )
     return "succeeded", {"skills": rows}
 
 
 def install_(
-    names: list[str] | None, *, scope: str = "project", force: bool = False,
+    names: list[str] | None,
+    *,
+    scope: str = "project",
+    force: bool = False,
+    agents: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    root = root_for(scope)
     bundled = {entry["name"]: entry for entry in available()}
     selected = sorted(set(names or bundled))
+    roots = _roots(scope, agents)
     unknown = [name for name in selected if name not in bundled]
     if unknown:
         return "not_found", {
-            "scope": scope, "destination": str(root), "installed": [], "existing": [],
+            "scope": scope,
+            "destination": str(roots[0][1]),
+            "installed": [],
+            "existing": [],
             "available": sorted(bundled),
         }
-    existing = [
-        {"name": name, "path": str(root / name)}
-        for name in selected if (root / name).exists()
-    ]
-    if existing and not force:
+    existing = []
+    for agent, root in roots:
+        for name in selected:
+            target = root / name
+            managed = _managed(target, name) if target.exists() else None
+            if not _safe(target):
+                existing.append({"name": name, "path": str(target), "agent": agent})
+            elif target.exists() and managed is None:
+                existing.append({"name": name, "path": str(target), "agent": agent})
+            elif target.exists() and not force:
+                existing.append({"name": name, "path": str(target), "agent": agent})
+    if existing:
         return "conflict", {
-            "scope": scope, "destination": str(root), "installed": [], "existing": existing,
+            "scope": scope,
+            "destination": str(roots[0][1]),
+            "installed": [],
+            "existing": existing,
         }
-    root.mkdir(parents=True, exist_ok=True)
     installed = []
-    for name in selected:
-        target = root / name
-        shutil.copytree(bundled[name]["path"], target, dirs_exist_ok=True)
-        installed.append({"name": name, "path": str(target)})
-    return "succeeded", {
-        "scope": scope, "destination": str(root), "installed": installed, "existing": [],
+    failed = []
+    for agent, root in roots:
+        for name in selected:
+            target = root / name
+            recovery: str | None = None
+            temporary: Path | None = None
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                temporary = Path(tempfile.mkdtemp(dir=root, prefix='.imagen-install-'))
+                staging = temporary / name
+                shutil.copytree(bundled[name]['path'], staging)
+                (staging / '.imagen-install.json').write_text(
+                    json.dumps(_manifest(staging, name), indent=2) + '\n', encoding='utf-8'
+                )
+                backup = temporary / 'previous'
+                if target.exists():
+                    target.rename(backup)
+                try:
+                    staging.rename(target)
+                except OSError:
+                    if backup.exists():
+                        recovery = str(backup)
+                        backup.rename(target)
+                        recovery = None
+                    raise
+                installed.append({'name': name, 'path': str(target), 'agent': agent})
+            except OSError:
+                failure = {'name': name, 'path': str(target), 'agent': agent}
+                if recovery:
+                    failure['backup'] = recovery
+                failed.append(failure)
+            finally:
+                if temporary is not None and recovery is None:
+                    shutil.rmtree(temporary, ignore_errors=True)
+    expanded = (
+        [row["name"] for row in skill_targets.targets() if row.get(scope)]
+        if agents and "all" in agents
+        else agents or ["claude-code"]
+    )
+    return ("internal_error" if failed else "succeeded"), {
+        "scope": scope,
+        "destination": str(roots[0][1]),
+        "installed": installed,
+        "existing": [],
+        "failed": failed,
+        "targets": expanded,
+        "unsupported": [row["name"] for row in skill_targets.targets() if not row.get(scope)]
+        if agents and "all" in agents
+        else [],
+    }
+
+
+def uninstall_(
+    names: list[str] | None,
+    *,
+    scope: str = "project",
+    force: bool = False,
+    yes: bool = False,
+    agents: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    selected = sorted(set(names or {entry["name"] for entry in available()}))
+    if set(selected) - {entry["name"] for entry in available()}:
+        return "not_found", {"scope": scope, "removed": [], "conflicts": []}
+    conflicts = []
+    targets = []
+    for agent, root in _roots(scope, agents):
+        for name in selected:
+            target = root / name
+            if not _safe(target):
+                conflicts.append({"name": name, "path": str(target), "agent": agent})
+                continue
+            if not target.exists():
+                continue
+            record = _managed(target, name)
+            if record is None:
+                conflicts.append({"name": name, "path": str(target), "agent": agent})
+                continue
+            expected = record["files"]
+            actual = _manifest(target, name)["files"]
+            if expected != actual and not (force and yes):
+                conflicts.append({"name": name, "path": str(target), "agent": agent})
+            else:
+                targets.append((agent, name, target))
+    if conflicts:
+        return "conflict", {"scope": scope, "removed": [], "conflicts": conflicts}
+    removed = []
+    failed = []
+    mappings = _roots(scope, agents, deduplicate=False)
+    for agent, name, target in targets:
+        record = {
+            'name': name, 'path': str(target), 'agent': agent,
+            'agents': [owner for owner, root in mappings if root / name == target],
+        }
+        try:
+            shutil.rmtree(target)
+            removed.append(record)
+        except OSError:
+            failed.append(record)
+    return ('internal_error' if failed else 'succeeded'), {
+        'scope': scope, 'removed': removed, 'conflicts': [], 'failed': failed,
     }

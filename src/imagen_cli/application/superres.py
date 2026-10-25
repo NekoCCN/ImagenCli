@@ -183,11 +183,19 @@ def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
         raise ValueError(
             "weights are missing; rerun with accept=true after reviewing " + str(url)
         )
-    (download or _download)(str(url), path)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    if pinned is not None and digest != pinned:
-        path.unlink(missing_ok=True)
-        raise ValueError("downloaded weights do not match the pinned digest")
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.imagen-download-') as temporary:
+        staged = Path(temporary) / path.name
+        (download or _download)(str(url), staged)
+        if not staged.is_file() or staged.stat().st_size > MAX_WEIGHT_BYTES:
+            raise ValueError('weights exceed the size limit or are not a regular file')
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+        if pinned is not None and digest != pinned:
+            raise ValueError('downloaded weights do not match the pinned digest')
+        # Hard-link publication refuses an existing file instead of overwriting it.
+        os.link(staged, path)
     _record_digest(model, suffix, digest)
     return path
 

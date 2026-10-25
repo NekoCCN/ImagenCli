@@ -46,7 +46,8 @@ def test_errors_are_reported_without_raw_exceptions():
 
 def test_cli_human_mode_has_no_color_escapes(tmp_path):
     env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(Path(__file__).parents[2] / "src"),
-           "HOME": str(tmp_path), "NO_COLOR": "1", "TERM": "dumb"}
+           "HOME": str(tmp_path), "NO_COLOR": "1", "TERM": "dumb",
+           "IMAGEN_LANG": "zh-CN"}
     script = (
         "import socket,sys; socket.socket=lambda *a,**k: (_ for _ in ()).throw(AssertionError());"
         "socket.getaddrinfo=socket.socket;"

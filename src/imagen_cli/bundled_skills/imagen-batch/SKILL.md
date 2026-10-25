@@ -9,6 +9,8 @@ description: Use when submitting several imagen image requests at once, controll
 
 ## 提交
 
+`batch submit` 会批准并执行各子请求，不是只生成待审计划。先向用户确认整批提示词、端点、模型、数量和可能费用，取得明确发送授权后才提交。
+
 准备一个 JSON 文件，`requests` 是 CreationInput 数组，`concurrency` 取 1–8：
 
 ```json

@@ -5,6 +5,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any, TextIO
 
+from imagen_cli import i18n
 from imagen_cli.domain.contracts import InvocationEvent
 
 from .diagnostics import redact
@@ -36,6 +37,17 @@ ERROR_TYPES = {
 }
 # Why an attempt failed, in words; provider response text is never echoed.
 ERROR_REASONS = {
+    "safety_refusal": "the provider's content-safety policy rejected this request",
+    "authentication_error": "the credential is invalid or missing",
+    "permission_denied": "permission to this resource is denied",
+    "validation_error": "the request parameters are invalid",
+    "provider_error": "the provider returned an error",
+    "outcome_unknown": "cannot confirm whether the provider accepted the request "
+    "(no automatic retry)",
+    "internal_error": "a local execution error occurred",
+    "save_failed": "the result was returned but saving it locally failed",
+}
+ERROR_REASONS_ZH = {
     "safety_refusal": "上游内容安全策略拒绝了本次请求",
     "authentication_error": "凭据无效或缺失",
     "permission_denied": "没有访问该资源的权限",
@@ -51,11 +63,12 @@ def error_message(detail: Any) -> str | None:
     """Human reason for a stored job error, or None when there is no usable detail."""
     if not isinstance(detail, dict):
         return None
-    label = ERROR_REASONS.get(str(detail.get("type")))
+    reasons = ERROR_REASONS_ZH if i18n.is_chinese() else ERROR_REASONS
+    label = reasons.get(str(detail.get("type")))
     if label is None:
         return None
     if isinstance(status := detail.get("http_status"), int):
-        label += f"（HTTP {status}）"
+        label += f"（HTTP {status}）" if i18n.is_chinese() else f" (HTTP {status})"
     if isinstance(exc := detail.get("error_class"), str) and exc:
         label += f" · {exc}"
     return label
@@ -87,9 +100,11 @@ def result(
     if error is None:
         detail = data_error(data)
         error = {
-            "type": str(detail.get("type")) if isinstance(detail, dict) and detail.get("type")
+            "type": str(detail.get("type"))
+            if isinstance(detail, dict) and detail.get("type")
             else ERROR_TYPES.get(status, status),
-            "message": error_message(detail) or "命令未成功完成。",
+            "message": error_message(detail)
+            or i18n.t("The command did not complete.", "命令未成功完成。"),
             "retryable": False,
             "accepted_maybe": status in {"unknown", "partial_success"},
             "next_actions": [],

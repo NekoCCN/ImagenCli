@@ -1,87 +1,45 @@
 ---
 name: imagen
-description: Use when generating or editing images with the local imagen CLI, creating image sessions, planning and approving provider requests, or retrieving generated artifacts. Covers discovery, the plan/approve/execute lifecycle, and the no-auto-retry rules for unknown outcomes.
+description: Use when the user wants to generate or edit images, manage image sessions, or process local images using the Imagen CLI. Includes command discovery, structured output, user approval before provider requests, and safe handling of unknown outcomes.
 ---
 
-# Imagen 图像工作台
+# Imagen CLI
 
-`imagen` 是本机持久图像工作台。会话、计划、批准、产物和失败都保存在本地；CLI 是完整能力面，TUI 只是同一能力的界面。
+用 `imagen` 完成用户的图像任务。生成和编辑使用已配置端点；会话、执行记录和产物保存在本机。不要把本地工作台理解为本地运行生成模型。
 
-## 先发现，再调用
-
-- `imagen help --agent`：全部命令的安全调用手册。
-- `imagen schema <command>`：单个命令的输入/输出 JSON Schema。
-- 机器调用加 `--agent`（等价于 `--output json`）。每次输出一条 envelope：
-  `schema_version`、`ok`、`status`、`data`、`error`。
-- 不要猜参数；先看 `schema`。位置参数只用于姓名或 ID，例如
-  `imagen session create "海报"`、`imagen plan approve pln_... --digest ...`。
-
-## 最小生成流程
+## 先发现能力
 
 ```bash
-# 1. 建会话（可复用已有会话）
-imagen session create "海报草稿" --profile local --agent
-# data.session.id / data.session.name
-
-# 2. 规划（不发送供应商请求）；prompt 只能选一个来源
-printf '%s' "$PROMPT" | imagen generate \
-  --session ses_... --profile local --size 1024x1024 --prompt-stdin --agent
-# status=approval_required, data.plan.id, data.plan.plan_digest
-
-# 3. 批准冻结的计划
-imagen plan approve pln_... --digest <plan_digest> --agent
-# status=approved
-
-# 4. 执行；最多发送一次创建请求
-imagen plan execute pln_... --timeout 300 --agent
-# status=succeeded, data.artifacts[].id / .path
+imagen help --agent
+imagen schema generate
+imagen profile list --agent
 ```
 
-- `--session` 接受会话 ID 或唯一名字。
-- `edit` 需要至少一个输入：`--input artifact:art_...` 或 `--input file:path.png`，
-  并使用 `--prompt-file` / `--prompt-stdin` 之一。
-- 执行成功不一定代表成本已知：`data.job.cost.actual` 可能为 `null`，
-  同时给出 `unknown_reason`。永远不要把 `null` 当成 0 或免费。
+- 使用当前安装版本的 `help` 和 `schema`，不要凭记忆猜参数。
+- 机器调用显式加 `--agent`，或 `--output json`；同时检查退出码和 `ok/status/data/error`。
+- 缺少 profile 或模型时请用户选择，不读取密钥文件、不输出环境变量或凭据配置。
+- 查询或本地处理不需要调用付费生成端点。
 
-## 失败与重试
+## 生成与编辑
 
-- 停止并报告任何 `status=unknown`（`error.type=outcome_unknown`）或
-  `accepted_maybe=true` 的结果。
-- 不要自动重发创建请求。先核对本地事实：
-  `imagen job get <job_id> --agent`，
-  需要补存结果时 `imagen job reconcile <job_id> --agent`，
-  再 `imagen job fetch <job_id> --agent`。
-- 只有确定没有创建请求时才重试：`imagen plan retry <plan_id> --agent` 只接受
-  确定失败或已取消的任务；已完成、进行中或结果未知时会返回 `conflict`，
-  先核对 `job get` / `job reconcile`。重试会重建一个新计划，仍需重新批准。
-- `error.retryable` 说明是否值得重试；`error.next_actions` 给出可恢复步骤。
+1. 确认用户的提示词、输入、profile、模型和数量。说明输入将发送到该端点。
+2. 创建或复用会话，调用 `generate` 或 `edit` 生成冻结计划；此时未发送创建请求。
+3. 检查计划，将请求范围、目标与可获得的费用信息呈现给用户。`approval_required` 是待批准，不是失败或生成成功。
+4. 只有用户明确授权当前请求后，才调用 `plan approve` 与 `plan execute`。不要因为用户想看计划就替他们执行。
+5. 从结果读取实际 artifact ID 和路径，不编造文件名。费用为 `null` 代表未知，不代表免费。
 
-## 常用查询
+完整 JSON 示例和恢复步骤见 [工作流](references/workflows.md)。
 
-```bash
-imagen session list --agent
-imagen session show ses_... --agent        # turns 与 artifact references
-imagen job get job_... --agent
-imagen job wait job_... --timeout 300 --agent
-imagen asset open art_... --agent          # 或 --folder
-```
+## 不确定结果
 
-## 异步队列
+`unknown`、`outcome_unknown` 或 `accepted_maybe=true` 时停止创建操作，检查 `job get`、`job reconcile` 等本地事实并告知用户。不要自动重新生成，也不要通过新建会话规避未知结果。
 
-`imagen generate ... --async` 会把请求直接放入本地队列，由 `imagen worker start`
-启动的隔离 worker 执行一次；它不生成批准计划，只在用户明确同意发送时使用。
+`--async` 和 `batch submit` 会直接排队或执行，不是绕过用户授权的方法；必须事先获得对应批次或请求的明确发送授权。
 
-```bash
-imagen generate --session ses_... --profile local --prompt-stdin --async --agent
-imagen worker start --agent
-imagen job wait job_... --timeout 300 --agent
-```
+## 其他任务
 
-结果未知时停止观察，不重发；worker 崩溃后只做 recover 观察。
-
-## 安全
-
-- 密钥只写本地私有存储：`imagen profile secret <profile> --key-file <file>`，
-  命令不回显密钥。不要在 prompt、日志或提交里复制密钥。
-- 未经用户明确同意，不执行 `session delete`、`asset gc`、`cache purge`。
-- 需要人机交互时用 `imagen tui`；TUI 的所有能力也能通过 `:` 命令面板到达。
+- 会话、产物、变换、比较、联系表和超分：参见随包的 `imagen-assets` skill；也可直接查询 `imagen help COMMAND`。
+- 批量创建与部分失败处理：参见 `imagen-batch` skill。
+- 本地后处理为 experimental，会另存产物；不要覆盖原图，不把指标差异说成画质提升证明。
+- 查看模型目录不下载权重。用户选定模型并接受来源许可后才能执行 `superres fetch --accept`，不得擅自下载或安装推理依赖。
+- 删除、垃圾回收、覆盖或强制卸载先取得用户明确确认。

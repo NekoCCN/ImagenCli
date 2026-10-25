@@ -7,6 +7,8 @@ name = "imagen-cli"
 version = "0.1.0"
 description = "Persistent image creation workbench for humans and agents"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["typer>=0.15", "pydantic>=2.10,<3", "httpx>=0.28", "Pillow>=11", "platformdirs>=4", "rich>=13", "jsonschema>=4.23"]
 
 [project.scripts]

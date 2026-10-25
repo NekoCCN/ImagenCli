@@ -25,8 +25,9 @@ from imagen_cli.application import cache_service, media_ops
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
 from imagen_cli.cli.human import render as human_render
 from imagen_cli.cli.options import SharedOptions
-from imagen_cli.cli.registry import COMMANDS, discover
+from imagen_cli.cli.registry import COMMANDS, command_summary, discover
 from imagen_cli.cli.renderers import data_error, error_message
+from imagen_cli.i18n import is_chinese, t
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.private_state import PrivateStateStore
@@ -220,50 +221,51 @@ _TONES = {
     "error": "#e98f95",
 }
 
-# Schema field names stay the machine contract; only the visible label is Chinese.
+# Schema field names stay the machine contract; only the visible label is translated.
 _FIELD_LABELS = {
-    "prompt": "提示词",
-    "profile": "配置",
-    "model": "模型",
-    "count": "数量",
-    "size": "尺寸",
-    "name": "名称",
-    "intent": "意图",
-    "session": "会话",
-    "operation": "操作",
-    "artifact": "产物",
-    "artifact_id": "产物",
-    "plan_id": "计划",
-    "destination": "目标路径",
-    "provider": "供应商",
-    "family": "端点类型",
-    "base_url": "端点",
-    "model_default": "默认模型",
-    "credential_ref": "凭证引用",
-    "api_key": "API key",
-    "revision": "修订",
-    "limit": "条数",
-    "cursor": "游标",
-    "digest": "摘要",
-    "pipeline": "流水线",
-    "op": "操作",
-    "archive": "归档路径",
-    "dry_run": "仅演示",
-    "yes": "确认",
-    "folder": "目录",
-    "send_credential": "发送凭证",
-    "timeout": "超时",
-    "wait": "等待完成",
-    "async_": "异步",
-    "concurrency": "并发",
-    "skill": "技能",
-    "scope": "范围",
-    "force": "覆盖",
+    "prompt": ("Prompt", "提示词"),
+    "profile": ("Profile", "配置"),
+    "model": ("Model", "模型"),
+    "count": ("Count", "数量"),
+    "size": ("Size", "尺寸"),
+    "name": ("Name", "名称"),
+    "intent": ("Intent", "意图"),
+    "session": ("Session", "会话"),
+    "operation": ("Operation", "操作"),
+    "artifact": ("Artifact", "产物"),
+    "artifact_id": ("Artifact", "产物"),
+    "plan_id": ("Plan", "计划"),
+    "destination": ("Destination path", "目标路径"),
+    "provider": ("Provider", "供应商"),
+    "family": ("Endpoint type", "端点类型"),
+    "base_url": ("Endpoint", "端点"),
+    "model_default": ("Default model", "默认模型"),
+    "credential_ref": ("Credential reference", "凭证引用"),
+    "api_key": ("API key", "API key"),
+    "revision": ("Revision", "修订"),
+    "limit": ("Limit", "条数"),
+    "cursor": ("Cursor", "游标"),
+    "digest": ("Digest", "摘要"),
+    "pipeline": ("Pipeline", "流水线"),
+    "op": ("Operation", "操作"),
+    "archive": ("Archive path", "归档路径"),
+    "dry_run": ("Dry run", "仅演示"),
+    "yes": ("Confirm", "确认"),
+    "folder": ("Folder", "目录"),
+    "send_credential": ("Send credential", "发送凭证"),
+    "timeout": ("Timeout", "超时"),
+    "wait": ("Wait for completion", "等待完成"),
+    "async_": ("Async", "异步"),
+    "concurrency": ("Concurrency", "并发"),
+    "skill": ("Skill", "技能"),
+    "scope": ("Scope", "范围"),
+    "force": ("Overwrite", "覆盖"),
 }
 
 
 def _label(name: str) -> str:
-    return _FIELD_LABELS.get(name, name)
+    labels = _FIELD_LABELS.get(name)
+    return t(*labels) if labels else name
 
 
 def _keybar(entries: list[tuple[str, str]]) -> Text:
@@ -279,7 +281,7 @@ def _keybar(entries: list[tuple[str, str]]) -> Text:
 class ConfirmScreen(ModalScreen[bool]):
     """Typed confirmation; Enter with the exact word authorizes the action."""
 
-    BINDINGS = [Binding("escape", "cancel", "取消")]
+    BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
 
     def __init__(self, prompt: str, word: str) -> None:
         super().__init__()
@@ -291,7 +293,7 @@ class ConfirmScreen(ModalScreen[bool]):
         yield Vertical(
             Static(self.prompt, classes="panel-title"),
             self.field,
-            Static("enter 确认 · esc 取消", classes="panel-hint"),
+            Static(t("enter confirm · esc cancel", "enter 确认 · esc 取消"), classes="panel-hint"),
             classes="panel",
             id="confirm",
         )
@@ -309,7 +311,7 @@ class ConfirmScreen(ModalScreen[bool]):
 class FormScreen(ModalScreen[dict[str, str] | None]):
     """Small labelled form; Enter submits, Escape cancels."""
 
-    BINDINGS = [Binding("escape", "cancel", "取消")]
+    BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
 
     def __init__(
         self,
@@ -335,7 +337,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
                 Horizontal(Static(_label(name), classes="field-label"), field, classes="field")
                 for (name, _, _), field in zip(self.fields, self.inputs, strict=True)
             ),
-            Static("enter 提交 · esc 取消", classes="panel-hint"),
+            Static(t("enter submit · esc cancel", "enter 提交 · esc 取消"), classes="panel-hint"),
             classes="panel",
             id="form",
         )
@@ -351,7 +353,9 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
         ]
         if missing:
             self.query_one(Static).update(
-                self.heading + " · 必填：" + "、".join(_label(name) for name in missing)
+                self.heading
+                + t(" · required: ", " · 必填：")
+                + t(", ", "、").join(_label(name) for name in missing)
             )
             return
         self.dismiss({name: value for name, value in values.items() if value})
@@ -362,8 +366,8 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
 
 class CacheScreen(ModalScreen[bool]):
     BINDINGS = [
-        Binding("p", "plan", "生成摘要"),
-        Binding("escape", "dismiss_screen", "关闭"),
+        Binding("p", "plan", t("Build digest", "生成摘要")),
+        Binding("escape", "dismiss_screen", t("Close", "关闭")),
     ]
 
     def __init__(self, deps: Deps) -> None:
@@ -373,11 +377,11 @@ class CacheScreen(ModalScreen[bool]):
         self.digest = ""
         self.table: DataTable[Any] = DataTable()
         self.status = Static("")
-        self.field = Input(placeholder="输入 purge 确认")
+        self.field = Input(placeholder=t("type purge to confirm", "输入 purge 确认"))
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("可回收空间", classes="panel-title"),
+            Static(t("Reclaimable space", "可回收空间"), classes="panel-title"),
             self.table,
             self.status,
             self.field,
@@ -387,29 +391,41 @@ class CacheScreen(ModalScreen[bool]):
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
-        self.table.add_columns("类型", "条目", "字节")
+        self.table.add_columns(t("Kind", "类型"), t("Entry", "条目"), t("Bytes", "字节"))
         extra = (
             {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
         )
         self.entries = self.deps.audit(self.deps.repositories, self.deps.store, **extra)
         for entry in self.entries:
             self.table.add_row(_sanitize(entry.kind), _sanitize(entry.identity), str(entry.bytes))
-        self.status.update(f"{len(self.entries)} 项，共 {sum(e.bytes for e in self.entries)} 字节")
+        self.status.update(
+            t(
+                f"{len(self.entries)} items, {sum(e.bytes for e in self.entries)} bytes in total",
+                f"{len(self.entries)} 项，共 {sum(e.bytes for e in self.entries)} 字节",
+            )
+        )
 
     def action_plan(self) -> None:
         self.digest = cache_service.digest(self.entries)
-        self.status.update(f"摘要 {self.digest[:16]}…，输入 purge 确认")
+        self.status.update(
+            t(
+                f"Digest {self.digest[:16]}…, type purge to confirm",
+                f"摘要 {self.digest[:16]}…，输入 purge 确认",
+            )
+        )
         self.field.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.value != "purge" or not self.digest:
-            self.status.update("未确认")
+            self.status.update(t("Not confirmed", "未确认"))
             return
         extra = (
             {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
         )
         result = self.deps.purge(self.deps.repositories, self.deps.store, self.digest, **extra)
-        self.status.update(f"已删除 {result['deleted_bytes']} 字节")
+        self.status.update(
+            t(f"Deleted {result['deleted_bytes']} bytes", f"已删除 {result['deleted_bytes']} 字节")
+        )
         self.dismiss(True)
 
     def action_dismiss_screen(self) -> None:
@@ -420,14 +436,17 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
     """Adjust parameters for the current transform pipeline."""
 
     BINDINGS = [
-        Binding("tab", "toggle_mode", "切换模式"),
-        Binding("m", "toggle_mode", "切换模式"),
+        Binding("tab", "toggle_mode", t("Switch mode", "切换模式")),
+        Binding("m", "toggle_mode", t("Switch mode", "切换模式")),
         Binding("escape", "cancel", "取消"),
     ]
 
     def __init__(self, preset_name: str, pipeline: list[dict[str, Any]]) -> None:
         super().__init__()
-        from imagen_cli.application.operator_catalog import get_operator_item
+        from imagen_cli.application.operator_catalog import (
+            get_operator_item,
+            localized_operator,
+        )
 
         self.preset_name = preset_name
         self.pipeline = copy.deepcopy(pipeline)
@@ -439,6 +458,8 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
             op = step.get("op", "")
             params = step.get("params", {})
             catalog_item = get_operator_item(op)
+            if catalog_item is not None:
+                catalog_item = localized_operator(catalog_item)
             catalog_params = {p.name: p for p in catalog_item.parameters} if catalog_item else {}
 
             all_param_names = list(params.keys())
@@ -455,15 +476,18 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 is_adv = p_meta.is_advanced if p_meta else False
 
                 if p_meta:
-                    prefix = "[高级] " if is_adv else ""
+                    prefix = t("[advanced] ", "[高级] ") if is_adv else ""
                     label = f"{prefix}{p_meta.label} ({k})"
-                    placeholder = f"默认 {p_meta.default} · {p_meta.description}"
+                    placeholder = t(
+                        f"default {p_meta.default} · {p_meta.description}",
+                        f"默认 {p_meta.default} · {p_meta.description}",
+                    )
                     expected_type = p_meta.param_type
                     if expected_type == "choice" and type(p_meta.default) is int:
                         expected_type = "int"
                 else:
                     label = f"{op}.{k}"
-                    placeholder = f"当前值: {v}"
+                    placeholder = t(f"current value: {v}", f"当前值: {v}")
                     expected_type = type(v).__name__
 
                 self.fields_info.append(
@@ -479,7 +503,10 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="param-form"):
-            yield Static(f"参数调节 · {self.preset_name}", classes="panel-title")
+            yield Static(
+                t(f"Parameters · {self.preset_name}", f"参数调节 · {self.preset_name}"),
+                classes="panel-title",
+            )
             yield Static("", id="param-mode-indicator")
             for (field_id, label, _, _, _, _, _), inp in zip(
                 self.fields_info, self.inputs, strict=True
@@ -487,19 +514,29 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 with Horizontal(classes="field", id=f"c_{field_id}"):
                     yield Static(label, classes="field-label")
                     yield inp
-            yield Static("enter 确认并预览 · Tab/m 切换基础/高级 · esc 取消", classes="panel-hint")
+            yield Static(
+                t(
+                    "enter confirm and preview · Tab/m switch basic/advanced · esc cancel",
+                    "enter 确认并预览 · Tab/m 切换基础/高级 · esc 取消",
+                ),
+                classes="panel-hint",
+            )
 
     def on_mount(self) -> None:
         self._update_mode_view()
 
     def _update_mode_view(self) -> None:
         if self.mode == "basic":
-            indicator_text = (
-                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (Tab/m 切换)"
+            indicator_text = t(
+                "Mode: [bold cyan]● Basic parameters[/]   [dim]○ All advanced parameters[/]"
+                "  (Tab/m)",
+                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (Tab/m 切换)",
             )
         else:
-            indicator_text = (
-                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (Tab/m 切换)"
+            indicator_text = t(
+                "Mode: [dim]○ Basic parameters[/]   [bold cyan]● All advanced parameters[/]"
+                "  (Tab/m)",
+                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (Tab/m 切换)",
             )
         self.query_one("#param-mode-indicator", Static).update(indicator_text)
 
@@ -552,12 +589,12 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
 
 class TransformScreen(ModalScreen[bool]):
     BINDINGS = [
-        Binding("up", "cursor_up", "上一个", show=False),
-        Binding("down", "cursor_down", "下一个", show=False),
-        Binding("c", "toggle_category", "切换分类"),
-        Binding("tab", "toggle_category", "切换分类", show=False),
-        Binding("p", "edit_params", "参数调节"),
-        Binding("enter", "apply", "应用"),
+        Binding("up", "cursor_up", t("Previous", "上一个"), show=False),
+        Binding("down", "cursor_down", t("Next", "下一个"), show=False),
+        Binding("c", "toggle_category", t("Switch category", "切换分类")),
+        Binding("tab", "toggle_category", t("Switch category", "切换分类"), show=False),
+        Binding("p", "edit_params", t("Adjust parameters", "参数调节")),
+        Binding("enter", "apply", t("Apply", "应用")),
         Binding("escape", "cancel", "取消"),
     ]
 
@@ -572,8 +609,29 @@ class TransformScreen(ModalScreen[bool]):
         from imagen_cli.application.operator_catalog import browse_entries
 
         self.entries = {entry["key"]: entry for entry in browse_entries()}
-        self.categories = ["全部", "综合配方", "平滑与缺陷", "线条与色块", "颜色明暗",
-                           "风格光学", "模型恢复", "尺寸几何"]
+        self.categories = (
+            [
+                "All",
+                "Combined recipes",
+                "Smoothing and artifacts",
+                "Lines and color areas",
+                "Color and tone",
+                "Style and optics",
+                "Model restoration",
+                "Size and geometry",
+            ]
+            if not is_chinese()
+            else [
+                "全部",
+                "综合配方",
+                "平滑与缺陷",
+                "线条与色块",
+                "颜色明暗",
+                "风格光学",
+                "模型恢复",
+                "尺寸几何",
+            ]
+        )
         self.all_names = list(self.entries)
         self.filtered_names = list(self.all_names)
         self.names = self.filtered_names
@@ -589,7 +647,11 @@ class TransformScreen(ModalScreen[bool]):
         self.intro_view = Static("", id="transform-intro-view")
         self.params_view = Static("", id="transform-params-view")
         self.header_title = Static(
-            "变换预设与后处理工作室（实验性 experimental）", classes="panel-title",
+            t(
+                "Transform presets and postprocessing studio (experimental)",
+                "变换预设与后处理工作室（实验性 experimental）",
+            ),
+            classes="panel-title",
         )
 
     def compose(self) -> ComposeResult:
@@ -606,19 +668,23 @@ class TransformScreen(ModalScreen[bool]):
                     yield self.params_view
                     yield self.status
             yield Static(
-                "↑↓ 预设 · c/Tab 分类 · p 调参 · enter 应用 · esc 取消", classes="panel-hint"
+                t(
+                    "↑↓ presets · c/Tab category · p parameters · enter apply · esc cancel",
+                    "↑↓ 预设 · c/Tab 分类 · p 调参 · enter 应用 · esc 取消",
+                ),
+                classes="panel-hint",
             )
 
     def on_mount(self) -> None:
         self.category_table.cursor_type = "row"
-        self.category_table.add_columns("分类")
+        self.category_table.add_columns(t("Category", "分类"))
         for cat in self.categories:
             self.category_table.add_row(cat)
         self.category_table.can_focus = False
         self.category_table.move_cursor(row=0)
 
         self.table.cursor_type = "row"
-        self.table.add_columns("预设")
+        self.table.add_columns(t("Preset", "预设"))
         self._populate_table()
         self.table.can_focus = False
         self.table.move_cursor(row=0)
@@ -634,15 +700,24 @@ class TransformScreen(ModalScreen[bool]):
         self.current_category_idx = (self.current_category_idx + 1) % len(self.categories)
         self.category_table.move_cursor(row=self.current_category_idx)
         cat_filter = self.categories[self.current_category_idx]
-        if cat_filter == "全部":
+        if cat_filter in {"全部", "All"}:
             self.filtered_names = list(self.all_names)
-            self.header_title.update("变换预设与后处理工作室（实验性 experimental）")
+            self.header_title.update(
+                t(
+                    "Transform presets and postprocessing studio (experimental)",
+                    "变换预设与后处理工作室（实验性 experimental）",
+                )
+            )
         else:
             self.filtered_names = [
                 n for n in self.all_names if self.entries[n]["group"] == cat_filter
             ]
             self.header_title.update(
-                f"变换预设与后处理工作室（实验性 experimental）  [dim cyan]({cat_filter})[/]"
+                t(
+                    f"Transform presets and postprocessing studio (experimental)"
+                    f"  [dim cyan]({cat_filter})[/]",
+                    f"变换预设与后处理工作室（实验性 experimental）  [dim cyan]({cat_filter})[/]",
+                )
             )
         self.names = self.filtered_names
         self._populate_table()
@@ -651,7 +726,9 @@ class TransformScreen(ModalScreen[bool]):
             self.render_preview()
         else:
             self.view.update("")
-            self.intro_view.update("[dim]该分类下无匹配预设[/]")
+            self.intro_view.update(
+                t("[dim]No presets in this category[/]", "[dim]该分类下无匹配预设[/]")
+            )
             self.params_view.update("")
 
     def action_cursor_up(self) -> None:
@@ -684,6 +761,7 @@ class TransformScreen(ModalScreen[bool]):
         if not 0 <= row < len(self.names):
             return
         name = self.names[row]
+        display = self.entries[name]["name"]
         pipeline = self.pipelines.get(name, PRESETS[name])
         from imagen_cli.application import operator_catalog
 
@@ -720,11 +798,17 @@ class TransformScreen(ModalScreen[bool]):
                     if op_name in media_ops.OPS:
                         thumbnail = media_ops.OPS[op_name](thumbnail, **step.get("params", {}))
             image = thumbnail.convert("RGB")
-            self.view.update(Text.from_ansi(preview.ansi_image(image, cols=48, rows=12)))
+            preview_cols = max(40, min(96, self.view.size.width))
+            preview_rows = max(10, min(28, self.view.size.height))
+            self.view.update(
+                Text.from_ansi(preview.ansi_image(image, cols=preview_cols, rows=preview_rows))
+            )
             self.params_view.update(self._describe_pipeline(pipeline))
-            self.status.update(f"{name} · p 调参 · enter 应用")
+            self.status.update(
+                t(f"{display} · p parameters · enter apply", f"{display} · p 调参 · enter 应用")
+            )
         except (ValueError, KeyError, OSError, RuntimeError) as error:
-            self.view.update("预览不可用")
+            self.view.update(t("Preview unavailable", "预览不可用"))
             self.params_view.update(self._describe_pipeline(pipeline))
             self.status.update(_sanitize(error))
 
@@ -733,6 +817,7 @@ class TransformScreen(ModalScreen[bool]):
         if not 0 <= row < len(self.names):
             return
         name = self.names[row]
+        display = self.entries[name]["name"]
         pipeline = self.pipelines.get(name, PRESETS[name])
         from imagen_cli.application.operator_catalog import get_operator_item
 
@@ -744,16 +829,18 @@ class TransformScreen(ModalScreen[bool]):
 
         has_params = any(_step_has_params(s) for s in pipeline)
         if not has_params:
-            self.status.update(f"{name} 无可配置参数")
+            self.status.update(t(f"{name} has no configurable parameters", f"{name} 无可配置参数"))
             return
 
         def on_saved(updated_pipeline: list[dict[str, Any]] | None) -> None:
             if updated_pipeline is not None:
                 self.pipelines[name] = updated_pipeline
                 self.render_preview()
-                self.status.update(f"{name} 参数已更新 · enter 应用")
+                self.status.update(
+                    t(f"{name} parameters updated · enter apply", f"{name} 参数已更新 · enter 应用")
+                )
 
-        self.app.push_screen(ParamEditScreen(name, pipeline), on_saved)
+        self.app.push_screen(ParamEditScreen(display, pipeline), on_saved)
 
     def action_apply(self) -> None:
         if self.running:
@@ -767,7 +854,12 @@ class TransformScreen(ModalScreen[bool]):
         if self.deps.transform == self.deps._transform:
             self.running = True
             self.cancelled.clear()
-            self.status.update("处理中 · Esc 取消，成功后保存新产物")
+            self.status.update(
+                t(
+                    "Processing · Esc cancels; a new artifact is saved on success",
+                    "处理中 · Esc 取消，成功后保存新产物",
+                )
+            )
             self.run_worker(self._apply_isolated(pipeline), exclusive=True)
             return
         try:
@@ -785,14 +877,24 @@ class TransformScreen(ModalScreen[bool]):
             # Only file computation leaves the UI thread; SQLite publication stays here.
             steps = postprocess_service.validate(pipeline)
             data, metadata = await asyncio.to_thread(
-                execute, self.path, steps, cancelled=self.cancelled,
+                execute,
+                self.path,
+                steps,
+                cancelled=self.cancelled,
             )
             if self.cancelled.is_set():
-                self.status.update("处理已取消，未保存产物")
+                self.status.update(
+                    t("Processing canceled; no artifact saved", "处理已取消，未保存产物")
+                )
                 return
             result = postprocess_service.publish_result(
-                self.deps.repositories, self.deps.store, self.artifact, steps,
-                data, metadata, session_id=self.session,
+                self.deps.repositories,
+                self.deps.store,
+                self.artifact,
+                steps,
+                data,
+                metadata,
+                session_id=self.session,
             )
         except (ValueError, KeyError, OSError, RuntimeError) as error:
             self.status.update(_sanitize(error))
@@ -807,7 +909,7 @@ class TransformScreen(ModalScreen[bool]):
     def action_cancel(self) -> None:
         if self.running:
             self.cancelled.set()
-            self.status.update("正在取消处理…")
+            self.status.update(t("Canceling processing…", "正在取消处理…"))
             return
         self.dismiss(False)
 
@@ -815,21 +917,29 @@ class TransformScreen(ModalScreen[bool]):
 class ModelPickerScreen(ModalScreen[str | None]):
     """Pick the default model from the declared catalog, with a text filter."""
 
-    BINDINGS = [Binding("escape", "cancel", "关闭")]
+    BINDINGS = [Binding("escape", "cancel", t("Close", "关闭"))]
 
     def __init__(self, models: list[dict[str, Any]], current: str) -> None:
         super().__init__()
         self.models = sorted(models, key=lambda row: str(row["model_id"]))
         self.current = current
-        self.filter: Input = Input(placeholder="过滤 model id", id="model-filter")
+        self.filter: Input = Input(
+            placeholder=t("filter model id", "过滤 model id"), id="model-filter"
+        )
         self.table: DataTable[Any] = DataTable(id="model-table")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("选择默认模型", classes="panel-title"),
+            Static(t("Choose the default model", "选择默认模型"), classes="panel-title"),
             self.filter,
             self.table,
-            Static("输入过滤 · enter 选定 · esc 取消", classes="panel-hint"),
+            Static(
+                t(
+                    "Type to filter · enter selects · esc cancels",
+                    "输入过滤 · enter 选定 · esc 取消",
+                ),
+                classes="panel-hint",
+            ),
             classes="panel",
             id="model-picker",
         )
@@ -866,11 +976,11 @@ class ModelPickerScreen(ModalScreen[str | None]):
 
 class ProvidersScreen(ModalScreen[bool]):
     BINDINGS = [
-        Binding("a", "add", "新增"),
-        Binding("u", "update", "更新"),
-        Binding("m", "refresh_models", "刷新模型"),
-        Binding("n", "add_model", "添加模型"),
-        Binding("escape", "dismiss_screen", "关闭"),
+        Binding("a", "add", t("Add", "新增")),
+        Binding("u", "update", t("Update", "更新")),
+        Binding("m", "refresh_models", t("Refresh models", "刷新模型")),
+        Binding("n", "add_model", t("Add model", "添加模型")),
+        Binding("escape", "dismiss_screen", t("Close", "关闭")),
     ]
     FIELDS = (
         ("profile", "profile id", ""),
@@ -878,8 +988,22 @@ class ProvidersScreen(ModalScreen[bool]):
         ("family", "images / generate_content", "images"),
         ("base_url", "https://…", ""),
         ("model_default", "model id", ""),
-        ("credential_ref", "env:NAME / keyring:SERVICE / private:NAME（可留空）", "env:IMAGEN_KEY"),
-        ("api_key", "直接填 API key（写入私有存储，不回显）", ""),
+        (
+            "credential_ref",
+            t(
+                "env:NAME / keyring:SERVICE / private:NAME (may be empty)",
+                "env:NAME / keyring:SERVICE / private:NAME（可留空）",
+            ),
+            "env:IMAGEN_KEY",
+        ),
+        (
+            "api_key",
+            t(
+                "Enter an API key directly (stored privately, never echoed)",
+                "直接填 API key（写入私有存储，不回显）",
+            ),
+            "",
+        ),
         ("revision", "1", "1"),
     )
     OPTIONAL = {"credential_ref", "api_key"}
@@ -895,8 +1019,14 @@ class ProvidersScreen(ModalScreen[bool]):
         yield Vertical(
             Static("Providers", classes="panel-title"),
             Static(
-                "a 新增 · u 更新 · m 刷新模型 · n 手输模型 · enter 选择默认模型\n"
-                "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空",
+                t(
+                    "a add · u update · m refresh models · n enter model · enter selects "
+                    "the default model\n"
+                    "Add or update can take an API key directly, stored in workspace private "
+                    "storage; credential_ref may stay empty",
+                    "a 新增 · u 更新 · m 刷新模型 · n 手输模型 · enter 选择默认模型\n"
+                    "新增/更新时可直接填 API key，写入 workspace 私有存储；credential_ref 可留空",
+                ),
                 classes="panel-hint",
             ),
             self.table,
@@ -943,7 +1073,12 @@ class ProvidersScreen(ModalScreen[bool]):
                 raise ValueError("private credential storage is unavailable")
             parameters["credential_ref"] = self.deps.secret_ref(str(values["profile"]), secret)
         elif not parameters.get("credential_ref"):
-            raise ValueError("填写 API key，或提供 env:/keyring:/private: 引用")
+            raise ValueError(
+                t(
+                    "Enter an API key or provide an env:/keyring:/private: reference",
+                    "填写 API key，或提供 env:/keyring:/private: 引用",
+                )
+            )
         return parameters
 
     def action_add(self) -> None:
@@ -963,7 +1098,7 @@ class ProvidersScreen(ModalScreen[bool]):
 
         self.app.push_screen(
             FormScreen(
-                "新增 profile",
+                t("Add profile", "新增 profile"),
                 list(self.FIELDS),
                 optional=self.OPTIONAL,
                 secrets=self.SECRETS,
@@ -974,7 +1109,7 @@ class ProvidersScreen(ModalScreen[bool]):
     def action_update(self) -> None:
         profile = self._selected()
         if profile is None:
-            self.status.update("没有选中 profile")
+            self.status.update(t("No profile selected", "没有选中 profile"))
             return
         defaults = [
             (
@@ -1001,7 +1136,7 @@ class ProvidersScreen(ModalScreen[bool]):
 
         self.app.push_screen(
             FormScreen(
-                "更新 profile",
+                t("Update profile", "更新 profile"),
                 defaults,
                 optional=self.OPTIONAL,
                 secrets=self.SECRETS,
@@ -1012,19 +1147,24 @@ class ProvidersScreen(ModalScreen[bool]):
     def action_refresh_models(self) -> None:
         profile = self._selected()
         if profile is None or self.deps.models_refresh is None:
-            self.status.update("没有选中 profile")
+            self.status.update(t("No profile selected", "没有选中 profile"))
             return
         try:
             status, data = self.deps.models_refresh(str(profile["id"]))
         except (ValueError, OSError) as error:
             self.status.update(_sanitize(error))
             return
-        self.status.update(f"{status}: {len(data.get('models', []))} 个模型")
+        self.status.update(
+            t(
+                f"{status}: {len(data.get('models', []))} models",
+                f"{status}: {len(data.get('models', []))} 个模型",
+            )
+        )
 
     def action_add_model(self) -> None:
         profile = self._selected()
         if profile is None or self.deps.models_add is None:
-            self.status.update("没有选中 profile")
+            self.status.update(t("No profile selected", "没有选中 profile"))
             return
 
         def done(values: dict[str, str] | None) -> None:
@@ -1037,7 +1177,9 @@ class ProvidersScreen(ModalScreen[bool]):
                 return
             self.status.update(f"{status}: {values['model']}")
 
-        self.app.push_screen(FormScreen("添加模型", [("model", "model id", "")]), done)
+        self.app.push_screen(
+            FormScreen(t("Add model", "添加模型"), [("model", "model id", "")]), done
+        )
 
     def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
         self.action_choose_model()
@@ -1045,13 +1187,18 @@ class ProvidersScreen(ModalScreen[bool]):
     def action_choose_model(self) -> None:
         profile = self._selected()
         if profile is None:
-            self.status.update("没有选中 profile")
+            self.status.update(t("No profile selected", "没有选中 profile"))
             return
         rows = queries.iter_all(
             self.deps.repositories, "provider_models", profile_id=str(profile["id"])
         )
         if not rows:
-            self.status.update("尚未声明模型；按 m 刷新，或按 n 手输 model id")
+            self.status.update(
+                t(
+                    "No models declared; press m to refresh or n to enter a model id",
+                    "尚未声明模型；按 m 刷新，或按 n 手输 model id",
+                )
+            )
             return
 
         def done(model: str | None) -> None:
@@ -1075,9 +1222,9 @@ class PlanScreen(ModalScreen[bool]):
     """Show a frozen plan; approval and execution are separate keys."""
 
     BINDINGS = [
-        Binding("a", "approve", "批准"),
-        Binding("enter", "execute", "执行"),
-        Binding("r", "retry", "重试"),
+        Binding("a", "approve", t("Approve", "批准")),
+        Binding("enter", "execute", t("Execute", "执行")),
+        Binding("r", "retry", t("Retry", "重试")),
         Binding("escape", "cancel", "取消"),
     ]
 
@@ -1091,20 +1238,33 @@ class PlanScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("执行计划", classes="panel-title"),
+            Static(t("Execution plan", "执行计划"), classes="panel-title"),
             Static(
-                f"计划 {self.plan.get('id')}\n"
-                f"操作 {self.plan.get('operation')} · 模型 {self.plan.get('model')}"
+                t(
+                    f"Plan {self.plan.get('id')}\n"
+                    f"Operation {self.plan.get('operation')} · Model {self.plan.get('model')}",
+                    f"计划 {self.plan.get('id')}\n"
+                    f"操作 {self.plan.get('operation')} · 模型 {self.plan.get('model')}",
+                )
             ),
-            Static(f"摘要 {self.plan.get('plan_digest')}", classes="panel-hint"),
+            Static(
+                t(f"Digest {self.plan.get('plan_digest')}", f"摘要 {self.plan.get('plan_digest')}"),
+                classes="panel-hint",
+            ),
             self.status,
-            Static("a 批准 · enter 执行 · r 重试 · esc 取消", classes="panel-hint"),
+            Static(
+                t(
+                    "a approve · enter execute · r retry · esc cancel",
+                    "a 批准 · enter 执行 · r 重试 · esc 取消",
+                ),
+                classes="panel-hint",
+            ),
             classes="panel",
             id="plan",
         )
 
     def on_mount(self) -> None:
-        self._say("尚未批准", "muted")
+        self._say(t("Not approved yet", "尚未批准"), "muted")
 
     def _say(self, message: str, tone: str = "muted") -> None:
         self.status.update(Text(message, style=_TONES[tone]))
@@ -1117,16 +1277,28 @@ class PlanScreen(ModalScreen[bool]):
         if self.running:
             return
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         state = self._approval_state()
         if state == "consumed":
             # The plan already dispatched once; Enter shows the recorded outcome.
             self.approved = True
-            self._say("该计划已执行 · enter 查看结果", "info")
+            self._say(
+                t(
+                    "This plan already ran · enter shows the result",
+                    "该计划已执行 · enter 查看结果",
+                ),
+                "info",
+            )
             return
         if state == "expired":
-            self._say("该计划已过期 · esc 关闭后重新生成", "error")
+            self._say(
+                t(
+                    "This plan expired · close with esc and create a new one",
+                    "该计划已过期 · esc 关闭后重新生成",
+                ),
+                "error",
+            )
             return
         try:
             status, _ = self.deps.execute(
@@ -1134,25 +1306,31 @@ class PlanScreen(ModalScreen[bool]):
                 {"plan_id": self.plan["id"], "digest": self.plan["plan_digest"]},
             )
         except (ValueError, OSError) as error:
-            self._say("批准失败：" + _sanitize(error), "error")
+            self._say(t("Approval failed: ", "批准失败：") + _sanitize(error), "error")
             return
         if status in {"approved", "succeeded"}:
             self.approved = True
-            self._say("已批准 · enter 执行", "ok")
+            self._say(t("Approved · enter executes", "已批准 · enter 执行"), "ok")
         else:
-            self._say(f"批准失败：{status}", "error")
+            self._say(t(f"Approval failed: {status}", f"批准失败：{status}"), "error")
 
     def action_execute(self) -> None:
         if self.running:
             return
         if not self.approved:
-            self._say("先按 a 批准", "info")
+            self._say(t("Press a to approve first", "先按 a 批准"), "info")
             return
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         self.running = True
-        self._say("执行中… 首次请求可能 20–60 秒，完成后自动返回", "info")
+        self._say(
+            t(
+                "Executing… the first request may take 20–60 seconds; returns automatically",
+                "执行中… 首次请求可能 20–60 秒，完成后自动返回",
+            ),
+            "info",
+        )
         # Owned by the app: dismissing this screen must not cancel the paid request.
         self.app.run_worker(self._execute_job, thread=True, group="plan-execute", exclusive=True)
 
@@ -1167,19 +1345,25 @@ class PlanScreen(ModalScreen[bool]):
     def _finish(self, result: tuple[str, dict[str, Any]] | None, error: str | None) -> None:
         self.running = False
         if error is not None:
-            self._say("执行失败：" + error, "error")
+            self._say(t("Execution failed: ", "执行失败：") + error, "error")
             return
         assert result is not None
         status, data = result
         job = data.get("job") or {}
         if status in {"succeeded", "accepted", "partial_success"}:
-            self._say(f"执行完成：{job.get('state')} · {job.get('id')}", "ok")
+            self._say(
+                t(
+                    f"Execution finished: {job.get('state')} · {job.get('id')}",
+                    f"执行完成：{job.get('state')} · {job.get('id')}",
+                ),
+                "ok",
+            )
             self.dismiss(True)
         else:
             reason = error_message(job.get("error") or data.get("error"))
             identity = job.get("id")
             self._say(
-                f"执行结果：{status}"
+                t(f"Execution result: {status}", f"执行结果：{status}")
                 + (f" · {reason}" if reason else "")
                 + (f" · {identity}" if identity else ""),
                 "error",
@@ -1189,22 +1373,22 @@ class PlanScreen(ModalScreen[bool]):
         if self.running:
             return
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         try:
             status, data = self.deps.execute("plan retry", {"plan_id": self.plan["id"]})
         except (ValueError, OSError) as error:
-            self._say("重试失败：" + _sanitize(error), "error")
+            self._say(t("Retry failed: ", "重试失败：") + _sanitize(error), "error")
             return
         plan = data.get("plan") or {}
         if plan.get("id"):
             self.app.push_screen(PlanScreen(self.deps, plan))
         else:
-            self._say(f"重试结果：{status}", "error")
+            self._say(t(f"Retry result: {status}", f"重试结果：{status}"), "error")
 
     def action_cancel(self) -> None:
         if self.running:
-            self._say("执行中，请稍候…", "info")
+            self._say(t("Executing, please wait…", "执行中，请稍候…"), "info")
             return
         self.dismiss(False)
 
@@ -1241,7 +1425,7 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
 
 
 class ResultScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "close", "关闭")]
+    BINDINGS = [Binding("escape", "close", t("Close", "关闭"))]
 
     def __init__(self, command: str, status: str, data: dict[str, Any]) -> None:
         super().__init__()
@@ -1254,7 +1438,7 @@ class ResultScreen(ModalScreen[None]):
         yield Vertical(
             Static(f"{self.command} · {self.status}", classes="panel-title"),
             self.body,
-            Static("esc 关闭", classes="panel-hint"),
+            Static(t("esc closes", "esc 关闭"), classes="panel-hint"),
             classes="panel",
             id="result",
         )
@@ -1280,10 +1464,10 @@ class CommandPaletteScreen(ModalScreen[str | None]):
     """Every registered CLI command; the form is generated from its schema."""
 
     BINDINGS = [
-        Binding("up", "cursor_up", "上一个", show=False),
-        Binding("down", "cursor_down", "下一个", show=False),
-        Binding("enter", "select", "打开"),
-        Binding("escape", "close", "关闭"),
+        Binding("up", "cursor_up", t("Previous", "上一个"), show=False),
+        Binding("down", "cursor_down", t("Next", "下一个"), show=False),
+        Binding("enter", "select", t("Open", "打开")),
+        Binding("escape", "close", t("Close", "关闭")),
     ]
 
     def __init__(self) -> None:
@@ -1295,23 +1479,31 @@ class CommandPaletteScreen(ModalScreen[str | None]):
         )
         self.matches = list(self.names)
         self.table: DataTable[Any] = DataTable()
-        self.filter: Input = Input(placeholder="过滤命令或说明", id="palette-filter")
+        self.filter: Input = Input(
+            placeholder=t("filter commands or descriptions", "过滤命令或说明"), id="palette-filter"
+        )
         self.status = Static("")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("全部命令", classes="panel-title"),
+            Static(t("All commands", "全部命令"), classes="panel-title"),
             self.filter,
             self.table,
             self.status,
-            Static("输入过滤 · ↑↓ 选择 · enter 打开 · esc 关闭", classes="panel-hint"),
+            Static(
+                t(
+                    "Type to filter · ↑↓ select · enter opens · esc closes",
+                    "输入过滤 · ↑↓ 选择 · enter 打开 · esc 关闭",
+                ),
+                classes="panel-hint",
+            ),
             classes="panel",
             id="palette",
         )
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
-        self.table.add_columns("命令", "说明")
+        self.table.add_columns(t("Command", "命令"), t("Description", "说明"))
         self.table.can_focus = False
         self._populate()
         self.filter.focus()
@@ -1321,14 +1513,14 @@ class CommandPaletteScreen(ModalScreen[str | None]):
         self.matches = [
             name
             for name in self.names
-            if not needle or needle in name.lower() or needle in str(COMMANDS[name].summary).lower()
+            if (not needle or needle in name.lower() or needle in command_summary(name).lower())
         ]
         self.table.clear()
         for name in self.matches:
-            self.table.add_row(_sanitize(name), _sanitize(COMMANDS[name].summary))
+            self.table.add_row(_sanitize(name), _sanitize(command_summary(name)))
         if self.matches:
             self.table.move_cursor(row=0)
-        self.status.update(f"{len(self.matches)} 个命令")
+        self.status.update(t(f"{len(self.matches)} commands", f"{len(self.matches)} 个命令"))
 
     def on_input_changed(self, _: Input.Changed) -> None:
         self._populate()
@@ -1379,10 +1571,35 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
     return fields, set(properties) - required
 
 
+# Runtime lookup so the help panel follows IMAGEN_LANG even when the module was
+# imported before the fixture or command selected a language.
+_BINDING_TEXT = {
+    "quit": ("Quit", "退出"),
+    "cache": ("Cache", "缓存"),
+    "providers": ("Providers", "端点"),
+    "new_session": ("New session", "新建会话"),
+    "generate": ("Generate", "生成"),
+    "edit": ("Edit", "编辑"),
+    "delete": ("Delete session", "删除会话"),
+    "delete_artifact": ("Delete image", "删除图片"),
+    "fork": ("Fork session", "分支会话"),
+    "export": ("Export session", "导出会话"),
+    "transform": ("Transform", "变换"),
+    "open_image": ("Open image", "打开图片"),
+    "open_folder": ("Open folder", "打开目录"),
+    "previous_artifact": ("Previous artifact", "上一张产物"),
+    "next_artifact": ("Next artifact", "下一张产物"),
+    "refresh": ("Refresh", "刷新"),
+    "commands": ("All commands", "全部命令"),
+    "help": ("Help", "帮助"),
+    "toggle_language": ("Switch language", "切换语言"),
+}
+
+
 class HelpScreen(ModalScreen[None]):
     """Every shown binding in one panel; keeps the key bar short."""
 
-    BINDINGS = [Binding("escape", "close", "关闭")]
+    BINDINGS = [Binding("escape", "close", t("Close", "关闭"))]
 
     def __init__(self, rows: list[tuple[str, str]]) -> None:
         super().__init__()
@@ -1390,9 +1607,12 @@ class HelpScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("快捷键", classes="panel-title"),
+            Static(t("Keyboard shortcuts", "快捷键"), classes="panel-title"),
             *(Static(f"{key}  {description}") for key, description in self.rows),
-            Static(": 打开全部命令 · esc 关闭", classes="panel-hint"),
+            Static(
+                t(": opens all commands · esc closes", ": 打开全部命令 · esc 关闭"),
+                classes="panel-hint",
+            ),
             classes="panel",
             id="help",
         )
@@ -1456,9 +1676,9 @@ class WorkbenchApp(App[None]):
     #providers DataTable, #palette DataTable, #model-picker DataTable {
         height: 1fr; width: 1fr;
     }
-    #transform { width: 92%; max-width: 114; height: 90%; overflow: hidden; }
-    #transform-cat-col { width: 14; height: 1fr; border-right: solid #252b36; }
-    #transform-preset-col { width: 26; height: 1fr; margin-left: 1; }
+    #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
+    #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid #252b36; }
+    #transform-preset-col { width: 33%; min-width: 26; height: 1fr; margin-left: 1; }
     #transform-categories, #transform-presets { height: 1fr; width: 1fr; }
     #transform-preview-col { width: 1fr; margin-left: 2; height: 1fr; }
     #transform-intro-view {
@@ -1466,8 +1686,9 @@ class WorkbenchApp(App[None]):
         margin: 1 0; padding: 0 1; background: #0f131a; border-left: solid #f2a6c0;
     }
     #transform-params-view { height: 4; overflow-y: auto; color: #8e97a4; margin-top: 1; }
-    #param-form { max-width: 82; max-height: 84%; overflow-y: auto; }
+    #param-form { max-width: 82; max-height: 88%; overflow-y: auto; }
     #param-form .field-label { width: 24; }
+    #param-form .panel-hint { margin-top: 1; }
     #palette-filter { margin-bottom: 1; width: 1fr; }
     .panel-title { color: #f4efec; text-style: bold; padding-bottom: 1; }
     .panel-hint { color: #8e97a4; }
@@ -1478,26 +1699,27 @@ class WorkbenchApp(App[None]):
     Input:focus { border: solid #f2a6c0; }
     """
     BINDINGS = [
-        Binding("q", "quit", "退出"),
-        Binding("c", "cache", "缓存"),
+        Binding("q", "quit", t("Quit", "退出")),
+        Binding("c", "cache", t("Cache", "缓存")),
         Binding("v", "providers", "Providers"),
         Binding("p", "providers", "Providers", show=False),
-        Binding("n", "new_session", "新建会话"),
-        Binding("g", "generate", "生成"),
-        Binding("m", "edit", "编辑"),
-        Binding("x", "delete", "删除会话"),
-        Binding("d", "delete_artifact", "删除图片"),
-        Binding("delete", "delete_artifact", "删除图片", show=False),
-        Binding("f", "fork", "分支会话"),
-        Binding("e", "export", "导出会话"),
-        Binding("t", "transform", "变换"),
-        Binding("o", "open_image", "打开图片"),
-        Binding("O", "open_folder", "打开目录"),
-        Binding("[", "previous_artifact", "上一张产物"),
-        Binding("]", "next_artifact", "下一张产物"),
-        Binding("r", "refresh", "刷新"),
-        Binding("colon", "commands", "全部命令"),
-        Binding("?", "help", "帮助"),
+        Binding("n", "new_session", t("New session", "新建会话")),
+        Binding("g", "generate", t("Generate", "生成")),
+        Binding("m", "edit", t("Edit", "编辑")),
+        Binding("x", "delete", t("Delete session", "删除会话")),
+        Binding("d", "delete_artifact", t("Delete image", "删除图片")),
+        Binding("delete", "delete_artifact", t("Delete image", "删除图片"), show=False),
+        Binding("f", "fork", t("Fork session", "分支会话")),
+        Binding("e", "export", t("Export session", "导出会话")),
+        Binding("t", "transform", t("Transform", "变换")),
+        Binding("o", "open_image", t("Open image", "打开图片")),
+        Binding("O", "open_folder", t("Open folder", "打开目录")),
+        Binding("[", "previous_artifact", t("Previous artifact", "上一张产物")),
+        Binding("]", "next_artifact", t("Next artifact", "下一张产物")),
+        Binding("r", "refresh", t("Refresh", "刷新")),
+        Binding("colon", "commands", t("All commands", "全部命令")),
+        Binding("?", "help", t("Help", "帮助")),
+        Binding("l", "toggle_language", t("Switch language", "切换语言")),
     ]
 
     def __init__(self, deps: Deps, *, workspace_label: str = "") -> None:
@@ -1534,26 +1756,35 @@ class WorkbenchApp(App[None]):
                     yield self.preview
                 yield self.film
                 yield self.status
-        yield Static(
-            _keybar(
-                [
-                    ("g", "生成"),
-                    ("m", "编辑"),
-                    ("t", "变换"),
-                    ("d", "删图"),
-                    ("x", "删除会话"),
-                    ("[ ]", "产物"),
-                    (":", "命令"),
-                    ("?", "帮助"),
-                ]
-            ),
-            id="keybar",
-        )
+        yield Static(_keybar(self._keybar_entries()), id="keybar")
+
+    def _keybar_entries(self) -> list[tuple[str, str]]:
+        return [
+            ("g", t("Generate", "生成")),
+            ("m", t("Edit", "编辑")),
+            ("t", t("Transform", "变换")),
+            ("d", t("Delete image", "删图")),
+            ("x", t("Delete session", "删除会话")),
+            ("[ ]", t("Artifacts", "产物")),
+            (":", t("Commands", "命令")),
+            ("l", t("Language", "语言")),
+            ("?", t("Help", "帮助")),
+        ]
+
+    def action_toggle_language(self) -> None:
+        from imagen_cli import i18n
+
+        i18n.set_language("en" if i18n.is_chinese() else "zh-CN")
+        self.sessions.clear(columns=True)
+        self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
+        self.refresh_rows()
+        self.query_one("#keybar", Static).update(_keybar(self._keybar_entries()))
+        self._say(t("Language: English", "语言：中文"), "info")
 
     def on_mount(self) -> None:
         self.title = "Imagen"
         self.sessions.cursor_type = "row"
-        self.sessions.add_columns("会话", "轮次", "版本")
+        self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
         self.refresh_rows()
 
     def _say(self, message: str, tone: str = "muted") -> None:
@@ -1578,13 +1809,24 @@ class WorkbenchApp(App[None]):
         if self.current not in identities:
             self.current = identities[0] if identities else None
         if not identities:
-            self.detail.update("尚无会话")
+            self.detail.update(t("No sessions yet", "尚无会话"))
             self.meta.update("")
             self.film_items = []
             self.film_index = -1
             self.film.update("")
-            self.preview.update(Text("尚无产物\n\n按 n 新建会话", justify="center"))
-            self._say("按 n 新建会话，v 选择端点与模型", "info")
+            self.preview.update(
+                Text(
+                    t("No artifacts yet\n\nPress n for a new session", "尚无产物\n\n按 n 新建会话"),
+                    justify="center",
+                )
+            )
+            self._say(
+                t(
+                    "Press n for a new session; v selects endpoint and model",
+                    "按 n 新建会话，v 选择端点与模型",
+                ),
+                "info",
+            )
             return
         self.sessions.move_cursor(row=identities.index(str(self.current)))
         self.show_detail()
@@ -1694,7 +1936,7 @@ class WorkbenchApp(App[None]):
         start = max(0, min(len(self.film_items) - limit, self.film_index - limit // 2))
         window = self.film_items[start : start + limit]
         text = Text()
-        text.append("产物 ", style="#8e97a4")
+        text.append(t("Artifacts ", "产物 "), style="#8e97a4")
         text.append(f"{self.film_index + 1}/{len(self.film_items)}  ", style="#8e97a4")
         if start:
             text.append("… ", style="#5f6875")
@@ -1717,13 +1959,21 @@ class WorkbenchApp(App[None]):
 
     def _render_preview(self) -> None:
         if not self.film_items or not 0 <= self.film_index < len(self.film_items):
-            self.preview.update(Text("尚无产物\n\n按 g 生成第一张图", justify="center"))
+            self.preview.update(
+                Text(
+                    t(
+                        "No artifacts yet\n\nPress g to generate the first image",
+                        "尚无产物\n\n按 g 生成第一张图",
+                    ),
+                    justify="center",
+                )
+            )
             return
         item = self.film_items[self.film_index]
         path = cast(Path, item["path"])
         artifact = self.deps.repositories.get("artifacts", str(item["id"]))
         if artifact is None:
-            self.preview.update(Text("产物不可用", justify="center"))
+            self.preview.update(Text(t("Artifact unavailable", "产物不可用"), justify="center"))
             return
         width, height = artifact.get("width"), artifact.get("height")
         size = f"{width}×{height}" if width and height else ""
@@ -1748,7 +1998,12 @@ class WorkbenchApp(App[None]):
         self._preview_request_id += 1
         req_id = self._preview_request_id
         # 轻量占位符，UI 立即响应
-        self.preview.update(Text(f"\n\n正在加载图像预览…\n{size}", justify="center"))
+        self.preview.update(
+            Text(
+                t(f"\n\nLoading image preview…\n{size}", f"\n\n正在加载图像预览…\n{size}"),
+                justify="center",
+            )
+        )
         self._load_preview_async(req_id, path, cols, rows, mtime)
 
     @work(thread=True, group="preview_render", exclusive=True)
@@ -1778,11 +2033,16 @@ class WorkbenchApp(App[None]):
         row = self.deps.repositories.get("sessions", self.current)
         if row is None:
             return
-        self.detail.update(f"{_sanitize(row['name'])} · 版本 {row['version']}")
+        self.detail.update(
+            t(
+                f"{_sanitize(row['name'])} · version {row['version']}",
+                f"{_sanitize(row['name'])} · 版本 {row['version']}",
+            )
+        )
         profile, model = self._creation_defaults(row)
         model = model.rsplit("/", 1)[-1]
-        self.meta_base = (
-            " · ".join(part for part in (profile, model) if part) or "尚未选择端点与模型"
+        self.meta_base = " · ".join(part for part in (profile, model) if part) or t(
+            "No endpoint or model selected yet", "尚未选择端点与模型"
         )
         self.meta.update(self.meta_base)
         previous = (
@@ -1802,12 +2062,17 @@ class WorkbenchApp(App[None]):
         self._render_film()
         self._render_preview()
 
-    def _push_plan(self, status: str, data: dict[str, Any], label: str = "生成") -> None:
+    def _push_plan(self, status: str, data: dict[str, Any], label: str | None = None) -> None:
+        label = label or t("Generate", "生成")
         plan = data.get("plan") or {}
         if status not in {"approval_required", "planned"} or not plan.get("id"):
             tone = "ok" if status in {"succeeded", "accepted"} else "error"
             reason = error_message(data_error(data))
-            self._say(f"{label}结果：{status}" + (f" · {reason}" if reason else ""), tone)
+            self._say(
+                t(f"{label} result: {status}", f"{label}结果：{status}")
+                + (f" · {reason}" if reason else ""),
+                tone,
+            )
             return
 
         def finished(changed: bool | None) -> None:
@@ -1815,7 +2080,10 @@ class WorkbenchApp(App[None]):
                 self.refresh_rows()
                 self.show_detail()
                 self._select_artifact(len(self.film_items) - 1)
-                self._say("执行完成 · 已载入最新产物", "ok")
+                self._say(
+                    t("Execution finished · latest artifacts loaded", "执行完成 · 已载入最新产物"),
+                    "ok",
+                )
 
         self.push_screen(PlanScreen(self.deps, plan), finished)
 
@@ -1828,7 +2096,7 @@ class WorkbenchApp(App[None]):
 
     def _open_command(self, command: str) -> None:
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         fields, optional = command_fields(command)
         required = [f for f in fields if f[0] not in optional]
@@ -1842,17 +2110,19 @@ class WorkbenchApp(App[None]):
             try:
                 arguments = _convert_arguments(command, values)
             except (ValueError, TypeError) as error:
-                self._say("参数错误：" + _sanitize(error), "error")
+                self._say(t("Parameter error: ", "参数错误：") + _sanitize(error), "error")
                 return
             self._run_command(command, arguments)
 
-        self.push_screen(FormScreen(f"命令 {command}", fields, optional=optional), done)
+        self.push_screen(
+            FormScreen(t(f"Command {command}", f"命令 {command}"), fields, optional=optional), done
+        )
 
     def _run_command(self, command: str, arguments: dict[str, Any]) -> None:
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
-        self._say(f"执行 {command}…", "info")
+        self._say(t(f"Running {command}…", f"执行 {command}…"), "info")
         self._run_command_worker(command, arguments)
 
     @work(thread=True, group="command", exclusive=True)
@@ -1874,7 +2144,7 @@ class WorkbenchApp(App[None]):
         data: dict[str, Any],
     ) -> None:
         if data.get("plan") and status in {"approval_required", "planned"}:
-            self._push_plan(status, data, "命令")
+            self._push_plan(status, data, t("Command", "命令"))
             return
         reason = error_message(data_error(data))
         self._say(
@@ -1901,10 +2171,16 @@ class WorkbenchApp(App[None]):
                     values.get("model"),
                 )
             except sqlite3.IntegrityError:
-                self._say(f"会话名已存在：{values['name']}", "error")
+                self._say(
+                    t(
+                        f"Session name already exists: {values['name']}",
+                        f"会话名已存在：{values['name']}",
+                    ),
+                    "error",
+                )
                 return
             except Exception as error:  # noqa: BLE001 - surfaced in the panel
-                self._say("新建失败：" + _sanitize(error), "error")
+                self._say(t("Create failed: ", "新建失败：") + _sanitize(error), "error")
                 return
             self.current = str(row["id"])
             self.refresh_rows()
@@ -1912,12 +2188,12 @@ class WorkbenchApp(App[None]):
 
         self.push_screen(
             FormScreen(
-                "新建会话",
+                t("New session", "新建会话"),
                 [
-                    ("name", "会话名", ""),
-                    ("intent", "意图（可留空）", ""),
-                    ("profile", "配置（可留空）", ""),
-                    ("model", "模型（可留空）", ""),
+                    ("name", t("session name", "会话名"), ""),
+                    ("intent", t("intent (optional)", "意图（可留空）"), ""),
+                    ("profile", t("profile (optional)", "配置（可留空）"), ""),
+                    ("model", t("model (optional)", "模型（可留空）"), ""),
                 ],
                 optional={"intent", "profile", "model"},
             ),
@@ -1937,13 +2213,16 @@ class WorkbenchApp(App[None]):
 
     def _run_creation(self, operation: str, arguments: dict[str, Any], label: str) -> None:
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         if self.planning:
-            self._say("上一项仍在处理，请稍候", "info")
+            self._say(
+                t("The previous item is still running; please wait", "上一项仍在处理，请稍候"),
+                "info",
+            )
             return
         self.planning = True
-        self._say("规划中…", "info")
+        self._say(t("Planning…", "规划中…"), "info")
         self._plan_creation(operation, arguments, label)
 
     @work(thread=True, group="creation", exclusive=True)
@@ -1962,7 +2241,7 @@ class WorkbenchApp(App[None]):
 
     def _plan_failed(self, label: str, message: str) -> None:
         self.planning = False
-        self._say(f"{label}失败：{message}", "error")
+        self._say(t(f"{label} failed: {message}", f"{label}失败：{message}"), "error")
 
     def _plan_ready(self, status: str, data: dict[str, Any], label: str) -> None:
         self.planning = False
@@ -1970,13 +2249,15 @@ class WorkbenchApp(App[None]):
 
     def action_generate(self) -> None:
         if self.current is None:
-            self._say("尚无会话；按 n 新建后再生成", "info")
+            self._say(
+                t("No sessions yet; press n to create one", "尚无会话；按 n 新建后再生成"), "info"
+            )
             return
         session = self.deps.repositories.get("sessions", self.current)
         if session is None:
             return
         if self.deps.execute is None:
-            self._say("执行器不可用", "error")
+            self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
 
         def done(values: dict[str, str] | None) -> None:
@@ -1994,18 +2275,18 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            self._run_creation("generate", arguments, "生成")
+            self._run_creation("generate", arguments, t("Generate", "生成"))
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
             FormScreen(
-                "生成图片",
+                t("Generate image", "生成图片"),
                 [
-                    ("prompt", "提示词", ""),
-                    ("profile", "配置（可留空）", profile_default),
-                    ("model", "模型（可留空）", model_default),
-                    ("count", "数量", "1"),
-                    ("size", "尺寸", "1024x1024"),
+                    ("prompt", t("prompt", "提示词"), ""),
+                    ("profile", t("profile (optional)", "配置（可留空）"), profile_default),
+                    ("model", t("model (optional)", "模型（可留空）"), model_default),
+                    ("count", t("count", "数量"), "1"),
+                    ("size", t("size", "尺寸"), "1024x1024"),
                 ],
                 optional={"profile", "model"},
             ),
@@ -2015,7 +2296,7 @@ class WorkbenchApp(App[None]):
     def action_edit(self) -> None:
         found = self._current_artifact()
         if found is None or self.current is None:
-            self._say("没有可编辑的产物", "info")
+            self._say(t("No artifact to edit", "没有可编辑的产物"), "info")
             return
         identity, _ = found
         session = self.deps.repositories.get("sessions", self.current)
@@ -2038,18 +2319,18 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            self._run_creation("edit", arguments, "编辑")
+            self._run_creation("edit", arguments, t("Edit", "编辑"))
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
             FormScreen(
-                f"编辑 {identity}",
+                t(f"Edit {identity}", f"编辑 {identity}"),
                 [
-                    ("prompt", "提示词", ""),
-                    ("profile", "配置（可留空）", profile_default),
-                    ("model", "模型（可留空）", model_default),
-                    ("count", "数量", "1"),
-                    ("size", "尺寸", "1024x1024"),
+                    ("prompt", t("prompt", "提示词"), ""),
+                    ("profile", t("profile (optional)", "配置（可留空）"), profile_default),
+                    ("model", t("model (optional)", "模型（可留空）"), model_default),
+                    ("count", t("count", "数量"), "1"),
+                    ("size", t("size", "尺寸"), "1024x1024"),
                 ],
                 optional={"profile", "model"},
             ),
@@ -2069,18 +2350,20 @@ class WorkbenchApp(App[None]):
     def _open_current(self, folder: bool) -> None:
         found = self._current_artifact()
         if found is None or self.deps.open_artifact is None:
-            self._say("当前会话没有可打开的产物", "info")
+            self._say(t("This session has no artifact to open", "当前会话没有可打开的产物"), "info")
             return
         identity, path = found
         try:
             status, data = self.deps.open_artifact(identity, folder)
         except (ValueError, OSError) as error:
-            self._say("打开失败：" + _sanitize(error), "error")
+            self._say(t("Open failed: ", "打开失败：") + _sanitize(error), "error")
             return
         if status == "succeeded":
-            self._say(f"已打开：{data.get('path', path)}", "ok")
+            self._say(
+                t(f"Opened: {data.get('path', path)}", f"已打开：{data.get('path', path)}"), "ok"
+            )
         else:
-            self._say(f"打开结果：{status}", "error")
+            self._say(t(f"Open result: {status}", f"打开结果：{status}"), "error")
 
     def action_open_image(self) -> None:
         self._open_current(False)
@@ -2092,7 +2375,15 @@ class WorkbenchApp(App[None]):
         self.push_screen(
             HelpScreen(
                 [
-                    ({"colon": ":"}.get(binding.key, binding.key), str(binding.description))
+                    (
+                        {"colon": ":"}.get(binding.key, binding.key),
+                        t(
+                            *_BINDING_TEXT.get(
+                                binding.action,
+                                (str(binding.description), str(binding.description)),
+                            )
+                        ),
+                    )
                     for binding in self.BINDINGS
                     if isinstance(binding, Binding) and binding.show
                 ]
@@ -2101,11 +2392,11 @@ class WorkbenchApp(App[None]):
 
     def action_delete(self) -> None:
         if self.current is None or self.deps.delete_session is None:
-            self._say("没有可删除的会话", "info")
+            self._say(t("No session to delete", "没有可删除的会话"), "info")
             return
         row = self.deps.repositories.get("sessions", self.current)
         if row is None:
-            self._say("会话不存在", "error")
+            self._say(t("Session does not exist", "会话不存在"), "error")
             return
         name = _sanitize(row["name"])
 
@@ -2115,17 +2406,22 @@ class WorkbenchApp(App[None]):
             try:
                 self.deps.delete_session(self.deps.repositories, self.current)
             except Exception as error:
-                self._say("删除失败：" + _sanitize(error), "error")
+                self._say(t("Delete failed: ", "删除失败：") + _sanitize(error), "error")
                 return
             self.refresh_rows()
-            self._say(f"已删除会话：{name}", "ok")
+            self._say(t(f"Session deleted: {name}", f"已删除会话：{name}"), "ok")
 
-        self.push_screen(ConfirmScreen(f"输入 {name} 确认删除", name), finished)
+        self.push_screen(
+            ConfirmScreen(t(f"Type {name} to confirm deletion", f"输入 {name} 确认删除"), name),
+            finished,
+        )
 
     def action_delete_artifact(self) -> None:
         target = self._current_artifact()
         if target is None or self.current is None:
-            self._say("当前会话没有选中的图片", "info")
+            self._say(
+                t("The current session has no selected image", "当前会话没有选中的图片"), "info"
+            )
             return
         art_id, _ = target
         num = self.film_index + 1
@@ -2141,14 +2437,24 @@ class WorkbenchApp(App[None]):
                     self.deps.repositories, self.deps.store, self.current, art_id, purge=True
                 )
             except Exception as error:
-                self._say("删除图片失败：" + _sanitize(error), "error")
+                self._say(
+                    t("Image deletion failed: ", "删除图片失败：") + _sanitize(error), "error"
+                )
                 return
             self.refresh_rows()
             self.show_detail()
-            self._say(f"已从会话中移除图片 {art_id}", "ok")
+            self._say(
+                t(f"Removed image {art_id} from the session", f"已从会话中移除图片 {art_id}"), "ok"
+            )
 
         self.push_screen(
-            ConfirmScreen(f"确认从当前会话中移除第 {num}/{total} 张图片？输入 yes 确认", "yes"),
+            ConfirmScreen(
+                t(
+                    f"Remove image {num}/{total} from this session? Type yes to confirm",
+                    f"确认从当前会话中移除第 {num}/{total} 张图片？输入 yes 确认",
+                ),
+                "yes",
+            ),
             finished,
         )
 
@@ -2164,7 +2470,7 @@ class WorkbenchApp(App[None]):
             if row.get("creation_state") == "succeeded"
         ]
         if not turns:
-            self._say("没有可分支的轮次", "info")
+            self._say(t("No turns to fork", "没有可分支的轮次"), "info")
             return
         turn = sorted(turns, key=lambda row: (row.get("created_at", ""), row["id"]))[-1]
         artifacts = tuple(
@@ -2183,7 +2489,10 @@ class WorkbenchApp(App[None]):
         status, _ = self.deps.fork(
             self.current, turn_id=turn["id"], name=name, artifact_ids=artifacts
         )
-        self._say(f"分支 {status}: {_sanitize(name)}", "ok" if status == "succeeded" else "error")
+        self._say(
+            t(f"Fork {status}: {_sanitize(name)}", f"分支 {status}: {_sanitize(name)}"),
+            "ok" if status == "succeeded" else "error",
+        )
         self.refresh_rows()
 
     def action_export(self) -> None:
@@ -2203,18 +2512,27 @@ class WorkbenchApp(App[None]):
             destination.parent.mkdir(parents=True, exist_ok=True)
             status, data = self.deps.export(self.current or "", str(destination))
             self._say(
-                f"导出 {status}: {_sanitize(data.get('artifacts', 0))} 个产物",
+                t(
+                    f"Export {status}: {_sanitize(data.get('artifacts', 0))} artifacts",
+                    f"导出 {status}: {_sanitize(data.get('artifacts', 0))} 个产物",
+                ),
                 "ok" if status == "succeeded" else "error",
             )
 
-        self.push_screen(FormScreen("导出会话", [("destination", "zip 路径", default)]), done)
+        self.push_screen(
+            FormScreen(
+                t("Export session", "导出会话"),
+                [("destination", t("zip path", "zip 路径"), default)],
+            ),
+            done,
+        )
 
     def action_transform(self) -> None:
         if self.current is None or self.deps.transform is None:
             return
         found = self._current_artifact()
         if found is None:
-            self._say("没有可变换的产物", "info")
+            self._say(t("No artifact to transform", "没有可变换的产物"), "info")
             return
         identity, path = found
 

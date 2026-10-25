@@ -19,13 +19,13 @@ def _sha256(path: Path) -> str:
 def dependency_report() -> list[dict[str, Any]]:
     report = []
     for distribution in metadata.distributions():
-        name = distribution.metadata["Name"]
+        name = distribution.metadata.get("Name")
         if not name:
             continue
         report.append({
             "name": name,
             "version": distribution.version,
-            "license": distribution.metadata["License"] or "UNKNOWN",
+            "license": distribution.metadata.get("License") or "UNKNOWN",
         })
     return sorted(report, key=lambda item: item["name"].casefold())
 

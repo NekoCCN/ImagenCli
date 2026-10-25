@@ -13,6 +13,8 @@ from imagen_cli.storage.repositories import Repositories
 
 pytest.importorskip("textual")
 
+from textual.widgets import Static  # noqa: E402
+
 from imagen_cli.cli.tui.app import Deps, WorkbenchApp  # noqa: E402
 
 
@@ -1155,3 +1157,21 @@ def test_tui_delete_artifact_key_binding(deps):
 
     asyncio.run(run())
 
+
+
+def test_toggle_language_updates_visible_labels(deps):
+    deps_value, _ = deps
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            assert "Language: English" in str(app.status.render())
+            assert "Generate" in str(app.query_one("#keybar", Static).render())
+            await pilot.press("l")
+            await pilot.pause()
+            assert "语言：中文" in str(app.status.render())
+            assert "生成" in str(app.query_one("#keybar", Static).render())
+
+    asyncio.run(run())

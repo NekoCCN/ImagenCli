@@ -9,6 +9,8 @@ from typing import Any, cast
 
 from PIL import Image
 
+from imagen_cli.i18n import t
+
 RESET = "\x1b[0m"
 
 
@@ -25,7 +27,7 @@ def supported(stream: Any = None) -> bool:
 def describe(row: dict[str, Any], path: Path | None) -> str:
     size = f"{row.get('width')}x{row.get('height')}"
     if path is None:
-        return f"{row['id']}\n{size}\n(文件不可用)"
+        return f"{row['id']}\n{size}\n" + t("(file unavailable)", "(文件不可用)")
     return f"{path}\n{size}\n{row['sha256'][:16]}…"
 
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+from imagen_cli import i18n
+
+from . import operator_catalog_en
 
 
 @dataclass(frozen=True)
@@ -63,13 +67,17 @@ CATEGORIES: dict[str, str] = {
     "superres": "模型恢复",
     "geometry": "尺寸几何",
 }
+_CATEGORY_LABELS_EN = {
+    label: operator_catalog_en.CATEGORY_LABELS[key] for key, label in CATEGORIES.items()
+}
 
 # Rich presets mapping
 PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     "像素化": [{"op": "pixelate", "params": {"scale": 4}}],
     "调色板": [{"op": "quantize", "params": {"colors": 16, "dither": True}}],
     "线稿": [
-        {"op": "grayscale"}, {"op": "autocontrast"},
+        {"op": "grayscale"},
+        {"op": "autocontrast"},
         {"op": "highpass", "params": {"radius": 2, "boost": 2}},
     ],
     "抖动": [{"op": "dither", "params": {"mode": "atkinson"}}],
@@ -351,9 +359,8 @@ OPERATORS: list[OperatorItem] = [
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
-                "本算子基于径向距离权重的色通道横向几何色散模拟，重构真"
-                "实光学透镜的边缘色散特性。"
-            ),
+            "本算子基于径向距离权重的色通道横向几何色散模拟，重构真实光学透镜的边缘色散特性。"
+        ),
         default_op="chromatic_aberration",
         default_params={"shift": 2, "radial": True},
         parameters=[
@@ -381,9 +388,9 @@ OPERATORS: list[OperatorItem] = [
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
-                "本算子基于二维离散傅里叶变换与高频陷波掩模，衰减潜空间"
-                "转置卷积引入的周期性棋盘格网格尖峰。"
-            ),
+            "本算子基于二维离散傅里叶变换与高频陷波掩模，衰减潜空间"
+            "转置卷积引入的周期性棋盘格网格尖峰。"
+        ),
         default_op="anti_checkerboard",
         default_params={"strength": 0.5, "cutoff": 0.85},
         parameters=[
@@ -449,9 +456,9 @@ OPERATORS: list[OperatorItem] = [
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
         description=(
-                "本算子基于局部中值滤波与极值形态学夹紧约束，抑制高反差"
-                "边缘处由采样器过度锐化引入的振铃白边与暗光晕伪影。"
-            ),
+            "本算子基于局部中值滤波与极值形态学夹紧约束，抑制高反差"
+            "边缘处由采样器过度锐化引入的振铃白边与暗光晕伪影。"
+        ),
         default_op="de_haloing",
         default_params={"radius": 2, "strength": 0.6, "threshold": 25},
         parameters=[
@@ -597,14 +604,10 @@ OPERATORS: list[OperatorItem] = [
                 max_value=25,
                 description="距离场膨胀像素宽度",
             ),
-            Parameter("color", "边框颜色", "str", "#ffffff",
-                description=(
-                    "外轮廓十六进制颜色代码"
-                )),
-            Parameter("shadow", "立体投影", "bool", True,
-                description=(
-                    "是否合成低频偏移阴影层"
-                )),
+            Parameter(
+                "color", "边框颜色", "str", "#ffffff", description=("外轮廓十六进制颜色代码")
+            ),
+            Parameter("shadow", "立体投影", "bool", True, description=("是否合成低频偏移阴影层")),
             Parameter(
                 "shadow_offset",
                 "阴影偏移",
@@ -1647,93 +1650,128 @@ OPERATORS.extend(
     ]
 )
 
-OPERATORS.append(OperatorItem(
-    key="weighted_median", name="按颜色相似度计算加权中值",
-    category="anti_ai", category_label=CATEGORIES["anti_ai"],
-    description="以 RGB 相似度和覆盖率加权逐通道中值，减少脉冲和局部杂点；可能移除细线。",
-    default_op="weighted_median",
-    default_params={"radius": 2, "sigma_range": 0.15, "strength": 1.0},
-    parameters=[
-        Parameter("radius", "邻域半径（像素）", "int", 2, 1, 8),
-        Parameter("sigma_range", "RGB 范围尺度", "float", 0.15, 0.001, 1),
-        Parameter("strength", "混合强度", "float", 1.0, 0, 1),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="weighted_median",
+        name="按颜色相似度计算加权中值",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="以 RGB 相似度和覆盖率加权逐通道中值，减少脉冲和局部杂点；可能移除细线。",
+        default_op="weighted_median",
+        default_params={"radius": 2, "sigma_range": 0.15, "strength": 1.0},
+        parameters=[
+            Parameter("radius", "邻域半径（像素）", "int", 2, 1, 8),
+            Parameter("sigma_range", "RGB 范围尺度", "float", 0.15, 0.001, 1),
+            Parameter("strength", "混合强度", "float", 1.0, 0, 1),
+        ],
+    )
+)
 
-OPERATORS.append(OperatorItem(
-    key="fast_guided_smooth", name="降采样估计引导平滑系数",
-    category="anti_ai", category_label=CATEGORIES["anti_ai"],
-    description="在低分辨率估计线性系数，再由原尺寸亮度引导重建；可能遗漏细小结构。",
-    default_op="fast_guided_smooth",
-    default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5, "subsample": 4},
-    parameters=[
-        Parameter("radius", "输入像素半径", "int", 4, 1, 128),
-        Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
-        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
-        Parameter("subsample", "系数降采样倍率", "int", 4, 1, 8),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="fast_guided_smooth",
+        name="降采样估计引导平滑系数",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="在低分辨率估计线性系数，再由原尺寸亮度引导重建；可能遗漏细小结构。",
+        default_op="fast_guided_smooth",
+        default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5, "subsample": 4},
+        parameters=[
+            Parameter("radius", "输入像素半径", "int", 4, 1, 128),
+            Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
+            Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+            Parameter("subsample", "系数降采样倍率", "int", 4, 1, 8),
+        ],
+    )
+)
 
-OPERATORS.append(OperatorItem(
-    key="periodic_notch_auto", name="检测窄带周期峰并抑制",
-    category="anti_ai", category_label=CATEGORIES["anti_ai"],
-    description="对去趋势加窗频谱检测窄峰并施加共轭陷波；无法区分有意网点与噪声。",
-    default_op="periodic_notch_auto",
-    default_params={"threshold": 8, "min_frequency": 0.06, "max_pairs": 3,
-                    "width": 0.01, "strength": 0.5},
-    parameters=[
-        Parameter("threshold", "局部峰对比阈值", "float", 8, 2, 100),
-        Parameter("min_frequency", "最低径向频率", "float", 0.06, 0.01, 0.45),
-        Parameter("max_pairs", "最多频率对数", "int", 3, 1, 16),
-        Parameter("width", "频带宽度", "float", 0.01, 0.0001, 0.25),
-        Parameter("strength", "抑制强度", "float", 0.5, 0, 1),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="periodic_notch_auto",
+        name="检测窄带周期峰并抑制",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="对去趋势加窗频谱检测窄峰并施加共轭陷波；无法区分有意网点与噪声。",
+        default_op="periodic_notch_auto",
+        default_params={
+            "threshold": 8,
+            "min_frequency": 0.06,
+            "max_pairs": 3,
+            "width": 0.01,
+            "strength": 0.5,
+        },
+        parameters=[
+            Parameter("threshold", "局部峰对比阈值", "float", 8, 2, 100),
+            Parameter("min_frequency", "最低径向频率", "float", 0.06, 0.01, 0.45),
+            Parameter("max_pairs", "最多频率对数", "int", 3, 1, 16),
+            Parameter("width", "频带宽度", "float", 0.01, 0.0001, 0.25),
+            Parameter("strength", "抑制强度", "float", 0.5, 0, 1),
+        ],
+    )
+)
 
-OPERATORS.append(OperatorItem(
-    key="wls_detail", name="按保边尺度调整亮度细节",
-    category="photo", category_label=CATEGORIES["photo"],
-    description="以固定引导 WLS 分解三个尺度的亮度残差；增强可能产生光晕，非 Local Laplacian。",
-    default_op="wls_detail",
-    default_params={"fine": 1, "medium": 1, "coarse": 1, "smoothing": 0.05,
-                    "scale_ratio": 4, "alpha": 1.2},
-    parameters=[
-        Parameter("fine", "细尺度增益", "float", 1, 0, 4),
-        Parameter("medium", "中尺度增益", "float", 1, 0, 4),
-        Parameter("coarse", "粗尺度增益", "float", 1, 0, 4),
-        Parameter("smoothing", "起始平滑权重", "float", 0.05, 0.0001, 1),
-        Parameter("scale_ratio", "层间权重倍率", "float", 4, 1.1, 8),
-        Parameter("alpha", "边缘权重指数", "float", 1.2, 0.1, 2),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="wls_detail",
+        name="按保边尺度调整亮度细节",
+        category="photo",
+        category_label=CATEGORIES["photo"],
+        description="以固定引导 WLS 分解三个尺度的亮度残差；增强可能产生光晕，非 Local Laplacian。",
+        default_op="wls_detail",
+        default_params={
+            "fine": 1,
+            "medium": 1,
+            "coarse": 1,
+            "smoothing": 0.05,
+            "scale_ratio": 4,
+            "alpha": 1.2,
+        },
+        parameters=[
+            Parameter("fine", "细尺度增益", "float", 1, 0, 4),
+            Parameter("medium", "中尺度增益", "float", 1, 0, 4),
+            Parameter("coarse", "粗尺度增益", "float", 1, 0, 4),
+            Parameter("smoothing", "起始平滑权重", "float", 0.05, 0.0001, 1),
+            Parameter("scale_ratio", "层间权重倍率", "float", 4, 1.1, 8),
+            Parameter("alpha", "边缘权重指数", "float", 1.2, 0.1, 2),
+        ],
+    )
+)
 
-OPERATORS.append(OperatorItem(
-    key="weighted_guided_smooth", name="按局部方差调节引导平滑",
-    category="anti_ai", category_label=CATEGORIES["anti_ai"],
-    description="按三像素窗口方差自适应正则强度，平滑色块并减少跨边混合；仍可能损失细纹。",
-    default_op="weighted_guided_smooth",
-    default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5},
-    parameters=[
-        Parameter("radius", "输入像素半径", "int", 4, 1, 128),
-        Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
-        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="weighted_guided_smooth",
+        name="按局部方差调节引导平滑",
+        category="anti_ai",
+        category_label=CATEGORIES["anti_ai"],
+        description="按三像素窗口方差自适应正则强度，平滑色块并减少跨边混合；仍可能损失细纹。",
+        default_op="weighted_guided_smooth",
+        default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5},
+        parameters=[
+            Parameter("radius", "输入像素半径", "int", 4, 1, 128),
+            Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
+            Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+        ],
+    )
+)
 
-OPERATORS.append(OperatorItem(
-    key="local_laplacian_sampled", name="采样局部拉普拉斯细节重映射",
-    category="photo", category_label=CATEGORIES["photo"],
-    description="在多个参考亮度上重映射并插值金字塔系数；采样近似可能产生光晕或色域裁切。",
-    default_op="local_laplacian_sampled",
-    default_params={"sigma": 0.2, "detail": 2, "samples": 8, "levels": 5, "strength": 0.5},
-    parameters=[
-        Parameter("sigma", "细节幅值阈值", "float", 0.2, 0.01, 1),
-        Parameter("detail", "细节幂指数（大于 1 平滑）", "float", 2, 0.25, 4),
-        Parameter("samples", "参考亮度采样数", "int", 8, 4, 32),
-        Parameter("levels", "最多处理层数", "int", 5, 1, 8),
-        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
-    ],
-))
+OPERATORS.append(
+    OperatorItem(
+        key="local_laplacian_sampled",
+        name="采样局部拉普拉斯细节重映射",
+        category="photo",
+        category_label=CATEGORIES["photo"],
+        description="在多个参考亮度上重映射并插值金字塔系数；采样近似可能产生光晕或色域裁切。",
+        default_op="local_laplacian_sampled",
+        default_params={"sigma": 0.2, "detail": 2, "samples": 8, "levels": 5, "strength": 0.5},
+        parameters=[
+            Parameter("sigma", "细节幅值阈值", "float", 0.2, 0.01, 1),
+            Parameter("detail", "细节幂指数（大于 1 平滑）", "float", 2, 0.25, 4),
+            Parameter("samples", "参考亮度采样数", "int", 8, 4, 32),
+            Parameter("levels", "最多处理层数", "int", 5, 1, 8),
+            Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+        ],
+    )
+)
 
 # New recipes share the displayed defaults; historical recipes above stay unchanged.
 _NEW_OPERATORS = (
@@ -1770,6 +1808,50 @@ def get_operator_item(op: str) -> OperatorItem | None:
     return OPERATORS_BY_OP.get(op)
 
 
+def category_label(category: str) -> str:
+    """Display label; keys and raw CATEGORIES stay stable."""
+    if not i18n.is_chinese():
+        return operator_catalog_en.CATEGORY_LABELS.get(category, CATEGORIES.get(category, category))
+    return CATEGORIES.get(category, category)
+
+
+def localized_operator(item: OperatorItem) -> OperatorItem:
+    """A copy with display text in the active language; identifiers are unchanged."""
+    if i18n.is_chinese():
+        return item
+    name = operator_catalog_en.OPERATORS.get(item.default_op, {}).get("name", item.name)
+    description = operator_catalog_en.OPERATORS.get(item.default_op, {}).get(
+        "description", item.description
+    )
+    translated = operator_catalog_en.PARAMETERS.get(item.default_op, {})
+    parameters = [
+        replace(
+            parameter,
+            label=translated.get(parameter.name, {}).get("label", parameter.label),
+            description=translated.get(parameter.name, {}).get(
+                "description", parameter.description
+            ),
+        )
+        for parameter in item.parameters
+    ]
+    return replace(
+        item,
+        name=name,
+        description=description,
+        category_label=category_label(item.category),
+        parameters=parameters,
+    )
+
+
+def localized_intro(key: str) -> dict[str, str] | None:
+    """Intro text for a catalog key in the active language."""
+    base = INTROS.get(key)
+    if base is None or i18n.is_chinese():
+        return base
+    english = operator_catalog_en.intro_en(key)
+    return {**base, **english} if english else base
+
+
 # -------------------------------------------------------------------------
 # Comprehensive Introductions for Presets & Operators
 # -------------------------------------------------------------------------
@@ -1778,41 +1860,41 @@ INTROS: dict[str, dict[str, str]] = {
     "local_laplacian_sampled": {
         "title": "采样局部拉普拉斯细节重映射",
         "principle": "按 Local Laplacian Filters（2011）式 1 的幂函数重映射细节，"
-                     "大幅边缘保持单位斜率；均匀采样参考亮度，对重映射金字塔系数线性插值。"
-                     "Gaussian sigma=1 降采样与双线性展开，不是原逐系数精确算法或作者加速实现。",
+        "大幅边缘保持单位斜率；均匀采样参考亮度，对重映射金字塔系数线性插值。"
+        "Gaussian sigma=1 降采样与双线性展开，不是原逐系数精确算法或作者加速实现。",
         "scenarios": "适用于跨尺度压低或增强小幅细节；编码亮度加性回混、隐藏 RGB 均值延拓，"
-                     "最终裁切 RGB，不能承诺无光晕或保色相。",
+        "最终裁切 RGB，不能承诺无光晕或保色相。",
     },
     "weighted_guided_smooth": {
         "title": "按局部方差调节引导平滑",
         "principle": "按 Weighted Guided Image Filtering（2015）式 5–10，以 3×3 方差和"
-                     "全图逆方差均值计算边缘权重，正则项为 epsilon/weight。"
-                     "本项目以亮度引导 RGB，覆盖率加权、reflect 边界、sigma=1 Gaussian 权重平滑。",
+        "全图逆方差均值计算边缘权重，正则项为 epsilon/weight。"
+        "本项目以亮度引导 RGB，覆盖率加权、reflect 边界、sigma=1 Gaussian 权重平滑。",
         "scenarios": "适用于平滑色块与边界保护对照；不是加权中值，不能保证消除所有光晕。",
     },
     "wls_detail": {
         "title": "按保边尺度调整亮度细节",
         "principle": "使用原图 log-luma 固定权重进行三个不同正则强度的 WLS 求解，"
-                     "调整相邻层残差后重建。CG 容差 1e-6、最多 500 次，不收敛拒绝输出。",
+        "调整相邻层残差后重建。CG 容差 1e-6、最多 500 次，不收敛拒绝输出。",
         "scenarios": "适用于分尺度控制明暗细节；增益全 1 精确旁路，强增益仍可能损伤细线。",
     },
     "periodic_notch_auto": {
         "title": "检测窄带周期峰并抑制",
         "principle": "拟合亮度平面去趋势，Hann 加窗后按局部环带背景寻找共轭窄峰；"
-                     "无峰则不处理，检测频率写入执行记录。不是语义识别或论文同名算法。",
+        "无峰则不处理，检测频率写入执行记录。不是语义识别或论文同名算法。",
         "scenarios": "适用于检查已知周期污染；漫画网点、织物、建筑栅格也可能被删除，须对照原图。",
     },
     "fast_guided_smooth": {
         "title": "降采样估计引导平滑系数",
         "principle": "按 Fast Guided Filter（2015）Algorithm 2 在低分辨率计算系数，"
-                     "双线性上采样后应用于原尺寸引导。半径除以倍率取整且至少为 1，"
-                     "覆盖率加权为本项目变体；倍率 1 直接调用完整引导滤波。",
+        "双线性上采样后应用于原尺寸引导。半径除以倍率取整且至少为 1，"
+        "覆盖率加权为本项目变体；倍率 1 直接调用完整引导滤波。",
         "scenarios": "适用于大尺度平滑的速度对照；不保证与完整滤波相同，不自动替换旧配方。",
     },
     "weighted_median": {
         "title": "按颜色相似度计算加权中值",
         "principle": "按 CVPR 2014 WMF 论文式 2 累计排序权重达到一半后取值；"
-                     "本实现为 RGB Gaussian 权重的逐行排序参考变体，不含论文加速结构。",
+        "本实现为 RGB Gaussian 权重的逐行排序参考变体，不含论文加速结构。",
         "scenarios": "适用于局部杂点与脉冲；窄范围会保留强离群点，逐通道取值也可能改变颜色组合。",
     },
     "rtv_smooth": {
@@ -2441,11 +2523,13 @@ PRESET_CATEGORIES: dict[str, str] = {
 }
 
 PRESET_CATEGORIES.update({op: OPERATORS_BY_OP[op].category_label for op in _NEW_OPERATORS})
-PRESET_CATEGORIES.update({
-    name: PRESET_CATEGORIES[name.split(" (", 1)[0]]
-    for name in PRESET_PIPELINES
-    if name not in PRESET_CATEGORIES
-})
+PRESET_CATEGORIES.update(
+    {
+        name: PRESET_CATEGORIES[name.split(" (", 1)[0]]
+        for name in PRESET_PIPELINES
+        if name not in PRESET_CATEGORIES
+    }
+)
 
 CATEGORIES_LIST: list[str] = [
     "全部",
@@ -2458,29 +2542,31 @@ CATEGORIES_LIST: list[str] = [
 ]
 
 
+_BROWSE_NAMES = {
+    "XDoG动漫手绘线稿 (Line Art)": "高斯差分线稿提取",
+    "去AI塑料感 (Anti-AI Organic)": "局部平滑与高光扩散",
+    "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": "高频衰减与局部平滑",
+    "二次元平涂去杂 (Anime Cel Surface Smoothing)": "局部平滑与暗部降饱和",
+    "动漫色彩提纯 (Anime Color Purity)": "暗部降饱和与色差增益",
+    "二次元线条强化与描墨 (Anime Line Inking)": "暗线提取与加深",
+    "二次元赛璐珞顶级精修 (Anime Cel Master)": "局部平滑、暗线加深与降饱和",
+    "日系通透空气感 (Shinkai Airy)": "通道调色、高光扩散与边缘压暗",
+    "热血集中线 (Manga Action Focus)": "叠加径向线条",
+    "黑白漫画网点 (Manga Screentone)": "亮度转网点",
+    "立绘贴纸白边 (Die-cut Sticker)": "透明轮廓扩边与投影",
+    "复古90年代胶片 (Retro 90s Film)": "色阶压缩、边缘压暗与噪声叠加",
+    "动漫超分辨率 4x (Anime SR)": "插画模型四倍放大",
+    "通用超分辨率 4x (General SR)": "通用模型四倍放大",
+    "日系治愈空气柔光 (Anime Soft Glow)": "高光扩散、饱和度与暗线颜色调整",
+    "大魄力动感鱼眼 (Anime Fisheye)": "径向畸变与线条叠加",
+    "橙青影视色彩平衡 (Teal & Orange)": "分区调色、色阶压缩与噪声叠加",
+    "赛璐璐": "色阶量化与轮廓叠加",
+    "l0_smooth": "稀疏梯度平滑",
+}
+
+
 def browse_entries() -> list[dict[str, str]]:
     """Human-facing entries; legacy keys remain valid for execution."""
-    names = {
-        "XDoG动漫手绘线稿 (Line Art)": "高斯差分线稿提取",
-        "去AI塑料感 (Anti-AI Organic)": "局部平滑与高光扩散",
-        "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": "高频衰减与局部平滑",
-        "二次元平涂去杂 (Anime Cel Surface Smoothing)": "局部平滑与暗部降饱和",
-        "动漫色彩提纯 (Anime Color Purity)": "暗部降饱和与色差增益",
-        "二次元线条强化与描墨 (Anime Line Inking)": "暗线提取与加深",
-        "二次元赛璐珞顶级精修 (Anime Cel Master)": "局部平滑、暗线加深与降饱和",
-        "日系通透空气感 (Shinkai Airy)": "通道调色、高光扩散与边缘压暗",
-        "热血集中线 (Manga Action Focus)": "叠加径向线条",
-        "黑白漫画网点 (Manga Screentone)": "亮度转网点",
-        "立绘贴纸白边 (Die-cut Sticker)": "透明轮廓扩边与投影",
-        "复古90年代胶片 (Retro 90s Film)": "色阶压缩、边缘压暗与噪声叠加",
-        "动漫超分辨率 4x (Anime SR)": "插画模型四倍放大",
-        "通用超分辨率 4x (General SR)": "通用模型四倍放大",
-        "日系治愈空气柔光 (Anime Soft Glow)": "高光扩散、饱和度与暗线颜色调整",
-        "大魄力动感鱼眼 (Anime Fisheye)": "径向畸变与线条叠加",
-        "橙青影视色彩平衡 (Teal & Orange)": "分区调色、色阶压缩与噪声叠加",
-        "赛璐璐": "色阶量化与轮廓叠加",
-        "l0_smooth": "稀疏梯度平滑",
-    }
     entries = []
     pipelines: list[list[dict[str, Any]]] = []
     for key, pipeline in PRESET_PIPELINES.items():
@@ -2488,112 +2574,178 @@ def browse_entries() -> list[dict[str, str]]:
             continue
         pipelines.append(pipeline)
         item = get_operator_item(key)
-        name = names.get(key, (item.name if item else key).split(" (", 1)[0]).replace("4x", "4倍")
-        entries.append({
-            "key": key, "name": name,
-            "group": "综合配方" if len(pipeline) > 1 else PRESET_CATEGORIES[key],
-        })
+        if not i18n.is_chinese():
+            name = operator_catalog_en.PRESET_NAMES.get(
+                key
+            ) or operator_catalog_en.PRESET_NAMES.get(key.split(" (", 1)[0])
+            if name is None and item is not None:
+                name = localized_operator(item).name
+            name = name or key
+            group = (
+                operator_catalog_en.GROUPS["综合配方"]
+                if len(pipeline) > 1
+                else _CATEGORY_LABELS_EN.get(PRESET_CATEGORIES[key], PRESET_CATEGORIES[key])
+            )
+        else:
+            name = _BROWSE_NAMES.get(key, (item.name if item else key).split(" (", 1)[0]).replace(
+                "4x", "4倍"
+            )
+            group = "综合配方" if len(pipeline) > 1 else PRESET_CATEGORIES[key]
+        entries.append({"key": key, "name": name, "group": group})
     return entries
+
+
+def display_preset_name(key: str) -> str:
+    """English display name for a preset key; the key itself stays the identifier."""
+    if i18n.is_chinese():
+        return key
+    base = key.split(" (", 1)[0]
+    for entry in browse_entries():
+        if entry["key"] in {key, base}:
+            return entry["name"]
+    item = get_operator_item(key)
+    return localized_operator(item).name if item is not None else key
 
 
 # Shared descriptions for individual operations and composed recipes.
 _OPERATION_EFFECTS = {
-    "quantize": ("调色板量化", "将 RGB 映射到有限调色板，可启用误差扩散。",
-                 "减少使用的颜色数量。", "原始颜色与渐变层次会丢失，可能出现色带或颗粒。"),
-    "dither": ("量化误差扩散", "按所选规则将量化误差分配到邻近像素。",
-               "以空间点阵近似连续色阶。", "增加点状纹理，微小结构可能与点阵混叠。"),
-    "sharpen": ("高频残差增强", "通过模糊差分增强高频分量。",
-                "增加边缘局部对比度。", "噪声、光晕和过冲可能增加。"),
-    "grayscale": ("转换灰度", "将颜色通道转换为单通道亮度代理。",
-                  "去除颜色差异以处理明暗结构。", "颜色信息会丢失。"),
-    "autocontrast": ("直方图端点拉伸", "按直方图端点重新映射像素范围。",
-                     "扩大使用的明暗范围。", "噪声与微小亮度差可能放大。"),
-    "highpass": ("高频残差提取", "从原图减去低通分量并按增益映射。",
-                 "突出局部亮度变化。", "缓慢明暗结构会减弱，噪声也可能增强。"),
+    "quantize": (
+        "调色板量化",
+        "将 RGB 映射到有限调色板，可启用误差扩散。",
+        "减少使用的颜色数量。",
+        "原始颜色与渐变层次会丢失，可能出现色带或颗粒。",
+    ),
+    "dither": (
+        "量化误差扩散",
+        "按所选规则将量化误差分配到邻近像素。",
+        "以空间点阵近似连续色阶。",
+        "增加点状纹理，微小结构可能与点阵混叠。",
+    ),
+    "sharpen": (
+        "高频残差增强",
+        "通过模糊差分增强高频分量。",
+        "增加边缘局部对比度。",
+        "噪声、光晕和过冲可能增加。",
+    ),
+    "grayscale": (
+        "转换灰度",
+        "将颜色通道转换为单通道亮度代理。",
+        "去除颜色差异以处理明暗结构。",
+        "颜色信息会丢失。",
+    ),
+    "autocontrast": (
+        "直方图端点拉伸",
+        "按直方图端点重新映射像素范围。",
+        "扩大使用的明暗范围。",
+        "噪声与微小亮度差可能放大。",
+    ),
+    "highpass": (
+        "高频残差提取",
+        "从原图减去低通分量并按增益映射。",
+        "突出局部亮度变化。",
+        "缓慢明暗结构会减弱，噪声也可能增强。",
+    ),
     "surface_blur": (
         "局部色差加权平滑",
         "按原图与 Gaussian 模糊图的 RGB 距离加权，混合 Gaussian 与中值结果。",
-        "减小局部小幅颜色变化。", "低对比细线、纹理与小色块可能被平滑。",
+        "减小局部小幅颜色变化。",
+        "低对比细线、纹理与小色块可能被平滑。",
     ),
     "anti_checkerboard": (
         "指定高频区域衰减",
         "对 RGB 分通道做 FFT，在指定半径与轴向条件的频区衰减后混回原图；不检测伪影来源。",
-        "减小所选频区的周期变化。", "同频率的网点、排线和真实纹理也会衰减。",
+        "减小所选频区的周期变化。",
+        "同频率的网点、排线和真实纹理也会衰减。",
     ),
     "de_haloing": (
         "局部中值偏差压缩",
         "计算各通道相对局部中值的差值，压缩超过阈值的正负偏差。",
-        "减小孤立明暗过冲。", "真实高光、小字与细线也可能被压弱。",
+        "减小孤立明暗过冲。",
+        "真实高光、小字与细线也可能被压弱。",
     ),
     "filmic_tone": (
         "黑白端点与色阶调整",
         "在编码 RGB 上以幂函数 LUT 抬黑、压白，并调整饱和度与通道色偏。",
-        "改变亮暗端点及色阶分布。", "原有对比度和颜色关系会改变，不能恢复已截断信息。",
+        "改变亮暗端点及色阶分布。",
+        "原有对比度和颜色关系会改变，不能恢复已截断信息。",
     ),
     "de_ai_bloom": (
         "高光提取与模糊混合",
         "按亮度阈值提取高光，模糊后混合，并可用暗线权重限制作用范围。",
-        "扩大高光周围的亮区过渡。", "局部对比度可能下降，细线可能变淡。",
+        "扩大高光周围的亮区过渡。",
+        "局部对比度可能下降，细线可能变淡。",
     ),
     "subsurface_scattering": (
         "分通道模糊混合",
         "以不同半径模糊 RGB 通道后回混，可用肤色权重限制区域；不求解次表面光传输。",
-        "减弱局部明暗与颜色变化。", "细节可能模糊，颜色掩模可能误选。",
+        "减弱局部明暗与颜色变化。",
+        "细节可能模糊，颜色掩模可能误选。",
     ),
     "color_purity": (
         "暗部降饱和与色差增益",
         "按编码亮度代理生成暗部掩模，向灰度混合；按低饱和度权重调整非暗部色差。",
-        "降低暗部饱和度并改变其他区域的颜色强度。", "有意的阴影配色可能丢失，强增益可能裁切通道。",
+        "降低暗部饱和度并改变其他区域的颜色强度。",
+        "有意的阴影配色可能丢失，强增益可能裁切通道。",
     ),
     "anime_line_enhance": (
         "暗线提取与加深",
         "使用各向同性 DoG、方形闭运算与百分位归一化生成权重，再乘法压暗原图。",
-        "提高暗部轮廓的对比度。", "相邻线条可能连接，细小间隙与灰阶细节可能丢失。",
+        "提高暗部轮廓的对比度。",
+        "相邻线条可能连接，细小间隙与灰阶细节可能丢失。",
     ),
     "color_temperature": (
         "通道冷暖与色偏调整",
         "使用 RGB 通道 LUT 调整冷暖及绿品红色偏，不估计光源光谱。",
-        "改变整体通道平衡。", "原有配色会偏移，强调整可能裁切通道。",
+        "改变整体通道平衡。",
+        "原有配色会偏移，强调整可能裁切通道。",
     ),
     "vignette": (
         "径向边缘压暗",
         "按距中心的径向距离生成渐变亮度掩模。",
-        "降低画面边缘的亮度。", "边缘主体与暗部细节也会变暗。",
+        "降低画面边缘的亮度。",
+        "边缘主体与暗部细节也会变暗。",
     ),
     "focus_lines": (
         "径向线条叠加",
         "按固定随机种子生成角度与宽度扰动，沿中心外侧叠加三角形线条。",
-        "增加指向中心的线条结构。", "原有背景可能被遮挡，画面结构会改变。",
+        "增加指向中心的线条结构。",
+        "原有背景可能被遮挡，画面结构会改变。",
     ),
     "screentone": (
         "亮度转网点",
         "按亮度与设定的网点频率、角度生成离散点阵。",
-        "将连续亮度转为网点密度或大小变化。", "颜色与连续色阶可能丢失，缩放可能产生摩尔纹。",
+        "将连续亮度转为网点密度或大小变化。",
+        "颜色与连续色阶可能丢失，缩放可能产生摩尔纹。",
     ),
     "sticker_outline": (
         "透明轮廓扩边与投影",
         "扩张 Alpha 轮廓并叠加指定颜色的边框，可添加投影。",
-        "增加可见轮廓与背景的分隔。", "原有透明边界会改变，细小间隙可能填满。",
+        "增加可见轮廓与背景的分隔。",
+        "原有透明边界会改变，细小间隙可能填满。",
     ),
     "lineart_extract": (
         "高斯差分线稿提取",
         "以不同尺度 Gaussian 差分及非线性阈值映射提取明暗边缘。",
-        "将部分亮度变化转为线条。", "颜色和连续明暗会丢失，噪声也可能成为线条。",
+        "将部分亮度变化转为线条。",
+        "颜色和连续明暗会丢失，噪声也可能成为线条。",
     ),
     "film_grain": (
         "亮度加权噪声叠加",
         "按亮度权重叠加固定随机种子的噪声；不是对真实胶片或传感器的标定。",
-        "增加像素级随机变化。", "平坦区域不再均匀，信噪比可能下降。",
+        "增加像素级随机变化。",
+        "平坦区域不再均匀，信噪比可能下降。",
     ),
     "cel_shade": (
         "色阶量化与轮廓叠加",
         "先模糊并量化色阶，再以 FIND_EDGES 阈值与最小值滤波生成深色轮廓。",
-        "减少颜色层次并强化边缘。", "渐变、小色差和细节可能丢失，可能出现断阶。",
+        "减少颜色层次并强化边缘。",
+        "渐变、小色差和细节可能丢失，可能出现断阶。",
     ),
     "pixelate": (
         "块均值降采样与最近邻展开",
         "以 BOX 降采样后用最近邻恢复原尺寸。",
-        "以大色块替代局部变化。", "空间细节不可恢复；不保证敏感信息已安全脱敏。",
+        "以大色块替代局部变化。",
+        "空间细节不可恢复；不保证敏感信息已安全脱敏。",
     ),
     "superres": (
         "模型推理放大",
@@ -2604,34 +2756,42 @@ _OPERATION_EFFECTS = {
     "diffuse_glow": (
         "高光模糊与滤色混合",
         "提取超过阈值的亮度区域，Gaussian 模糊后以 Screen 混合并回混原图。",
-        "扩大亮区并抬升邻近亮度。", "局部对比度和高光层次可能降低。",
+        "扩大亮区并抬升邻近亮度。",
+        "局部对比度和高光层次可能降低。",
     ),
     "vibrance": (
         "饱和度加权颜色调整",
         "按像素颜色与饱和度权重调整通道相对差异。",
-        "改变不同饱和度区域的颜色强度。", "原配色可能偏移，强调整可能裁切色域。",
+        "改变不同饱和度区域的颜色强度。",
+        "原配色可能偏移，强调整可能裁切色域。",
     ),
     "line_color": (
         "暗线颜色混合",
         "按暗部权重将轮廓颜色与局部颜色混合。",
-        "减小暗线与邻近色块之间的颜色反差。", "暗线辨识度可能下降，文字与交叉点可能变淡。",
+        "减小暗线与邻近色块之间的颜色反差。",
+        "暗线辨识度可能下降，文字与交叉点可能变淡。",
     ),
     "fisheye": (
         "径向坐标重采样",
         "按径向映射重采样像素，并用缩放参数调整可见范围。",
-        "改变画面中心与边缘的相对尺度。", "直线与比例会变形，重采样及裁切可能损失边缘内容。",
+        "改变画面中心与边缘的相对尺度。",
+        "直线与比例会变形，重采样及裁切可能损失边缘内容。",
     ),
     "color_balance": (
         "分亮度区间通道偏移",
         "按阴影、中间调与高光权重调整 RGB 通道。",
-        "分别改变不同明暗区域的色偏。", "原有颜色关系会改变，过强偏移可能裁切通道。",
+        "分别改变不同明暗区域的色偏。",
+        "原有颜色关系会改变，过强偏移可能裁切通道。",
     ),
 }
 for _op, (_title, _method, _benefit, _loss) in _OPERATION_EFFECTS.items():
     INTROS[_op] = {
-        "title": _title, "summary": _method, "principle": _method,
+        "title": _title,
+        "summary": _method,
+        "principle": _method,
         "scenarios": f"可能带来：{_benefit} 可能失去：{_loss}",
-        "benefit": _benefit, "loss": _loss,
+        "benefit": _benefit,
+        "loss": _loss,
     }
 for _key, _pipeline in PRESET_PIPELINES.items():
     if _key in _NEW_OPERATORS:
@@ -2639,8 +2799,10 @@ for _key, _pipeline in PRESET_PIPELINES.items():
     _steps = [INTROS[step["op"]] for step in _pipeline if step["op"] in _OPERATION_EFFECTS]
     if len(_steps) != len(_pipeline):
         continue
-    _entry = next((entry for entry in browse_entries() if entry["key"] == _key), None)
-    _title = _entry["name"] if _entry else _key.split(" (", 1)[0]
+    _preset_item = get_operator_item(_key)
+    _title = _BROWSE_NAMES.get(
+        _key, (_preset_item.name if _preset_item else _key).split(" (", 1)[0]
+    ).replace("4x", "4倍")
     _intro = {
         "title": _title,
         "summary": "依次执行：" + "；".join(step["title"] for step in _steps) + "。",
@@ -2655,26 +2817,38 @@ for _key, _pipeline in PRESET_PIPELINES.items():
 
 def get_intro_text(key: str) -> str:
     """Return formatted introductory text for TUI transform screen."""
-    item = INTROS.get(key)
+    item = localized_intro(key)
     category_badge = ""
     for k, cat in PRESET_CATEGORIES.items():
         if k in key:
-            category_badge = f" [bold cyan][{cat}][/]"
+            shown = cat if i18n.is_chinese() else _CATEGORY_LABELS_EN.get(cat, cat)
+            category_badge = f" [bold cyan][{shown}][/]"
             break
     if item:
         return (
             f"[bold cyan]{item['title']}[/]{category_badge}\n"
-            f"[white]做什么：{item['summary']}[/]\n"
-            f"[dim]怎么做：{item['principle']}[/]\n"
-            f"[dim green]可能带来：{item.get('benefit', item['scenarios'])}[/]\n"
-            f"[dim yellow]可能失去：{item.get('loss', '结果取决于输入与参数，请对照原图。')}[/]"
+            + i18n.t("What it does: ", "做什么：")
+            + f"[white]{item['summary']}[/]\n"
+            + i18n.t("How: ", "怎么做：")
+            + f"[dim]{item['principle']}[/]\n"
+            + i18n.t("May provide: ", "可能带来：")
+            + f"[dim green]{item.get('benefit', item['scenarios'])}[/]\n"
+            + i18n.t("May lose: ", "可能失去：")
+            + "[dim yellow]"
+            + item.get("loss", item["scenarios"])
+            + "[/]"
         )
     # Fallback to operator item if key matches op
     op_item = get_operator_item(key)
     if op_item:
+        op_shown = localized_operator(op_item)
         return (
-            f"[bold cyan]{op_item.name}[/] [bold cyan][{op_item.category_label}][/]\n"
-            f"[white]{op_item.description}[/]\n"
-            f"[dim]分类：{op_item.category_label}[/]"
+            f"[bold cyan]{op_shown.name}[/] [bold cyan][{op_shown.category_label}][/]\n"
+            f"[white]{op_shown.description}[/]\n"
+            + i18n.t("Category: ", "分类：")
+            + f"{op_shown.category_label}[/]"
         )
-    return "[dim]选择变换预设查看介绍与效果[/]"
+    return i18n.t(
+        "[dim]Select a transform preset to see its description and effects[/]",
+        "[dim]选择变换预设查看介绍与效果[/]",
+    )

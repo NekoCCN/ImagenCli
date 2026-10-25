@@ -125,6 +125,32 @@ def test_pinned_models_require_accept_before_download(tmp_path, monkeypatch):
         )
 
 
+def test_download_is_verified_before_publication(tmp_path, monkeypatch):
+    import hashlib
+    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path))
+    monkeypatch.setitem(superres.MANIFEST, 'test', {
+        'url': 'https://example.org/weights', 'sha256': hashlib.sha256(b'weights').hexdigest(),
+    })
+    def download(url, target):
+        assert not (tmp_path / 'test.onnx').exists()
+        assert target != tmp_path / 'test.onnx'
+        target.write_bytes(b'weights')
+    assert (
+        superres.ensure_weights('test', accept=True, download=download).read_bytes()
+        == b'weights'
+    )
+
+
+def test_failed_download_leaves_no_weights_or_partial(tmp_path, monkeypatch):
+    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path))
+    def download(url, target):
+        target.write_bytes(b'partial')
+        raise OSError('interrupted')
+    with pytest.raises(OSError):
+        superres.ensure_weights('realesrgan-x4plus', accept=True, download=download)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_manual_weights_record_and_enforce_a_digest(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     monkeypatch.setitem(superres.MANIFEST, "manual", {

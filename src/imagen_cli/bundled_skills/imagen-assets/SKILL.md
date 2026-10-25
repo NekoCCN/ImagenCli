@@ -39,6 +39,8 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3 --agent
 
 ## 超分
 
+先查看目录，请用户选择模型并查阅来源与权重许可。只有用户明确接受下载后，才执行带 `--accept` 的命令；不要按下面的示例默认选择模型。
+
 ```bash
 imagen superres models --agent
 imagen superres fetch realesrgan-x4plus --accept --agent

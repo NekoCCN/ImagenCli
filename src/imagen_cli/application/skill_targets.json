@@ -1,0 +1,397 @@
+[
+  {
+    "name": "aider-desk",
+    "project": ".aider-desk/skills",
+    "global": "~/.aider-desk/skills"
+  },
+  {
+    "name": "amp",
+    "project": ".agents/skills",
+    "global": "~/.config/agents/skills"
+  },
+  {
+    "name": "replit",
+    "project": ".agents/skills",
+    "global": "~/.config/agents/skills"
+  },
+  {
+    "name": "universal",
+    "project": ".agents/skills",
+    "global": "~/.config/agents/skills"
+  },
+  {
+    "name": "antigravity",
+    "project": ".agents/skills",
+    "global": "~/.gemini/antigravity/skills"
+  },
+  {
+    "name": "antigravity-cli",
+    "project": ".agents/skills",
+    "global": "~/.gemini/antigravity-cli/skills"
+  },
+  {
+    "name": "astrbot",
+    "project": "data/skills",
+    "global": "~/.astrbot/data/skills"
+  },
+  {
+    "name": "autohand-code",
+    "project": ".autohand/skills",
+    "global": "~/.autohand/skills"
+  },
+  {
+    "name": "augment",
+    "project": ".augment/skills",
+    "global": "~/.augment/skills"
+  },
+  {
+    "name": "bob",
+    "project": ".bob/skills",
+    "global": "~/.bob/skills"
+  },
+  {
+    "name": "claude-code",
+    "project": ".claude/skills",
+    "global": "~/.claude/skills"
+  },
+  {
+    "name": "openclaw",
+    "project": "skills",
+    "global": "~/.openclaw/skills"
+  },
+  {
+    "name": "cline",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "codex",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "dexto",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "fx",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "kimi-code-cli",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "loaf",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "pi",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "sarvam-code",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "warp",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "zed",
+    "project": ".agents/skills",
+    "global": "~/.agents/skills"
+  },
+  {
+    "name": "codearts-agent",
+    "project": ".codeartsdoer/skills",
+    "global": "~/.codeartsdoer/skills"
+  },
+  {
+    "name": "codebuddy",
+    "project": ".codebuddy/skills",
+    "global": "~/.codebuddy/skills"
+  },
+  {
+    "name": "codemaker",
+    "project": ".codemaker/skills",
+    "global": "~/.codemaker/skills"
+  },
+  {
+    "name": "codestudio",
+    "project": ".codestudio/skills",
+    "global": "~/.codestudio/skills"
+  },
+  {
+    "name": "command-code",
+    "project": ".commandcode/skills",
+    "global": "~/.commandcode/skills"
+  },
+  {
+    "name": "continue",
+    "project": ".continue/skills",
+    "global": "~/.continue/skills"
+  },
+  {
+    "name": "cortex",
+    "project": ".cortex/skills",
+    "global": "~/.snowflake/cortex/skills"
+  },
+  {
+    "name": "crush",
+    "project": ".crush/skills",
+    "global": "~/.config/crush/skills"
+  },
+  {
+    "name": "cursor",
+    "project": ".agents/skills",
+    "global": "~/.cursor/skills"
+  },
+  {
+    "name": "deepagents",
+    "project": ".agents/skills",
+    "global": "~/.deepagents/agent/skills"
+  },
+  {
+    "name": "devin",
+    "project": ".devin/skills",
+    "global": "~/.config/devin/skills"
+  },
+  {
+    "name": "droid",
+    "project": ".agents/skills",
+    "global": "~/.factory/skills"
+  },
+  {
+    "name": "eve",
+    "project": "agent/skills",
+    "global": ""
+  },
+  {
+    "name": "firebender",
+    "project": ".agents/skills",
+    "global": "~/.firebender/skills"
+  },
+  {
+    "name": "forgecode",
+    "project": ".forge/skills",
+    "global": "~/.forge/skills"
+  },
+  {
+    "name": "gemini-cli",
+    "project": ".agents/skills",
+    "global": "~/.gemini/skills"
+  },
+  {
+    "name": "github-copilot",
+    "project": ".agents/skills",
+    "global": "~/.copilot/skills"
+  },
+  {
+    "name": "goose",
+    "project": ".goose/skills",
+    "global": "~/.config/goose/skills"
+  },
+  {
+    "name": "grok",
+    "project": ".grok/skills",
+    "global": "~/.grok/skills"
+  },
+  {
+    "name": "hermes-agent",
+    "project": ".hermes/skills",
+    "global": "~/.hermes/skills"
+  },
+  {
+    "name": "inference-sh",
+    "project": ".inferencesh/skills",
+    "global": "~/.inferencesh/skills"
+  },
+  {
+    "name": "jazz",
+    "project": ".jazz/skills",
+    "global": "~/.jazz/skills"
+  },
+  {
+    "name": "junie",
+    "project": ".junie/skills",
+    "global": "~/.junie/skills"
+  },
+  {
+    "name": "iflow-cli",
+    "project": ".iflow/skills",
+    "global": "~/.iflow/skills"
+  },
+  {
+    "name": "kilo",
+    "project": ".agents/skills",
+    "global": "~/.kilo/skills"
+  },
+  {
+    "name": "kimchi",
+    "project": ".kimchi/skills",
+    "global": "~/.config/kimchi/harness/skills"
+  },
+  {
+    "name": "kiro-cli",
+    "project": ".kiro/skills",
+    "global": "~/.kiro/skills"
+  },
+  {
+    "name": "kode",
+    "project": ".kode/skills",
+    "global": "~/.kode/skills"
+  },
+  {
+    "name": "lingma",
+    "project": ".lingma/skills",
+    "global": "~/.lingma/skills"
+  },
+  {
+    "name": "mcpjam",
+    "project": ".mcpjam/skills",
+    "global": "~/.mcpjam/skills"
+  },
+  {
+    "name": "minimax-code",
+    "project": ".minimax/skills",
+    "global": "~/.minimax/skills"
+  },
+  {
+    "name": "mistral-vibe",
+    "project": ".vibe/skills",
+    "global": "~/.vibe/skills"
+  },
+  {
+    "name": "moxby",
+    "project": ".moxby/skills",
+    "global": "~/.moxby/skills"
+  },
+  {
+    "name": "mux",
+    "project": ".mux/skills",
+    "global": "~/.mux/skills"
+  },
+  {
+    "name": "opencode",
+    "project": ".agents/skills",
+    "global": "~/.config/opencode/skills"
+  },
+  {
+    "name": "openhands",
+    "project": ".openhands/skills",
+    "global": "~/.openhands/skills"
+  },
+  {
+    "name": "ona",
+    "project": ".ona/skills",
+    "global": "~/.ona/skills"
+  },
+  {
+    "name": "posit-assistant",
+    "project": ".posit/assistant/skills",
+    "global": "~/.posit/assistant/skills"
+  },
+  {
+    "name": "qoder",
+    "project": ".qoder/skills",
+    "global": "~/.qoder/skills"
+  },
+  {
+    "name": "qoder-cn",
+    "project": ".qoder/skills",
+    "global": "~/.qoder-cn/skills"
+  },
+  {
+    "name": "qwen-code",
+    "project": ".qwen/skills",
+    "global": "~/.qwen/skills"
+  },
+  {
+    "name": "reasonix",
+    "project": ".reasonix/skills",
+    "global": "~/.reasonix/skills"
+  },
+  {
+    "name": "rovodev",
+    "project": ".rovodev/skills",
+    "global": "~/.rovodev/skills"
+  },
+  {
+    "name": "roo",
+    "project": ".roo/skills",
+    "global": "~/.roo/skills"
+  },
+  {
+    "name": "tabnine-cli",
+    "project": ".tabnine/agent/skills",
+    "global": "~/.tabnine/agent/skills"
+  },
+  {
+    "name": "terramind",
+    "project": ".terramind/skills",
+    "global": "~/.terramind/skills"
+  },
+  {
+    "name": "tinycloud",
+    "project": ".tinycloud/skills",
+    "global": "~/.tinycloud/skills"
+  },
+  {
+    "name": "trae",
+    "project": ".trae/skills",
+    "global": "~/.trae/skills"
+  },
+  {
+    "name": "trae-cn",
+    "project": ".trae/skills",
+    "global": "~/.trae-cn/skills"
+  },
+  {
+    "name": "windsurf",
+    "project": ".windsurf/skills",
+    "global": "~/.codeium/windsurf/skills"
+  },
+  {
+    "name": "zcode",
+    "project": ".zcode/skills",
+    "global": "~/.zcode/skills"
+  },
+  {
+    "name": "zencoder",
+    "project": ".zencoder/skills",
+    "global": "~/.zencoder/skills"
+  },
+  {
+    "name": "zenflow",
+    "project": ".zencoder/skills",
+    "global": "~/.zencoder/skills"
+  },
+  {
+    "name": "neovate",
+    "project": ".neovate/skills",
+    "global": "~/.neovate/skills"
+  },
+  {
+    "name": "pochi",
+    "project": ".pochi/skills",
+    "global": "~/.pochi/skills"
+  },
+  {
+    "name": "promptscript",
+    "project": ".agents/skills",
+    "global": ""
+  },
+  {
+    "name": "adal",
+    "project": ".adal/skills",
+    "global": "~/.adal/skills"
+  }
+]

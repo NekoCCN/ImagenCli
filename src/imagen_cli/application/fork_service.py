@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from imagen_cli.domain.primitive import new_id
+from imagen_cli.i18n import t
 from imagen_cli.storage.repositories import Repositories
 
 
@@ -12,8 +13,12 @@ def _now() -> str:
 
 
 def fork(
-    repositories: Repositories, session_id: str, *, turn_id: str,
-    artifact_ids: tuple[str, ...] = (), name: str | None = None,
+    repositories: Repositories,
+    session_id: str,
+    *,
+    turn_id: str,
+    artifact_ids: tuple[str, ...] = (),
+    name: str | None = None,
 ) -> dict[str, Any]:
     with repositories.transaction():
         source = repositories.get("sessions", session_id)
@@ -29,16 +34,19 @@ def fork(
             refs = repositories.list("artifact_references", turn_id=turn_id)
             if identity not in {ref["artifact_id"] for ref in refs}:
                 raise ValueError("selected artifact does not belong to the turn")
-        return repositories.insert("sessions", {
-            "id": new_id("ses"),
-            "name": name or f"{source['name']} 分支",
-            "intent": source["intent"],
-            "default_profile_id": source["default_profile_id"],
-            "default_model": source["default_model"],
-            "current_turn_id": None,
-            "version": 0,
-            "created_at": _now(),
-            "deleted_at": None,
-            "origin_session_id": session_id,
-            "origin_turn_id": turn_id,
-        })
+        return repositories.insert(
+            "sessions",
+            {
+                "id": new_id("ses"),
+                "name": name or t(f"{source['name']} branch", f"{source['name']} 分支"),
+                "intent": source["intent"],
+                "default_profile_id": source["default_profile_id"],
+                "default_model": source["default_model"],
+                "current_turn_id": None,
+                "version": 0,
+                "created_at": _now(),
+                "deleted_at": None,
+                "origin_session_id": session_id,
+                "origin_turn_id": turn_id,
+            },
+        )
