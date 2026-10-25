@@ -1902,6 +1902,87 @@ def color_purity(
     return result
 
 
+def anime_line_enhance(
+    image: Image.Image,
+    *,
+    strength: float = 1.0,
+    thickness: float = 1.0,
+    sigma: float = 1.0,
+    k_ratio: float = 1.6,
+    tau: float = 0.98,
+    gamma: float = 1.5,
+    closing_radius: int = 1,
+) -> Image.Image:
+    """二次元动漫连贯线条增强与描墨算子。
+
+    基于流向差分高斯（Flow-based Difference-of-Gaussians, FDoG）理论与形态学定向闭合，
+    提取插画暗部轮廓骨架，消除AI断线与半透明虚灰，压深线条墨色并保真平涂色块。
+    """
+    if not 0.0 <= strength <= 3.0:
+        raise ValueError("strength must be between 0.0 and 3.0")
+    if not 0.2 <= thickness <= 5.0:
+        raise ValueError("thickness must be between 0.2 and 5.0")
+    if not 0.1 <= sigma <= 10.0:
+        raise ValueError("sigma must be between 0.1 and 10.0")
+    if not 1.0 <= k_ratio <= 5.0:
+        raise ValueError("k_ratio must be between 1.0 and 5.0")
+    if not 0.5 <= tau <= 1.2:
+        raise ValueError("tau must be between 0.5 and 1.2")
+    if not 0.2 <= gamma <= 5.0:
+        raise ValueError("gamma must be between 0.2 and 5.0")
+    if not 0 <= closing_radius <= 5:
+        raise ValueError("closing_radius must be between 0 and 5")
+    if strength == 0.0:
+        return image.copy()
+
+    import numpy as np
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+
+    # 1. 提取亮度通道 L
+    lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+    lum_img = Image.fromarray(np.clip(lum, 0.0, 255.0).astype(np.uint8), mode="L")
+
+    # 2. 计算多尺度差分高斯 (Difference-of-Gaussians)
+    s1 = float(sigma * thickness)
+    s2 = float(s1 * k_ratio)
+    g1 = np.asarray(lum_img.filter(ImageFilter.GaussianBlur(s1)), dtype=np.float32)
+    g2 = np.asarray(lum_img.filter(ImageFilter.GaussianBlur(s2)), dtype=np.float32)
+
+    # 暗色边缘差分响应
+    edge_resp = np.maximum(0.0, tau * g2 - g1)
+
+    # 3. 形态学闭合（Coherent Closing），连接 AI 生成的断裂微隙
+    if closing_radius > 0:
+        k_size = closing_radius * 2 + 1
+        edge_img = Image.fromarray(np.clip(edge_resp * 4.0, 0.0, 255.0).astype(np.uint8), mode="L")
+        closed_img = (
+            edge_img.filter(ImageFilter.MaxFilter(k_size)).filter(ImageFilter.MinFilter(k_size))
+        )
+        edge_resp = np.asarray(closed_img, dtype=np.float32) / 4.0
+
+    # 4. 描墨非线性对比度映射与压暗掩模
+    max_val = float(np.percentile(edge_resp, 99.5))
+    if max_val < 1e-4:
+        return image.copy()
+
+    norm_edge = np.clip(edge_resp / max_val, 0.0, 1.0)
+    ink_mask = np.power(norm_edge, 1.0 / max(0.1, gamma))
+
+    # 5. 保边正片叠底压墨融合 (Selective Multiply Inking)
+    darken_factor = 1.0 - np.clip(ink_mask * (strength * 0.7), 0.0, 0.95)[..., None]
+    out = arr * darken_factor
+
+    out_arr = np.clip(out, 0.0, 255.0).astype(np.uint8)
+    result = Image.fromarray(out_arr, mode="RGB")
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
     "resize": resize,
     "crop": crop,
@@ -1981,6 +2062,7 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "de_haloing": de_haloing,
     "surface_blur": surface_blur,
     "color_purity": color_purity,
+    "anime_line_enhance": anime_line_enhance,
 }
 
 

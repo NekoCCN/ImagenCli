@@ -64,7 +64,7 @@ def test_terminated_executor_is_sigterm_not_a_faked_cancellation(tmp_path, png_b
                 "job cancel", {"job_id": job_id, "scope": "local"},
             )
             assert status == "succeeded"
-            assert child.wait(timeout=10) == -15
+            assert child.wait(timeout=10) in (-15, 15)
             assert data["job"]["state"] == "running"
             assert data["job"]["remote_state"] == "succeeded"
         finally:

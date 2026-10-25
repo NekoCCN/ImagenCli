@@ -319,6 +319,61 @@ def test_transform_param_tuning(deps):
     assert pipeline[0]["params"]["scale"] == 8
 
 
+def test_param_edit_screen_basic_and_advanced_toggle():
+    from textual.app import App, ComposeResult
+    from textual.widgets import Static
+
+    from imagen_cli.cli.tui.app import ParamEditScreen
+
+    pipeline = [
+        {
+            "op": "anime_line_enhance",
+            "params": {
+                "strength": 1.0,
+                "thickness": 1.0,
+                "sigma": 1.0,
+                "k_ratio": 1.6,
+                "tau": 0.98,
+                "gamma": 1.5,
+                "closing_radius": 1,
+            },
+        }
+    ]
+
+    class TestApp(App[None]):
+        def compose(self) -> ComposeResult:
+            yield Static("test")
+
+    app = TestApp()
+
+    async def run():
+        async with app.run_test() as pilot:
+            screen = ParamEditScreen("动漫线条增强", pipeline)
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            # 初始为基础模式，仅显示基础参数
+            assert screen.mode == "basic"
+            # 基础参数容器可见
+            c_strength = screen.query_one("#c_f_0_strength")
+            assert c_strength.display is True
+            # 高级参数容器被隐藏
+            c_sigma = screen.query_one("#c_f_0_sigma")
+            assert c_sigma.display is False
+
+            # 按 Tab/m 或触发 action_toggle_mode 切换到高级模式
+            screen.action_toggle_mode()
+            assert screen.mode == "advanced"
+            assert c_sigma.display is True
+
+            # 再次切换回基础模式
+            screen.action_toggle_mode()
+            assert screen.mode == "basic"
+            assert c_sigma.display is False
+
+    asyncio.run(run())
+
+
 def test_transform_intro_display(deps):
     from imagen_cli.cli.tui.app import TransformScreen
 

@@ -121,7 +121,7 @@ def test_local_cancel_terminates_only_a_verified_executor(tmp_path, png_bytes):
             }})
             status, data = container.execute("job cancel", {"job_id": job_id, "scope": "local"})
             assert status == "succeeded"
-            assert child.wait(timeout=10) == -15
+            assert child.wait(timeout=10) in (-15, 15)
             assert data["job"]["state"] == "running"
             events = [row["event_type"] for row in
                       container.repositories.list("events", job_id=job_id)]

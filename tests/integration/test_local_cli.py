@@ -18,12 +18,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def invoke(workspace: Path, *args: str) -> tuple[int, dict[str, Any]]:
-    env = {
-        "PATH": os.environ["PATH"],
+    unused_home = str(workspace.parent / "unused-home")
+    env = dict(os.environ)
+    env.update({
         "PYTHONPATH": str(ROOT / "src"),
-        "HOME": str(workspace.parent / "unused-home"),
+        "HOME": unused_home,
+        "USERPROFILE": unused_home,
         "NO_COLOR": "1",
-    }
+        "PYTHONUTF8": "1",
+    })
     script = (
         "import socket,sys; "
         "socket.socket=lambda *a,**k: (_ for _ in ()).throw(AssertionError('network')); "

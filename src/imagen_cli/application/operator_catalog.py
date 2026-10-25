@@ -16,6 +16,7 @@ class Parameter:
     max_value: float | int | None = None
     choices: list[str] | None = None
     description: str = ""
+    is_advanced: bool = False
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,17 @@ class OperatorItem:
     default_op: str
     default_params: dict[str, Any]
     parameters: list[Parameter] = field(default_factory=list)
+
+    @property
+    def basic_parameters(self) -> list[Parameter]:
+        """返回基础浓缩参数列表。若未特别指定高级参数，则返回全部参数。"""
+        basics = [p for p in self.parameters if not p.is_advanced]
+        return basics if basics else list(self.parameters)
+
+    @property
+    def advanced_parameters(self) -> list[Parameter]:
+        """返回全部微观高级参数列表。"""
+        return list(self.parameters)
 
     def build_pipeline(self, overrides: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         params = dict(self.default_params)
@@ -91,6 +103,34 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
         {
             "op": "color_purity",
             "params": {"shadow_desat": 0.4, "shadow_threshold": 70.0, "vibrance_boost": 0.2},
+        },
+    ],
+    "二次元线条强化与描墨 (Anime Line Inking)": [
+        {
+            "op": "anime_line_enhance",
+            "params": {
+                "strength": 1.0,
+                "thickness": 1.0,
+                "sigma": 1.0,
+                "k_ratio": 1.6,
+                "tau": 0.98,
+                "gamma": 1.5,
+                "closing_radius": 1,
+            },
+        },
+    ],
+    "二次元赛璐珞顶级精修 (Anime Cel Master)": [
+        {
+            "op": "surface_blur",
+            "params": {"radius": 4, "threshold": 22.0, "blend": 0.85},
+        },
+        {
+            "op": "anime_line_enhance",
+            "params": {"strength": 0.9, "thickness": 1.0},
+        },
+        {
+            "op": "color_purity",
+            "params": {"shadow_desat": 0.35, "shadow_threshold": 65.0, "vibrance_boost": 0.15},
         },
     ],
     "日系通透空气感 (Shinkai Airy)": [
@@ -1066,6 +1106,16 @@ OPERATORS: list[OperatorItem] = [
         default_params={"radius": 4, "threshold": 20.0, "blend": 0.85},
         parameters=[
             Parameter(
+                "blend",
+                "混合强度",
+                "float",
+                0.85,
+                min_value=0.0,
+                max_value=1.0,
+                description="平滑效果与原图的融合权重系数",
+                is_advanced=False,
+            ),
+            Parameter(
                 "radius",
                 "平滑半径",
                 "int",
@@ -1073,6 +1123,7 @@ OPERATORS: list[OperatorItem] = [
                 min_value=1,
                 max_value=30,
                 description="平滑滤波空间邻域核半径",
+                is_advanced=True,
             ),
             Parameter(
                 "threshold",
@@ -1082,15 +1133,7 @@ OPERATORS: list[OperatorItem] = [
                 min_value=0.0,
                 max_value=100.0,
                 description="色差容差阈值，低于该差值被判定为同色块并熨平均匀",
-            ),
-            Parameter(
-                "blend",
-                "混合强度",
-                "float",
-                0.85,
-                min_value=0.0,
-                max_value=1.0,
-                description="平滑效果与原图的融合权重系数",
+                is_advanced=True,
             ),
         ],
     ),
@@ -1104,6 +1147,16 @@ OPERATORS: list[OperatorItem] = [
         default_params={"shadow_desat": 0.35, "shadow_threshold": 70.0, "vibrance_boost": 0.15},
         parameters=[
             Parameter(
+                "vibrance_boost",
+                "色彩提纯",
+                "float",
+                0.15,
+                min_value=-1.0,
+                max_value=1.0,
+                description="主体未饱和色彩的自然通透度增益系数",
+                is_advanced=False,
+            ),
+            Parameter(
                 "shadow_desat",
                 "暗部去杂色",
                 "float",
@@ -1111,6 +1164,7 @@ OPERATORS: list[OperatorItem] = [
                 min_value=0.0,
                 max_value=1.0,
                 description="阴影区域杂乱反光的饱和度衰减比例",
+                is_advanced=True,
             ),
             Parameter(
                 "shadow_threshold",
@@ -1120,15 +1174,96 @@ OPERATORS: list[OperatorItem] = [
                 min_value=0.0,
                 max_value=255.0,
                 description="定义阴影暗部的照度阈值界限",
+                is_advanced=True,
+            ),
+        ],
+    ),
+    OperatorItem(
+        key="anime_line_enhance",
+        name="动漫线条增强 (Line Inking)",
+        category="acg",
+        category_label=CATEGORIES["acg"],
+        description="基于流向差分高斯与形态学定向闭合的二次元线稿边缘强化与连贯描墨算子。",
+        default_op="anime_line_enhance",
+        default_params={
+            "strength": 1.0,
+            "thickness": 1.0,
+            "sigma": 1.0,
+            "k_ratio": 1.6,
+            "tau": 0.98,
+            "gamma": 1.5,
+            "closing_radius": 1,
+        },
+        parameters=[
+            Parameter(
+                "strength",
+                "强化强度",
+                "float",
+                1.0,
+                min_value=0.0,
+                max_value=3.0,
+                description="线条加深压墨的全局融合权重系数",
+                is_advanced=False,
             ),
             Parameter(
-                "vibrance_boost",
-                "色彩提纯",
+                "thickness",
+                "线条粗细",
                 "float",
-                0.15,
-                min_value=-1.0,
-                max_value=1.0,
-                description="主体未饱和色彩的自然通透度增益系数",
+                1.0,
+                min_value=0.2,
+                max_value=5.0,
+                description="描线宽度缩放系数",
+                is_advanced=False,
+            ),
+            Parameter(
+                "sigma",
+                "高斯尺度",
+                "float",
+                1.0,
+                min_value=0.1,
+                max_value=10.0,
+                description="中心尺度滤波核标准差",
+                is_advanced=True,
+            ),
+            Parameter(
+                "k_ratio",
+                "核宽比例",
+                "float",
+                1.6,
+                min_value=1.0,
+                max_value=5.0,
+                description="差分高斯外核与内核宽度比率",
+                is_advanced=True,
+            ),
+            Parameter(
+                "tau",
+                "敏感度阈值",
+                "float",
+                0.98,
+                min_value=0.5,
+                max_value=1.2,
+                description="边缘检测响应敏感度阈值",
+                is_advanced=True,
+            ),
+            Parameter(
+                "gamma",
+                "压墨对比度",
+                "float",
+                1.5,
+                min_value=0.2,
+                max_value=5.0,
+                description="非线性曲线伽马对比度增强系数",
+                is_advanced=True,
+            ),
+            Parameter(
+                "closing_radius",
+                "闭合半径",
+                "int",
+                1,
+                min_value=0,
+                max_value=5,
+                description="形态学闭运算半径，用于缝合AI断线微隙",
+                is_advanced=True,
             ),
         ],
     ),
@@ -1796,6 +1931,42 @@ INTROS: dict[str, dict[str, str]] = {
         ),
         "scenarios": "适用于低清晰度图像高清放大、微观纹理恢复与印刷级输出预处理。",
     },
+    "二次元线条强化与描墨": {
+        "title": "二次元线条强化与描墨 (Anime Line Inking)",
+        "summary": (
+            "本算子通过流向差分高斯与定向形态学闭合理论，提取动漫插画暗部"
+            "轮廓骨架并加深描墨。"
+        ),
+        "principle": (
+            "基于差分高斯（FDoG）多尺度空间边缘响应提取暗部轮廓，经由形态学"
+            "定向闭运算与非线性伽马压墨融合。"
+        ),
+        "scenarios": "适用于加深强化二次元手绘线稿、缝合AI断线微隙以及消除线条边缘虚灰毛刺。",
+    },
+    "二次元赛璐珞顶级精修": {
+        "title": "二次元赛璐珞顶级精修 (Anime Cel Master)",
+        "summary": (
+            "整合保边色块平滑、连贯线稿描墨与暗部阴影提纯，提供全套顶级"
+            "二次元赛璐珞风格后处理重构。"
+        ),
+        "principle": (
+            "三阶段协同管线：首先表面保边去AI杂斑，其次流向差分高斯描墨增强"
+            "轮廓，最后暗部掩模色彩提纯去脏。"
+        ),
+        "scenarios": (
+            "适用于AI二次元生成图的一键顶级动漫化精修，重塑纯净平涂赛璐珞与"
+            "紧致利落的手绘质感。"
+        ),
+    },
+    "anime_line_enhance": {
+        "title": "动漫线条增强 (Line Inking)",
+        "summary": "基于流向差分高斯与形态学定向闭合的二次元线稿边缘强化与连贯描墨算子。",
+        "principle": (
+            "基于差分高斯（DoG）多尺度响应与形态学闭运算，增强暗部线条黑度并"
+            "保全平涂色块。"
+        ),
+        "scenarios": "适用于消除AI二次元图像线条虚浮断线缺陷并增强日系动漫描墨质感。",
+    },
 }
 
 
@@ -1810,6 +1981,10 @@ PRESET_CATEGORIES: dict[str, str] = {
     "抗AI生成伪影综合治理": "去AI感",
     "二次元平涂去杂": "去AI感",
     "动漫色彩提纯": "二次元动漫",
+    "二次元线条强化与描墨": "二次元动漫",
+    "二次元赛璐珞顶级精修": "二次元动漫",
+    "动漫线条增强": "二次元动漫",
+    "anime_line_enhance": "二次元动漫",
     "日系通透空气感": "二次元动漫",
     "热血集中线": "二次元动漫",
     "黑白漫画网点": "二次元动漫",

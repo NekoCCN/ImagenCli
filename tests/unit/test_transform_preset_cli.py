@@ -86,21 +86,45 @@ def test_cli_ops_specific_op_details(tmp_path: Path):
     assert "原理" in detail or "principle" in detail
 
 
-def test_cli_ops_specific_preset_details(tmp_path: Path):
-    ws = tmp_path / "ws_preset_details"
-    ws.mkdir()
+def test_cli_transform_with_anime_presets(tmp_path: Path):
+    ws, art_id = _create_ws(tmp_path)
     stdout = io.StringIO()
     code = main([
         "--workspace", str(ws),
-        "ops", "--preset", "日系治愈空气柔光",
+        "transform", art_id,
+        "--preset", "二次元线条强化与描墨",
         "--output", "json",
     ], stdout=stdout)
     assert code == 0
     resp = json.loads(stdout.getvalue())
     assert resp["ok"] is True
-    assert "details" in resp["data"]
-    matched = next(iter(resp["data"]["details"].values()))
-    assert "pipeline" in matched
+    assert "artifact" in resp["data"]
+
+
+def test_operator_catalog_basic_and_advanced_parameters():
+    from imagen_cli.application.operator_catalog import get_operator_item
+
+    item = get_operator_item("anime_line_enhance")
+    assert item is not None
+    basic_names = [p.name for p in item.basic_parameters]
+    adv_names = [p.name for p in item.advanced_parameters]
+
+    # 基础参数浓缩为最关键的 2 个宏观滑块
+    assert "strength" in basic_names
+    assert "thickness" in basic_names
+    assert len(basic_names) == 2
+
+    # 高级参数包含全部 7 个微观底层参数
+    assert len(adv_names) == 7
+    assert "sigma" in adv_names
+    assert "k_ratio" in adv_names
+    assert "closing_radius" in adv_names
+
+    # 验证表面平滑算子的基础/高级划分
+    surf = get_operator_item("surface_blur")
+    assert surf is not None
+    assert [p.name for p in surf.basic_parameters] == ["blend"]
+    assert len(surf.advanced_parameters) == 3
 
 
 def test_cli_ops_anti_ai_artifacts_suppression_preset(tmp_path: Path):

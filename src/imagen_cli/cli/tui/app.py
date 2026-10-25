@@ -550,7 +550,11 @@ class CacheScreen(ModalScreen[bool]):
 class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
     """Adjust parameters for the current transform pipeline."""
 
-    BINDINGS = [Binding("escape", "cancel", "取消")]
+    BINDINGS = [
+        Binding("tab", "toggle_mode", "切换模式"),
+        Binding("m", "toggle_mode", "切换模式"),
+        Binding("escape", "cancel", "取消"),
+    ]
 
     def __init__(self, preset_name: str, pipeline: list[dict[str, Any]]) -> None:
         super().__init__()
@@ -558,7 +562,8 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
 
         self.preset_name = preset_name
         self.pipeline = copy.deepcopy(pipeline)
-        self.fields_info: list[tuple[str, str, str, str, int, str]] = []
+        self.mode: str = "basic"
+        self.fields_info: list[tuple[str, str, str, str, int, str, bool]] = []
         self.inputs: list[Input] = []
 
         for step_idx, step in enumerate(self.pipeline):
@@ -567,11 +572,22 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
             catalog_item = get_operator_item(op)
             catalog_params = {p.name: p for p in catalog_item.parameters} if catalog_item else {}
 
-            for k, v in params.items():
+            all_param_names = list(params.keys())
+            if catalog_item:
+                for p in catalog_item.parameters:
+                    if p.name not in params:
+                        all_param_names.append(p.name)
+                        params[p.name] = p.default
+
+            for k in all_param_names:
+                v = params.get(k)
                 field_id = f"f_{step_idx}_{k}"
                 p_meta = catalog_params.get(k)
+                is_adv = p_meta.is_advanced if p_meta else False
+
                 if p_meta:
-                    label = f"{p_meta.label} ({k})"
+                    prefix = "[高级] " if is_adv else ""
+                    label = f"{prefix}{p_meta.label} ({k})"
                     placeholder = f"默认 {p_meta.default} · {p_meta.description}"
                     expected_type = p_meta.param_type
                 else:
@@ -579,28 +595,68 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                     placeholder = f"当前值: {v}"
                     expected_type = type(v).__name__
 
-                self.fields_info.append((field_id, label, placeholder, expected_type, step_idx, k))
-                self.inputs.append(Input(value=str(v), placeholder=placeholder, id=field_id))
+                self.fields_info.append(
+                    (field_id, label, placeholder, expected_type, step_idx, k, is_adv)
+                )
+                self.inputs.append(
+                    Input(
+                        value=str(v) if v is not None else "",
+                        placeholder=placeholder,
+                        id=field_id,
+                    )
+                )
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="param-form"):
             yield Static(f"参数调节 · {self.preset_name}", classes="panel-title")
-            for (_, label, _, _, _, _), inp in zip(self.fields_info, self.inputs, strict=True):
-                with Horizontal(classes="field"):
+            yield Static("", id="param-mode-indicator")
+            for (field_id, label, _, _, _, _, _), inp in zip(
+                self.fields_info, self.inputs, strict=True
+            ):
+                with Horizontal(classes="field", id=f"c_{field_id}"):
                     yield Static(label, classes="field-label")
                     yield inp
-            yield Static("enter 确认并预览 · esc 取消", classes="panel-hint")
+            yield Static("enter 确认并预览 · Tab/m 切换基础/高级 · esc 取消", classes="panel-hint")
 
     def on_mount(self) -> None:
-        if self.inputs:
-            self.inputs[0].focus()
+        self._update_mode_view()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def _update_mode_view(self) -> None:
+        if self.mode == "basic":
+            indicator_text = (
+                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (Tab/m 切换)"
+            )
+        else:
+            indicator_text = (
+                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (Tab/m 切换)"
+            )
+        self.query_one("#param-mode-indicator", Static).update(indicator_text)
+
+        first_visible: Input | None = None
+        for (field_id, _, _, _, _, _, is_adv), inp in zip(
+            self.fields_info, self.inputs, strict=True
+        ):
+            container = self.query_one(f"#c_{field_id}", Horizontal)
+            is_visible = not is_adv if self.mode == "basic" else True
+            container.display = is_visible
+            if is_visible and first_visible is None:
+                first_visible = inp
+
+        if first_visible:
+            first_visible.focus()
+
+    def action_toggle_mode(self) -> None:
+        self.mode = "advanced" if self.mode == "basic" else "basic"
+        self._update_mode_view()
+
+    def _save_inputs_to_pipeline(self) -> list[dict[str, Any]]:
         new_pipeline = copy.deepcopy(self.pipeline)
-        for (_, _, _, type_str, step_idx, k), inp in zip(
+        for (_, _, _, type_str, step_idx, k, _), inp in zip(
             self.fields_info, self.inputs, strict=True
         ):
             raw = inp.value.strip()
+            if not raw:
+                continue
             try:
                 if type_str in ("bool", "boolean"):
                     val: Any = raw.lower() in ("true", "1", "yes", "on")
@@ -613,6 +669,10 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 new_pipeline[step_idx]["params"][k] = val
             except (ValueError, TypeError):
                 pass
+        return new_pipeline
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        new_pipeline = self._save_inputs_to_pipeline()
         self.dismiss(new_pipeline)
 
     def action_cancel(self) -> None:
@@ -796,7 +856,15 @@ class TransformScreen(ModalScreen[bool]):
             return
         name = self.names[row]
         pipeline = self.pipelines.get(name, PRESETS[name])
-        has_params = any(bool(step.get("params")) for step in pipeline)
+        from imagen_cli.application.operator_catalog import get_operator_item
+
+        def _step_has_params(step: dict[str, Any]) -> bool:
+            if step.get("params"):
+                return True
+            item = get_operator_item(step.get("op", ""))
+            return bool(item.parameters) if item is not None else False
+
+        has_params = any(_step_has_params(s) for s in pipeline)
         if not has_params:
             self.status.update(f"{name} 无可配置参数")
             return

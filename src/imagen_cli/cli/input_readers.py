@@ -20,6 +20,18 @@ def read_stdin(
     stream = stream if stream is not None else sys.stdin.buffer
     deadline = time.monotonic() + timeout
     chunks = bytearray()
+    if sys.platform == "win32":
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("stdin timeout")
+            chunk = stream.read(min(65536, limit + 1 - len(chunks)))
+            if not chunk:
+                return bytes(chunks)
+            chunks.extend(chunk)
+            if len(chunks) > limit:
+                raise ValueError("input byte limit exceeded")
+
     # SelectSelector also accepts regular-file stdin redirected by the shell.
     with selectors.SelectSelector() as selector:
         selector.register(stream, selectors.EVENT_READ)
@@ -42,7 +54,7 @@ def _decode(raw: bytes) -> str:
         raise ValueError("invalid UTF-8") from None
     if "\0" in text:
         raise ValueError("NUL is forbidden")
-    return text
+    return text.replace("\r\n", "\n")
 
 
 def _bytes(source: Any, limit: int) -> bytes:

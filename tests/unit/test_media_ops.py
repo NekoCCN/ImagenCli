@@ -293,3 +293,39 @@ def test_kuwahara_and_color_transfer():
     assert sky.tobytes() != cyber.tobytes()
 
 
+def test_anime_line_enhance_sharpens_and_inks_strokes():
+    from PIL import ImageDraw
+
+    # 创建浅色平涂背景并在中心绘制一条灰色线稿
+    img = Image.new("RGBA", (60, 60), (240, 220, 200, 255))
+    draw = ImageDraw.Draw(img)
+    draw.line([(10, 30), (50, 30)], fill=(120, 100, 90, 255), width=2)
+
+    enhanced = media_ops.anime_line_enhance(
+        img, strength=1.5, thickness=1.0, sigma=1.0, gamma=1.5, closing_radius=1
+    )
+    assert enhanced.size == img.size
+    assert "A" in enhanced.getbands()
+
+    # 线条中心像素被加深压黑（数值减小）
+    orig_stroke_pixel = img.getpixel((30, 30))
+    enhanced_stroke_pixel = enhanced.getpixel((30, 30))
+    assert enhanced_stroke_pixel[0] < orig_stroke_pixel[0]
+    assert enhanced_stroke_pixel[1] < orig_stroke_pixel[1]
+    assert enhanced_stroke_pixel[2] < orig_stroke_pixel[2]
+
+    # 远离线条的平涂色块几乎不受影响（保真Cel平涂）
+    bg_orig = img.getpixel((10, 10))
+    bg_enhanced = enhanced.getpixel((10, 10))
+    assert abs(bg_orig[0] - bg_enhanced[0]) <= 2
+    assert abs(bg_orig[1] - bg_enhanced[1]) <= 2
+
+    # 边界参数校验
+    with pytest.raises(ValueError, match="strength"):
+        media_ops.anime_line_enhance(img, strength=-0.1)
+    with pytest.raises(ValueError, match="thickness"):
+        media_ops.anime_line_enhance(img, thickness=0.1)
+    with pytest.raises(ValueError, match="closing_radius"):
+        media_ops.anime_line_enhance(img, closing_radius=10)
+
+
