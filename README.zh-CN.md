@@ -56,7 +56,7 @@ Imagen 为人和 coding agent 提供同一个图像工作区。人可以在 TUI 
 | Agent skills | 不支持 | `skills list`、`skills install`、`skills uninstall` |
 | 超分模型 | 不支持 | `superres models`、`superres fetch`、`superres benchmark` |
 | 命令参考 | `:` 命令面板、`?` 帮助 | `imagen help`、`imagen schema` |
-| 切换界面语言 | `l` | `--zh` / `--en` |
+| 切换界面语言 | `l`（会记住） | `--zh` / `--en`、`language` |
 
 ## 界面
 
@@ -450,11 +450,15 @@ imagen skills uninstall --target codex
 ```bash
 imagen --zh help                  # 单次命令使用中文
 imagen --en help                  # 强制英文
-export IMAGEN_LANG=zh-CN          # 当前 shell
+export IMAGEN_LANG=zh-CN          # 仅当前 shell
+imagen language zh-CN             # 保存为默认
+imagen language                   # 查看已保存的默认
 imagen tui
 ```
 
-`--zh` 和 `--en` 是快捷参数，`--lang en|zh-CN` 是显式写法。语言参数优先于 `IMAGEN_LANG`，同一条命令只能使用一个语言选项。TUI 内按 `l` 立即切换。
+`--zh` 和 `--en` 是快捷参数，`--lang en|zh-CN` 是显式写法。语言参数优先于 `IMAGEN_LANG`，同一条命令只能使用一个语言选项。
+
+`imagen language [en|zh-CN]` 会把默认语言写入平台配置目录（Imagen 用户配置路径下的 `config.json`，仅本人可读）。TUI 内按 `l` 同样会保存，重启后保持。优先级依次为：命令行参数、`IMAGEN_LANG`、已保存的默认值、英文。
 
 ## 常见问题
 

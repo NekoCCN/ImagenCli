@@ -56,7 +56,7 @@ Most daily work is available in both interfaces. Keys below are TUI shortcuts.
 | Agent skills | not available | `skills list`, `skills install`, `skills uninstall` |
 | Upscaling models | not available | `superres models`, `superres fetch`, `superres benchmark` |
 | Command reference | `:` palette, `?` help | `imagen help`, `imagen schema` |
-| Switch interface language | `l` | `--zh` / `--en` |
+| Switch interface language | `l` (remembered) | `--zh` / `--en`, `language` |
 
 ## Screenshots
 
@@ -450,11 +450,15 @@ English is the default for help, human output, errors, and the TUI.
 ```bash
 imagen --zh help                  # Chinese for one command
 imagen --en help                  # force English
-export IMAGEN_LANG=zh-CN          # current shell
+export IMAGEN_LANG=zh-CN          # current shell only
+imagen language zh-CN             # save as the default
+imagen language                   # show the saved default
 imagen tui
 ```
 
-`--zh` and `--en` are shortcuts; `--lang en|zh-CN` is the explicit form. A language flag takes precedence over `IMAGEN_LANG`, and only one language selector may be used per command. Inside the TUI, press `l` to switch immediately.
+`--zh` and `--en` are shortcuts; `--lang en|zh-CN` is the explicit form. A language flag takes precedence over `IMAGEN_LANG`, and only one language selector may be used per command.
+
+`imagen language [en|zh-CN]` writes the default to the platform config directory (`config.json` under the Imagen user config path, readable only by you). The TUI's `l` key saves the same preference, so the choice survives restarts. Precedence is: command-line flag, then `IMAGEN_LANG`, then the saved default, then English.
 
 ## Troubleshooting
 

@@ -63,6 +63,10 @@ def _cost_line(cost: dict[str, Any]) -> str:
 def _plain_lines(value: dict[str, Any]) -> list[str]:
     data = value.get("data") or {}
     lines: list[str] = []
+    language = data.get("language")
+    if isinstance(language, str):
+        suffix = t(" (saved)", "（已保存）") if data.get("saved") else ""
+        lines.append(t(f"Language: {language}", f"语言：{language}") + suffix)
     plan = data.get("plan") or {}
     if plan:
         lines.append(
@@ -267,6 +271,12 @@ def _rich(value: dict[str, Any], width: int) -> str:
         console.print(Panel(message, title=t("Failed", "失败"), border_style="red"))
         return buffer.getvalue()
     data = value.get("data") or {}
+    language = data.get("language")
+    if isinstance(language, str):
+        suffix = t(" (saved)", "（已保存）") if data.get("saved") else ""
+        console.print(
+            t(f"Language: [bold]{language}[/bold]", f"语言：[bold]{language}[/bold]") + suffix
+        )
     plan = data.get("plan") or {}
     if plan:
         lines = [
@@ -433,6 +443,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
         console.print(table)
     if not any(
         (
+            language,
             plan,
             job,
             profile,

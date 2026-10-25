@@ -1175,3 +1175,19 @@ def test_toggle_language_updates_visible_labels(deps):
             assert "生成" in str(app.query_one("#keybar", Static).render())
 
     asyncio.run(run())
+
+
+def test_toggle_language_persists_choice(deps):
+    deps_value, _ = deps
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+
+    asyncio.run(run())
+    from imagen_cli import i18n
+
+    i18n.reset_language()
+    assert i18n.saved_language() == "en"

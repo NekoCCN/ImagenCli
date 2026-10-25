@@ -7,9 +7,14 @@ Chinese (``zh-CN``).
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 from contextvars import ContextVar, Token
+from pathlib import Path
 from typing import Any
+
+from platformdirs import user_config_path
 
 DEFAULT = "en"
 _ALIASES = {
@@ -22,6 +27,9 @@ _ALIASES = {
     "zh-sg": "zh-CN",
 }
 _selected: ContextVar[str | None] = ContextVar("imagen_language", default=None)
+_saved_loaded = False
+_saved_value: str | None = None
+CONFIG_FILE = "config.json"
 
 
 def normalize(value: Any) -> str | None:
@@ -30,11 +38,52 @@ def normalize(value: Any) -> str | None:
     return _ALIASES.get(value.strip().lower())
 
 
+def config_path() -> Path:
+    return user_config_path("imagen-cli") / CONFIG_FILE
+
+
+def saved_language() -> str | None:
+    global _saved_loaded, _saved_value
+    if not _saved_loaded:
+        try:
+            payload = json.loads(config_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+        _saved_value = normalize(payload.get("language")) if isinstance(payload, dict) else None
+        _saved_loaded = True
+    return _saved_value
+
+
+def save_language(value: str) -> str:
+    global _saved_loaded, _saved_value
+    normalized = normalize(value)
+    if normalized is None:
+        raise ValueError("unsupported language")
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump({"language": normalized}, stream)
+            stream.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    _saved_value = normalized
+    _saved_loaded = True
+    return normalized
+
+
 def language() -> str:
     selected = _selected.get()
     if selected is not None:
         return selected
-    return normalize(os.environ.get("IMAGEN_LANG")) or DEFAULT
+    environment = normalize(os.environ.get("IMAGEN_LANG"))
+    if environment is not None:
+        return environment
+    return saved_language() or DEFAULT
 
 
 def set_language(value: str) -> Token[str | None]:
@@ -45,6 +94,8 @@ def set_language(value: str) -> Token[str | None]:
 
 
 def reset_language(token: Token[str | None] | None = None) -> None:
+    global _saved_loaded
+    _saved_loaded = False
     if token is None:
         _selected.set(None)
     else:

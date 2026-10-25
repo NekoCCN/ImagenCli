@@ -99,3 +99,19 @@ def test_short_flag_overrides_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_LANG", "zh-CN")
     _, text = invoke(tmp_path, "--en", "help")
     assert "Show command help" in text
+
+
+def test_language_command_persists_default(tmp_path):
+    code, text = invoke(tmp_path, "language", "zh-CN")
+    assert code == 0
+    assert "zh-CN" in text
+    _, help_text = invoke(tmp_path, "help")
+    assert "查看命令帮助" in help_text
+
+
+def test_language_command_shows_saved_default(tmp_path):
+    invoke(tmp_path, "language", "zh-CN")
+    i18n.reset_language()
+    code, text = invoke(tmp_path, "language")
+    assert code == 0
+    assert "zh-CN" in text

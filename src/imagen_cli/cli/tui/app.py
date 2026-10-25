@@ -1774,7 +1774,12 @@ class WorkbenchApp(App[None]):
     def action_toggle_language(self) -> None:
         from imagen_cli import i18n
 
-        i18n.set_language("en" if i18n.is_chinese() else "zh-CN")
+        target = "en" if i18n.is_chinese() else "zh-CN"
+        i18n.set_language(target)
+        try:
+            i18n.save_language(target)
+        except OSError:
+            pass
         self.sessions.clear(columns=True)
         self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
         self.refresh_rows()

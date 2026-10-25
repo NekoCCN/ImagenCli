@@ -93,6 +93,11 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command == "language":
+            if "language" in args:
+                saved = i18n.save_language(str(args["language"]))
+                return "succeeded", {"language": saved, "saved": True}
+            return "succeeded", {"language": i18n.language(), "saved": False}
         if command in {"worker start", "worker status", "worker recover"}:
             from imagen_cli.cli.commands import worker
 

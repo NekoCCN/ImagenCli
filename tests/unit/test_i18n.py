@@ -75,3 +75,32 @@ def test_language_flags_conflict():
         i18n.take_argument(["--zh", "--en"])
     with pytest.raises(ValueError):
         i18n.take_argument(["--zh", "--lang", "en"])
+
+
+def test_saved_language_is_used_without_env_or_flag(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    i18n.save_language("zh-CN")
+    i18n.reset_language()
+    assert i18n.language() == "zh-CN"
+
+
+def test_environment_overrides_saved_language(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    i18n.save_language("zh-CN")
+    monkeypatch.setenv("IMAGEN_LANG", "en")
+    i18n.reset_language()
+    assert i18n.language() == "en"
+
+
+def test_invalid_saved_language_is_ignored(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    config = i18n.config_path()
+    config.parent.mkdir(parents=True)
+    config.write_text('{"language": "fr"}', encoding="utf-8")
+    i18n.reset_language()
+    assert i18n.language() == "en"
+
+
+def test_save_language_rejects_unknown():
+    with pytest.raises(ValueError):
+        i18n.save_language("fr")

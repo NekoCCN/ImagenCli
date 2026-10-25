@@ -93,6 +93,7 @@ COMMANDS = {
                 ("superres models", "列出超分模型、许可、下载与安装状态"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
+                ("language", "查看或设置默认界面语言"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
         ),
@@ -172,6 +173,7 @@ _SUMMARY_EN = {
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
+    "language": "Show or set the default interface language",
     "tui": "Open the terminal workspace; browse read-only and delete with confirmation",
 }
 for _name, _summary_en in _SUMMARY_EN.items():
@@ -246,6 +248,8 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {"command": {"enum": list(COMMANDS)}}
         if name == "help":
             properties["agent"] = {"type": "boolean", "default": False}
+    elif name == "language":
+        properties = {"language": {"enum": ["en", "zh", "zh-CN"]}}
     elif name.startswith("models "):
         properties = {"profile": text}
         required = ("profile",)
@@ -406,6 +410,11 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if not command.available:
         # Only the actual unsupported result is advertised, not hypothetical business output.
         return _object({})
+    if command.name == "language":
+        return _object(
+            {"language": {"type": "string"}, "saved": {"type": "boolean"}},
+            ("language", "saved"),
+        )
     if command.name == "profile secret":
         return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name == "transform":

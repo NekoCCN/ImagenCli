@@ -233,6 +233,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     if set(controls) - common - extra_controls:
         raise ValueError("unexpected option")
     schema = discover(command)["input_schema"]
+    if command == "language":
+        if len(words) > 1 or parameters:
+            raise ValueError("unexpected arguments")
+        if words:
+            parameters["language"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
     if command.startswith("profile "):
         if command == "profile list":
             if words or parameters:
