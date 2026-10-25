@@ -14,9 +14,10 @@ class Parameter:
     default: Any
     min_value: float | int | None = None
     max_value: float | int | None = None
-    choices: list[str] | None = None
+    choices: list[str | int] | None = None
     description: str = ""
     is_advanced: bool = False
+    required: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,20 +46,35 @@ class OperatorItem:
         params = dict(self.default_params)
         if overrides:
             params.update(overrides)
+        for parameter in self.parameters:
+            if parameter.required:
+                value = params.get(parameter.name)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    raise ValueError(f"{parameter.name} is required")
         return [{"op": self.default_op, "params": params}]
 
 
 CATEGORIES: dict[str, str] = {
-    "preset": "精选管线预设 (Presets)",
-    "anti_ai": "去AI感 (Generative Artifact Suppression)",
-    "acg": "二次元动漫 (Non-Photorealistic Rendering & Anime Optics)",
-    "photo": "色彩光影 (Color Space Transformation & Tone Mapping)",
-    "art": "风格滤波 (Spatial & Frequency Domain Filtering)",
-    "superres": "超分辨率 (Deep Super-Resolution)",
+    "preset": "处理配方",
+    "anti_ai": "平滑与缺陷",
+    "acg": "线条与色块",
+    "photo": "颜色明暗",
+    "art": "风格光学",
+    "superres": "模型恢复",
+    "geometry": "尺寸几何",
 }
 
 # Rich presets mapping
 PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
+    "像素化": [{"op": "pixelate", "params": {"scale": 4}}],
+    "调色板": [{"op": "quantize", "params": {"colors": 16, "dither": True}}],
+    "线稿": [
+        {"op": "grayscale"}, {"op": "autocontrast"},
+        {"op": "highpass", "params": {"radius": 2, "boost": 2}},
+    ],
+    "抖动": [{"op": "dither", "params": {"mode": "atkinson"}}],
+    "锐化": [{"op": "sharpen", "params": {"radius": 2, "percent": 160}}],
+    "赛璐璐": [{"op": "cel_shade", "params": {"levels": 3}}],
     "去AI塑料感 (Anti-AI Organic)": [
         {
             "op": "surface_blur",
@@ -198,6 +214,7 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+
 PRESETS = PRESET_PIPELINES
 
 OPERATORS: list[OperatorItem] = [
@@ -286,7 +303,7 @@ OPERATORS: list[OperatorItem] = [
         name="胶片色调与高光压制 (Filmic Tone)",
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
-        description="基于分段三次 Hermite 曲线的动态范围压缩与色阶映射算子。",
+        description="使用幂函数 LUT 调整黑白端点，并调节饱和度与冷暖色偏。",
         default_op="filmic_tone",
         default_params={"lift_black": 6, "compress_white": 245, "saturation": 0.95, "warmth": 0.0},
         parameters=[
@@ -392,13 +409,10 @@ OPERATORS: list[OperatorItem] = [
     ),
     OperatorItem(
         key="subsurface_scattering",
-        name="次表面散射 (Subsurface Scatter)",
+        name="肤色区域柔化 (Skin Softening)",
         category="anti_ai",
         category_label=CATEGORIES["anti_ai"],
-        description=(
-                "本算子基于波长依赖性光子扩散模型与非线性肤色色度掩模，"
-                "消除生成模型表面的均一塑料反光质感。"
-            ),
+        description="分别模糊 RGB 通道并混合原图，可用肤色掩模限制作用区域。",
         default_op="subsurface_scattering",
         default_params={"radius": 5, "scatter_strength": 0.35, "skin_only": True},
         parameters=[
@@ -409,7 +423,7 @@ OPERATORS: list[OperatorItem] = [
                 5,
                 min_value=1,
                 max_value=30,
-                description="红色长波长通道高斯漫射核像素半径",
+                description="红通道高斯模糊半径，绿蓝通道使用较小半径",
             ),
             Parameter(
                 "scatter_strength",
@@ -418,7 +432,7 @@ OPERATORS: list[OperatorItem] = [
                 0.35,
                 min_value=0.0,
                 max_value=1.0,
-                description="真皮层红润光子漫射线性混合强度",
+                description="RGB 柔化结果与原图的混合比例",
             ),
             Parameter(
                 "skin_only",
@@ -637,7 +651,7 @@ OPERATORS: list[OperatorItem] = [
         name="镜头暗角 (Vignette)",
         category="photo",
         category_label=CATEGORIES["photo"],
-        description="基于欧氏距离平滑衰减函数的镜头渐晕遮角算子。",
+        description="按径向距离生成渐变掩模，压暗图像边缘。",
         default_op="vignette",
         default_params={"radius": 0.75, "feather": 0.5, "darkness": 0.5},
         parameters=[
@@ -657,7 +671,7 @@ OPERATORS: list[OperatorItem] = [
                 0.5,
                 min_value=0.1,
                 max_value=1.0,
-                description="余弦平滑过渡过渡带宽度",
+                description="径向掩模过渡带宽度",
             ),
             Parameter(
                 "darkness",
@@ -675,7 +689,7 @@ OPERATORS: list[OperatorItem] = [
         name="色温与色调 (White Balance)",
         category="photo",
         category_label=CATEGORIES["photo"],
-        description="基于普朗克黑体轨迹与正交色度平移的双轴白平衡校正算子。",
+        description="使用 RGB 通道 LUT 调节冷暖与绿品红色偏，不估计光源色温。",
         default_op="color_temperature",
         default_params={"temperature": 0.0, "tint": 0.0},
         parameters=[
@@ -856,7 +870,7 @@ OPERATORS: list[OperatorItem] = [
         name="桑原动漫平涂滤波 (Kuwahara Filter)",
         category="acg",
         category_label=CATEGORIES["acg"],
-        description="基于四象限局部方差最小化判决的各向异性边缘保持平滑算子。",
+        description="比较四象限局部方差，选取较均匀区域的均值以平滑色块。",
         default_op="kuwahara",
         default_params={"size": 5},
         parameters=[
@@ -1183,7 +1197,7 @@ OPERATORS: list[OperatorItem] = [
         name="动漫线条增强 (Line Inking)",
         category="acg",
         category_label=CATEGORIES["acg"],
-        description="基于流向差分高斯与形态学定向闭合的二次元线稿边缘强化与连贯描墨算子。",
+        description="使用各向同性 DoG 与方形形态学闭运算提取暗线，再乘法压暗原图。",
         default_op="anime_line_enhance",
         default_params={
             "strength": 1.0,
@@ -1262,12 +1276,492 @@ OPERATORS: list[OperatorItem] = [
                 1,
                 min_value=0,
                 max_value=5,
-                description="形态学闭运算半径，用于缝合AI断线微隙",
+                description="方形闭运算半径，可能连接邻近线条",
                 is_advanced=True,
             ),
         ],
     ),
 ]
+
+OPERATORS.extend(
+    [
+        OperatorItem(
+            key="guided_smooth",
+            name="引导保边平滑",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="使用局部线性引导模型平滑编码 sRGB 色彩，再与原图混合；细线也可能减弱。",
+            default_op="guided_smooth",
+            default_params={
+                "radius": 4,
+                "epsilon": 0.001,
+                "strength": 0.5,
+                "guidance": "luma",
+                "border": "reflect",
+            },
+            parameters=[
+                Parameter("radius", "邻域半径（输入像素）", "int", 4, 1, 128),
+                Parameter(
+                    "epsilon",
+                    "引导方差正则项",
+                    "float",
+                    0.001,
+                    1e-6,
+                    1,
+                    description="归一化引导值的平方单位",
+                ),
+                Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+                Parameter(
+                    "guidance",
+                    "引导通道",
+                    "choice",
+                    "luma",
+                    choices=["luma", "rgb"],
+                    is_advanced=True,
+                ),
+                Parameter(
+                    "border", "边界策略", "choice", "reflect", choices=["reflect"], is_advanced=True
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="rolling_guidance",
+            name="迭代引导纹理平滑",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="初始尺度平滑后迭代联合双边引导，减少细碎纹理；可能抹去小结构。",
+            default_op="rolling_guidance",
+            default_params={
+                "sigma_space": 3,
+                "sigma_range": 0.1,
+                "iterations": 4,
+                "strength": 0.5,
+                "inner": "joint_bilateral",
+                "border": "reflect",
+            },
+            parameters=[
+                Parameter("sigma_space", "空间尺度（输入像素）", "float", 3, 0.5, 32),
+                Parameter(
+                    "sigma_range",
+                    "范围尺度",
+                    "float",
+                    0.1,
+                    0.001,
+                    1,
+                    description="归一化编码 sRGB 强度单位",
+                ),
+                Parameter("iterations", "迭代次数", "int", 4, 1, 10),
+                Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+                Parameter(
+                    "inner",
+                    "内部滤波",
+                    "choice",
+                    "joint_bilateral",
+                    choices=["joint_bilateral"],
+                    is_advanced=True,
+                ),
+                Parameter(
+                    "border", "边界策略", "choice", "reflect", choices=["reflect"], is_advanced=True
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="flow_line",
+            name="沿轮廓方向提取线条",
+            category="acg",
+            category_label=CATEGORIES["acg"],
+            description="构建 ETF 切线场并执行法向 DoG 与切向积分，输出线条或回混原图。",
+            default_op="flow_line",
+            default_params={
+                "derivative_sigma": 1,
+                "etf_radius": 3,
+                "etf_iterations": 3,
+                "sigma_normal": 1,
+                "gaussian_ratio": 1.6,
+                "sigma_tangent": 3,
+                "tau": 0.99,
+                "threshold": 0,
+                "strength": 0.3,
+                "output": "overlay",
+                "border": "reflect",
+            },
+            parameters=[
+                Parameter("strength", "混合强度", "float", 0.3, 0, 1),
+                Parameter("output", "输出方式", "choice", "overlay", choices=["overlay", "lines"]),
+                Parameter(
+                    "derivative_sigma", "梯度尺度（像素）", "float", 1, 0.3, 4, is_advanced=True
+                ),
+                Parameter("etf_radius", "方向邻域（像素）", "int", 3, 1, 8, is_advanced=True),
+                Parameter("etf_iterations", "方向迭代次数", "int", 3, 0, 8, is_advanced=True),
+                Parameter("sigma_normal", "法向尺度（像素）", "float", 1, 0.3, 4, is_advanced=True),
+                Parameter("gaussian_ratio", "高斯核宽比", "float", 1.6, 1.01, 3, is_advanced=True),
+                Parameter(
+                    "sigma_tangent", "切向尺度（像素）", "float", 3, 0.5, 12, is_advanced=True
+                ),
+                Parameter("tau", "差分权重", "float", 0.99, 0.8, 1.1, is_advanced=True),
+                Parameter("threshold", "线条阈值", "float", 0, -1, 1, is_advanced=True),
+                Parameter(
+                    "border", "边界策略", "choice", "reflect", choices=["reflect"], is_advanced=True
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="kuwahara_anisotropic",
+            name="方向性色块平滑",
+            category="acg",
+            category_label=CATEGORIES["acg"],
+            description="用结构张量确定方向，对方向性扇区统计加权以平滑色块；可能改变细节形状。",
+            default_op="kuwahara_anisotropic",
+            default_params={"radius": 3, "sectors": 8, "strength": 1.0},
+            parameters=[
+                Parameter("radius", "邻域半径（输入像素）", "int", 3, 1, 16),
+                Parameter("strength", "混合强度", "float", 1.0, 0, 1),
+                Parameter(
+                    "sectors", "扇区数量", "choice", 8, choices=[4, 8, 12, 16], is_advanced=True
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="bounded_sharpen",
+            name="限制过冲的亮度锐化",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="增强亮度代理残差并限制局部过冲，可跳过低幅残差；可能削弱真实高光。",
+            default_op="bounded_sharpen",
+            default_params={"amount": 1.0, "radius": 1.0, "noise_gate": 0.01, "overshoot": 0.0},
+            parameters=[
+                Parameter("amount", "锐化增益", "float", 1.0, 0, 4),
+                Parameter("radius", "半径（输入像素）", "float", 1.0, 0.3, 32),
+                Parameter(
+                    "noise_gate",
+                    "残差门限",
+                    "float",
+                    0.01,
+                    0,
+                    1,
+                    description="归一化编码 sRGB 亮度代理单位",
+                ),
+                Parameter(
+                    "overshoot",
+                    "允许过冲",
+                    "float",
+                    0.0,
+                    0,
+                    1,
+                    description="归一化编码 sRGB 亮度代理单位",
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="multiscale_detail",
+            name="按尺度调整细节",
+            category="photo",
+            category_label=CATEGORIES["photo"],
+            description="调整细、中、粗尺度亮度残差增益；1 为不变，增强也可能放大噪声。",
+            default_op="multiscale_detail",
+            default_params={"fine": 1.0, "medium": 1.0, "coarse": 1.0, "radius": 1.0},
+            parameters=[
+                Parameter("fine", "细尺度增益", "float", 1.0, 0, 4),
+                Parameter("medium", "中尺度增益", "float", 1.0, 0, 4),
+                Parameter("coarse", "粗尺度增益", "float", 1.0, 0, 4),
+                Parameter("radius", "基础半径（输入像素）", "float", 1.0, 0.3, 32),
+            ],
+        ),
+        OperatorItem(
+            key="linear_resize",
+            name="线性光透明边缘缩放",
+            category="geometry",
+            category_label=CATEGORIES["geometry"],
+            description="在线性 sRGB 中预乘 Alpha 后缩放。倍率与尺寸互斥，目录默认倍率为 1。",
+            default_op="linear_resize",
+            default_params={"scale": 1.0, "filter": "lanczos"},
+            parameters=[
+                Parameter(
+                    "scale", "缩放倍率", "float", 1.0, description="正有限数；指定尺寸时须移除倍率"
+                ),
+                Parameter(
+                    "filter",
+                    "重采样滤波",
+                    "choice",
+                    "lanczos",
+                    choices=["nearest", "box", "bilinear", "bicubic", "lanczos"],
+                ),
+            ],
+        ),
+    ]
+)
+
+OPERATORS.extend(
+    [
+        OperatorItem(
+            key="l0_smooth",
+            name="L0 梯度平滑",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="以半二次分裂减少非零梯度，使用 FFT 周期边界；可能合并细线与纹理。",
+            default_op="l0_smooth",
+            default_params={"smoothing": 0.02, "beta_growth": 2, "strength": 1},
+            parameters=[
+                Parameter(
+                    "smoothing",
+                    "平滑系数",
+                    "float",
+                    0.02,
+                    max_value=1,
+                    description="大于 0，不超过 1",
+                ),
+                Parameter("beta_growth", "惩罚增长倍率", "float", 2, 1.1, 4, is_advanced=True),
+                Parameter("strength", "混合强度", "float", 1, 0, 1),
+            ],
+        ),
+        OperatorItem(
+            key="domain_transform",
+            name="变换域递归平滑",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="按固定原图色差构建变换域，执行全图双向递归扫描；可能削弱小结构。",
+            default_op="domain_transform",
+            default_params={"sigma_space": 8, "sigma_range": 0.15, "iterations": 3, "strength": 1},
+            parameters=[
+                Parameter(
+                    "sigma_space",
+                    "空间尺度（输入像素）",
+                    "float",
+                    8,
+                    max_value=256,
+                    description="大于 0，不超过 256",
+                ),
+                Parameter(
+                    "sigma_range",
+                    "色差尺度",
+                    "float",
+                    0.15,
+                    max_value=1,
+                    description="归一化编码 RGB 单位；大于 0，不超过 1",
+                ),
+                Parameter("iterations", "扫描轮数", "int", 3, 1, 8),
+                Parameter("strength", "混合强度", "float", 1, 0, 1),
+            ],
+        ),
+        OperatorItem(
+            key="wls_smooth",
+            name="加权最小二乘平滑",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="用对数亮度代理梯度加权，求解 RGB 最小二乘平滑；未收敛时报错。",
+            default_op="wls_smooth",
+            default_params={"smoothing": 0.1, "alpha": 1.2, "strength": 1},
+            parameters=[
+                Parameter(
+                    "smoothing",
+                    "平滑系数",
+                    "float",
+                    0.1,
+                    max_value=10,
+                    description="大于 0，不超过 10",
+                ),
+                Parameter("alpha", "梯度权重指数", "float", 1.2, 0.1, 2),
+                Parameter("strength", "混合强度", "float", 1, 0, 1),
+            ],
+        ),
+        OperatorItem(
+            key="rtv_smooth",
+            name="相对全变分启发式平滑（近似）",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="以 box 窗口变化权重执行 IRLS 近似平滑，不等同原论文完整 RTV 求解。",
+            default_op="rtv_smooth",
+            default_params={"smoothing": 0.01, "iterations": 4, "strength": 1},
+            parameters=[
+                Parameter(
+                    "smoothing",
+                    "平滑系数",
+                    "float",
+                    0.01,
+                    max_value=1,
+                    description="大于 0，不超过 1",
+                ),
+                Parameter("iterations", "IRLS 轮数", "int", 4, 1, 10),
+                Parameter("strength", "混合强度", "float", 1, 0, 1),
+            ],
+        ),
+        OperatorItem(
+            key="periodic_notch",
+            name="手动周期频率抑制",
+            category="anti_ai",
+            category_label=CATEGORIES["anti_ai"],
+            description="手动指定周期频率并施加共轭 Gaussian 陷波，非自动检测；也会移除有意图案。",
+            default_op="periodic_notch",
+            default_params={"frequencies": "", "width": 0.01, "strength": 1.0},
+            parameters=[
+                Parameter(
+                    "frequencies",
+                    "频率坐标",
+                    "str",
+                    "",
+                    description="fx,fy;fx,fy，cycles/pixel，各轴 [-0.5,0.5]，排除 0,0；空值不处理",
+                ),
+                Parameter("width", "频带宽度（cycles/pixel）", "float", 0.01, 0.0001, 0.25),
+                Parameter("strength", "抑制强度", "float", 1.0, 0, 1),
+            ],
+        ),
+        OperatorItem(
+            key="chroma_transfer",
+            name="参考图色度统计迁移",
+            category="photo",
+            category_label=CATEGORIES["photo"],
+            description="在线性 RGB 对立色通道中迁移参考图统计；保留相对亮度非 Lab 感知明度。",
+            default_op="chroma_transfer",
+            default_params={"strength": 1.0, "luminance": "preserve"},
+            parameters=[
+                Parameter(
+                    "reference",
+                    "参考图片路径（必填）",
+                    "str",
+                    None,
+                    description="必须提供可读取的参考图片路径",
+                    required=True,
+                ),
+                Parameter("strength", "迁移强度", "float", 1.0, 0, 1),
+                Parameter(
+                    "luminance", "相对亮度处理", "choice", "preserve", choices=["preserve", "match"]
+                ),
+            ],
+        ),
+        OperatorItem(
+            key="illumination_correct",
+            name="平滑照明近似校正",
+            category="photo",
+            category_label=CATEGORIES["photo"],
+            description="用 Gaussian 照明估计做线性 sRGB 除法校正，非 LIME；可能放大噪声。",
+            default_op="illumination_correct",
+            default_params={"radius": 16.0, "strength": 0.5, "floor": 0.05},
+            parameters=[
+                Parameter("radius", "照明平滑半径（像素）", "float", 16.0, 0.3, 128),
+                Parameter("strength", "校正强度", "float", 0.5, 0, 1),
+                Parameter(
+                    "floor", "照明下限", "float", 0.05, 0.001, 1, description="线性 sRGB 归一化值"
+                ),
+            ],
+        ),
+    ]
+)
+
+OPERATORS.append(OperatorItem(
+    key="weighted_median", name="按颜色相似度计算加权中值",
+    category="anti_ai", category_label=CATEGORIES["anti_ai"],
+    description="以 RGB 相似度和覆盖率加权逐通道中值，减少脉冲和局部杂点；可能移除细线。",
+    default_op="weighted_median",
+    default_params={"radius": 2, "sigma_range": 0.15, "strength": 1.0},
+    parameters=[
+        Parameter("radius", "邻域半径（像素）", "int", 2, 1, 8),
+        Parameter("sigma_range", "RGB 范围尺度", "float", 0.15, 0.001, 1),
+        Parameter("strength", "混合强度", "float", 1.0, 0, 1),
+    ],
+))
+
+OPERATORS.append(OperatorItem(
+    key="fast_guided_smooth", name="降采样估计引导平滑系数",
+    category="anti_ai", category_label=CATEGORIES["anti_ai"],
+    description="在低分辨率估计线性系数，再由原尺寸亮度引导重建；可能遗漏细小结构。",
+    default_op="fast_guided_smooth",
+    default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5, "subsample": 4},
+    parameters=[
+        Parameter("radius", "输入像素半径", "int", 4, 1, 128),
+        Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
+        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+        Parameter("subsample", "系数降采样倍率", "int", 4, 1, 8),
+    ],
+))
+
+OPERATORS.append(OperatorItem(
+    key="periodic_notch_auto", name="检测窄带周期峰并抑制",
+    category="anti_ai", category_label=CATEGORIES["anti_ai"],
+    description="对去趋势加窗频谱检测窄峰并施加共轭陷波；无法区分有意网点与噪声。",
+    default_op="periodic_notch_auto",
+    default_params={"threshold": 8, "min_frequency": 0.06, "max_pairs": 3,
+                    "width": 0.01, "strength": 0.5},
+    parameters=[
+        Parameter("threshold", "局部峰对比阈值", "float", 8, 2, 100),
+        Parameter("min_frequency", "最低径向频率", "float", 0.06, 0.01, 0.45),
+        Parameter("max_pairs", "最多频率对数", "int", 3, 1, 16),
+        Parameter("width", "频带宽度", "float", 0.01, 0.0001, 0.25),
+        Parameter("strength", "抑制强度", "float", 0.5, 0, 1),
+    ],
+))
+
+OPERATORS.append(OperatorItem(
+    key="wls_detail", name="按保边尺度调整亮度细节",
+    category="photo", category_label=CATEGORIES["photo"],
+    description="以固定引导 WLS 分解三个尺度的亮度残差；增强可能产生光晕，非 Local Laplacian。",
+    default_op="wls_detail",
+    default_params={"fine": 1, "medium": 1, "coarse": 1, "smoothing": 0.05,
+                    "scale_ratio": 4, "alpha": 1.2},
+    parameters=[
+        Parameter("fine", "细尺度增益", "float", 1, 0, 4),
+        Parameter("medium", "中尺度增益", "float", 1, 0, 4),
+        Parameter("coarse", "粗尺度增益", "float", 1, 0, 4),
+        Parameter("smoothing", "起始平滑权重", "float", 0.05, 0.0001, 1),
+        Parameter("scale_ratio", "层间权重倍率", "float", 4, 1.1, 8),
+        Parameter("alpha", "边缘权重指数", "float", 1.2, 0.1, 2),
+    ],
+))
+
+OPERATORS.append(OperatorItem(
+    key="weighted_guided_smooth", name="按局部方差调节引导平滑",
+    category="anti_ai", category_label=CATEGORIES["anti_ai"],
+    description="按三像素窗口方差自适应正则强度，平滑色块并减少跨边混合；仍可能损失细纹。",
+    default_op="weighted_guided_smooth",
+    default_params={"radius": 4, "epsilon": 0.001, "strength": 0.5},
+    parameters=[
+        Parameter("radius", "输入像素半径", "int", 4, 1, 128),
+        Parameter("epsilon", "归一化引导值平方正则项", "float", 0.001, 0.000001, 1),
+        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+    ],
+))
+
+OPERATORS.append(OperatorItem(
+    key="local_laplacian_sampled", name="采样局部拉普拉斯细节重映射",
+    category="photo", category_label=CATEGORIES["photo"],
+    description="在多个参考亮度上重映射并插值金字塔系数；采样近似可能产生光晕或色域裁切。",
+    default_op="local_laplacian_sampled",
+    default_params={"sigma": 0.2, "detail": 2, "samples": 8, "levels": 5, "strength": 0.5},
+    parameters=[
+        Parameter("sigma", "细节幅值阈值", "float", 0.2, 0.01, 1),
+        Parameter("detail", "细节幂指数（大于 1 平滑）", "float", 2, 0.25, 4),
+        Parameter("samples", "参考亮度采样数", "int", 8, 4, 32),
+        Parameter("levels", "最多处理层数", "int", 5, 1, 8),
+        Parameter("strength", "混合强度", "float", 0.5, 0, 1),
+    ],
+))
+
+# New recipes share the displayed defaults; historical recipes above stay unchanged.
+_NEW_OPERATORS = (
+    "local_laplacian_sampled",
+    "weighted_guided_smooth",
+    "wls_detail",
+    "periodic_notch_auto",
+    "fast_guided_smooth",
+    "weighted_median",
+    "guided_smooth",
+    "rolling_guidance",
+    "flow_line",
+    "kuwahara_anisotropic",
+    "bounded_sharpen",
+    "multiscale_detail",
+    "linear_resize",
+    "l0_smooth",
+    "domain_transform",
+    "wls_smooth",
+    "rtv_smooth",
+    "periodic_notch",
+    "chroma_transfer",
+    "illumination_correct",
+)
+for _op in _NEW_OPERATORS:
+    _item = next(item for item in OPERATORS if item.default_op == _op)
+    if not any(parameter.required for parameter in _item.parameters):
+        PRESET_PIPELINES[_op] = _item.build_pipeline()
 
 OPERATORS_BY_OP: dict[str, OperatorItem] = {item.default_op: item for item in OPERATORS}
 
@@ -1281,64 +1775,125 @@ def get_operator_item(op: str) -> OperatorItem | None:
 # -------------------------------------------------------------------------
 
 INTROS: dict[str, dict[str, str]] = {
-    # --- 基础与风格化滤波 ---
+    "local_laplacian_sampled": {
+        "title": "采样局部拉普拉斯细节重映射",
+        "principle": "按 Local Laplacian Filters（2011）式 1 的幂函数重映射细节，"
+                     "大幅边缘保持单位斜率；均匀采样参考亮度，对重映射金字塔系数线性插值。"
+                     "Gaussian sigma=1 降采样与双线性展开，不是原逐系数精确算法或作者加速实现。",
+        "scenarios": "适用于跨尺度压低或增强小幅细节；编码亮度加性回混、隐藏 RGB 均值延拓，"
+                     "最终裁切 RGB，不能承诺无光晕或保色相。",
+    },
+    "weighted_guided_smooth": {
+        "title": "按局部方差调节引导平滑",
+        "principle": "按 Weighted Guided Image Filtering（2015）式 5–10，以 3×3 方差和"
+                     "全图逆方差均值计算边缘权重，正则项为 epsilon/weight。"
+                     "本项目以亮度引导 RGB，覆盖率加权、reflect 边界、sigma=1 Gaussian 权重平滑。",
+        "scenarios": "适用于平滑色块与边界保护对照；不是加权中值，不能保证消除所有光晕。",
+    },
+    "wls_detail": {
+        "title": "按保边尺度调整亮度细节",
+        "principle": "使用原图 log-luma 固定权重进行三个不同正则强度的 WLS 求解，"
+                     "调整相邻层残差后重建。CG 容差 1e-6、最多 500 次，不收敛拒绝输出。",
+        "scenarios": "适用于分尺度控制明暗细节；增益全 1 精确旁路，强增益仍可能损伤细线。",
+    },
+    "periodic_notch_auto": {
+        "title": "检测窄带周期峰并抑制",
+        "principle": "拟合亮度平面去趋势，Hann 加窗后按局部环带背景寻找共轭窄峰；"
+                     "无峰则不处理，检测频率写入执行记录。不是语义识别或论文同名算法。",
+        "scenarios": "适用于检查已知周期污染；漫画网点、织物、建筑栅格也可能被删除，须对照原图。",
+    },
+    "fast_guided_smooth": {
+        "title": "降采样估计引导平滑系数",
+        "principle": "按 Fast Guided Filter（2015）Algorithm 2 在低分辨率计算系数，"
+                     "双线性上采样后应用于原尺寸引导。半径除以倍率取整且至少为 1，"
+                     "覆盖率加权为本项目变体；倍率 1 直接调用完整引导滤波。",
+        "scenarios": "适用于大尺度平滑的速度对照；不保证与完整滤波相同，不自动替换旧配方。",
+    },
+    "weighted_median": {
+        "title": "按颜色相似度计算加权中值",
+        "principle": "按 CVPR 2014 WMF 论文式 2 累计排序权重达到一半后取值；"
+                     "本实现为 RGB Gaussian 权重的逐行排序参考变体，不含论文加速结构。",
+        "scenarios": "适用于局部杂点与脉冲；窄范围会保留强离群点，逐通道取值也可能改变颜色组合。",
+    },
+    "rtv_smooth": {
+        "title": "相对全变分启发式平滑",
+        "summary": "以 box 窗口变化权重执行 IRLS 近似平滑。",
+        "principle": "这是工程近似，不等同原论文完整 RTV 求解。",
+        "scenarios": "适用于减少纹理；迭代不足或参数较强时可能损失边缘。",
+    },
+    "periodic_notch": {
+        "title": "手动周期频率抑制",
+        "summary": "手动指定周期频率并施加共轭 Gaussian 陷波，非自动检测。",
+        "principle": "按 cycles/pixel 坐标构造频域共轭陷波，保留 DC。",
+        "scenarios": "适用于已知周期伪影；也会移除所选频率上的有意图案。",
+    },
+    "illumination_correct": {
+        "title": "平滑照明近似校正",
+        "summary": "用 Gaussian 最大通道照明估计做线性 sRGB 除法校正，非 LIME。",
+        "principle": "以覆盖率加权平滑照明并归一化，再按强度混合校正结果。",
+        "scenarios": "适用于缓慢照明不均；可能抹平材质明暗并放大噪声。",
+    },
+    "l0_smooth": {
+        "title": "L0 梯度平滑",
+        "summary": "以半二次分裂减少非零梯度，使用 FFT 周期边界。",
+        "principle": "在频域求解周期边界下的梯度稀疏化迭代。",
+        "scenarios": "适用于减少细碎纹理；可能合并细线与纹理。",
+    },
+    "domain_transform": {
+        "title": "变换域递归平滑",
+        "summary": "按固定原图色差构建变换域，执行全图双向递归扫描。",
+        "principle": "按空间与范围尺度控制变换域递归权重。",
+        "scenarios": "适用于保边平滑；可能削弱小结构。",
+    },
+    "wls_smooth": {
+        "title": "加权最小二乘平滑",
+        "summary": "用对数亮度代理梯度加权，求解 RGB 最小二乘平滑。",
+        "principle": "构造边缘权重并用共轭梯度求解；未收敛时报错。",
+        "scenarios": "适用于分离缓慢结构与细节；大图求解可能耗时。",
+    },
+    "chroma_transfer": {
+        "title": "参考图色度统计迁移",
+        "summary": "在线性 RGB 对立色通道中迁移参考图统计，参考图路径必填。",
+        "principle": "按 Alpha 加权均值和标准差匹配色度统计，可保留相对亮度。",
+        "scenarios": "适用于参考图配色迁移；相对亮度不是 Lab 感知明度。",
+    },
     "像素化": {
         "title": "像素化 (Pixelate)",
-        "summary": (
-            "本算子通过邻域块均值采样与重构，将连续图像离散化为规则的像素"
-            "网格点阵。"
-        ),
+        "summary": ("本算子通过邻域块均值采样与重构，将连续图像离散化为规则的像素网格点阵。"),
         "principle": "基于最近邻下采样与块级像素重构算法，实现空间分辨率的阶跃式离散化。",
         "scenarios": "适用于复古像素风格艺术创作与局部敏感信息脱敏处理流程。",
     },
     "调色板": {
         "title": "调色板减色 (Color Palette)",
-        "summary": (
-            "本算子通过中值切分聚类提取代表性色彩空间，并利用误差扩散完成"
-            "低位深着色。"
-        ),
+        "summary": ("本算子通过中值切分聚类提取代表性色彩空间，并利用误差扩散完成低位深着色。"),
         "principle": "基于中值切分色彩量化算法与 Floyd-Steinberg 空间邻域误差扩散卷积。",
         "scenarios": "适用于有限调色板限制的插画设计与复古显示介质效果模拟。",
     },
     "线稿": {
         "title": "手绘线稿提取 (Lineart)",
-        "summary": (
-            "本算子通过高通滤波与动态阈值反转，提取图像的高频轮廓结构并生"
-            "成黑白线稿。"
-        ),
-        "principle": (
-            "基于高通空间卷积算子提取高频梯度，经由直方图自动色阶拉伸与二"
-            "值反色映射。"
-        ),
+        "summary": ("本算子通过高通滤波与动态阈值反转，提取图像的高频轮廓结构并生成黑白线稿。"),
+        "principle": ("基于高通空间卷积算子提取高频梯度，经由直方图自动色阶拉伸与二值反色映射。"),
         "scenarios": "适用于手绘线稿底图提取、结构线临摹与着色填色练习流程。",
     },
     "抖动": {
         "title": "有序抖动 (Ordered Dither)",
         "summary": "本算子通过预设误差矩阵离散化连续色阶，在有限色阶下重建视觉连续灰度。",
         "principle": (
-            "基于 Atkinson 与 Floyd-Steinberg 空间误差扩散转移矩阵，将量"
-            "化残差分配至邻域像元。"
+            "基于 Atkinson 与 Floyd-Steinberg 空间误差扩散转移矩阵，将量化残差分配至邻域像元。"
         ),
         "scenarios": "适用于单色点阵印刷模拟、赛博终端视觉重构与复古介质渲染。",
     },
     "锐化": {
         "title": "反虚光锐化 (Unsharp Mask)",
-        "summary": (
-            "本算子通过分离并强化微观高频边缘分量，提升图像整体视觉反差与"
-            "边缘聚焦度。"
-        ),
+        "summary": ("本算子通过分离并强化微观高频边缘分量，提升图像整体视觉反差与边缘聚焦度。"),
         "principle": (
-            "基于经典高斯差分反虚光掩模（Unsharp Masking）数学模型，按比"
-            "例叠加高频边缘残差。"
+            "基于经典高斯差分反虚光掩模（Unsharp Masking）数学模型，按比例叠加高频边缘残差。"
         ),
         "scenarios": "适用于补偿光学镜头软化、提高小尺寸图像的视觉微观辨识度。",
     },
     "赛璐璐": {
         "title": "赛璐璐分色 (Cel Shading)",
-        "summary": (
-            "本算子将连续光影照度离散化为分段阶梯分布，结合索贝尔算子生成"
-            "硬边赛璐璐风格。"
-        ),
+        "summary": ("本算子将连续光影照度离散化为分段阶梯分布，结合索贝尔算子生成硬边赛璐璐风格。"),
         "principle": "基于照度直方图区间阶梯量化与索贝尔空间一阶导数梯度轮廓提取。",
         "scenarios": "适用于写实影像向非真实感动漫插画的阶梯化风格转换。",
     },
@@ -1350,40 +1905,30 @@ INTROS: dict[str, dict[str, str]] = {
             "抑制生成模型的油腻塑料质感与微观杂色。"
         ),
         "principle": (
-            "基于色差引导高斯保边表面平滑消除浮动色斑，结合高光软肩滚降"
-            "与极高光微漫射恢复自然光影。"
+            "基于色差引导高斯保边表面平滑消除浮动色斑，结合高光软肩滚降与极高光微漫射恢复自然光影。"
         ),
-        "scenarios": (
-            "适用于消除扩散模型生成画面的蜡质油光与不自然高光，呈现干净通透质感。"
-        ),
+        "scenarios": ("适用于消除扩散模型生成画面的蜡质油光与不自然高光，呈现干净通透质感。"),
     },
     "抗AI生成伪影综合治理": {
         "title": "抗AI伪影综合 (Anti-AI Artifacts)",
         "summary": (
-            "本预设管线结合频域陷波滤波、反边缘振铃、表面去杂平滑与"
-            "胶片色阶，多维度消除生成伪影。"
+            "本预设管线结合频域陷波滤波、反边缘振铃、表面去杂平滑与胶片色阶，多维度消除生成伪影。"
         ),
         "principle": (
-            "复合 2D-FFT 频域陷波滤除转置卷积棋盘格，结合形态学反振铃"
-            "与表面保边平滑消除结构伪影。"
+            "复合 2D-FFT 频域陷波滤除转置卷积棋盘格，结合形态学反振铃与表面保边平滑消除结构伪影。"
         ),
-        "scenarios": (
-            "适用于高画质 AI 生成作品的全流程伪影净化，还原平滑纯净的画面层次。"
-        ),
+        "scenarios": ("适用于高画质 AI 生成作品的全流程伪影净化，还原平滑纯净的画面层次。"),
     },
     "二次元平涂去杂": {
         "title": "二次元平涂去杂 (Anime Cel Smoothing)",
         "summary": (
-            "本预设管线专为二次元插画平涂设计，消除AI在色块内部生成的"
-            "细碎杂色斑驳与暗部脏色。"
+            "本预设管线专为二次元插画平涂设计，消除AI在色块内部生成的细碎杂色斑驳与暗部脏色。"
         ),
         "principle": (
             "基于色差引导表面模糊平滑色块内部微小杂斑，结合暗部照度掩模"
             "衰减阴影杂乱饱和度以保全线条锐度。"
         ),
-        "scenarios": (
-            "适用于二次元动漫角色、日系赛璐珞立绘及平涂背景消除AI杂色噪点。"
-        ),
+        "scenarios": ("适用于二次元动漫角色、日系赛璐珞立绘及平涂背景消除AI杂色噪点。"),
     },
     "动漫色彩提纯": {
         "title": "动漫色彩提纯 (Anime Color Purity)",
@@ -1395,9 +1940,7 @@ INTROS: dict[str, dict[str, str]] = {
             "基于非线性照度掩模对阴影暗部实施选择性去饱和，并结合色差权重"
             "对明部主体进行自然饱和度微调增益。"
         ),
-        "scenarios": (
-            "适用于解决AI生图在阴影深处泛紫泛红等脏色问题，恢复二次元纯净冷暖对比。"
-        ),
+        "scenarios": ("适用于解决AI生图在阴影深处泛紫泛红等脏色问题，恢复二次元纯净冷暖对比。"),
     },
     "anti_checkerboard": {
         "title": "网格去混叠 (Anti-Checkerboard)",
@@ -1410,24 +1953,14 @@ INTROS: dict[str, dict[str, str]] = {
             "在频域对齐奈奎斯特轴向高频尖峰并平滑衰减。"
         ),
         "scenarios": (
-            "适用于消除扩散模型与 GAN 在反卷积上采样阶段引入的微观高频栅"
-            "格与周期性棋盘格伪影。"
+            "适用于消除扩散模型与 GAN 在反卷积上采样阶段引入的微观高频栅格与周期性棋盘格伪影。"
         ),
     },
     "subsurface_scattering": {
-        "title": "次表面散射 (Subsurface Scatter)",
-        "summary": (
-            "本算子通过波长依赖性光子扩散模型与非线性肤色色度掩模，消除生"
-            "成模型表面的均一塑料反光质感。"
-        ),
-        "principle": (
-            "基于 Jensen et al. (SIGGRAPH 2001) 次表面散射物理模型，"
-            "按红绿蓝波长差分扩散半径模拟半透明组织透光。"
-        ),
-        "scenarios": (
-            "适用于人像皮肤、有机材质与半透明物体渲染，消除蜡质死白并增强"
-            "生物组织的温润光泽。"
-        ),
+        "title": "肤色区域柔化 (Skin Softening)",
+        "summary": "分别模糊 RGB 通道并混合原图，可用肤色掩模限制作用区域。",
+        "principle": "采用不同通道半径的高斯模糊与肤色权重混合，属于图像柔化效果。",
+        "scenarios": "适用于人像或插画的局部柔化；可能抹去细节，肤色掩模也可能误选。",
     },
     "de_haloing": {
         "title": "去边缘白边光晕 (De-Haloing)",
@@ -1447,123 +1980,90 @@ INTROS: dict[str, dict[str, str]] = {
     "film_grain": {
         "title": "胶片微粒 (Film Grain)",
         "summary": (
-            "本算子通过照度加权的微观噪点合成，模拟传统感光胶片与数字传感"
-            "器在弱光下的光子散粒噪声。"
+            "本算子通过照度加权的微观噪点合成，模拟传统感光胶片与数字传感器在弱光下的光子散粒噪声。"
         ),
         "principle": (
-            "基于泊松-高斯（Poisson-Gaussian）噪声分布模型，依反照度非线"
-            "性加权高斯随机扰动。"
+            "基于泊松-高斯（Poisson-Gaussian）噪声分布模型，依反照度非线性加权高斯随机扰动。"
         ),
         "scenarios": "适用于打破 AI 图像中过于平滑均一的合成表面，建立微观物理纹理基底。",
     },
     "de_ai_bloom": {
         "title": "柔和漫射光晕 (Diffuse Bloom)",
         "summary": (
-            "本算子通过照度阈值分割与多尺度高斯漫射核，在保全暗部轮廓的同"
-            "时模拟镜头微光晕溢出。"
+            "本算子通过照度阈值分割与多尺度高斯漫射核，在保全暗部轮廓的同时模拟镜头微光晕溢出。"
         ),
-        "principle": (
-            "基于高光照度非线性加权截断提取，并应用暗部梯度掩模保全线稿边"
-            "缘的完整性。"
-        ),
-        "scenarios": (
-            "适用于软化刺眼生硬的 AI 高光边缘，营造大光比场景下的自然光学"
-            "漫射环境。"
-        ),
+        "principle": ("基于高光照度非线性加权截断提取，并应用暗部梯度掩模保全线稿边缘的完整性。"),
+        "scenarios": ("适用于软化刺眼生硬的 AI 高光边缘，营造大光比场景下的自然光学漫射环境。"),
     },
     "filmic_tone": {
-        "title": "胶片高光压制 (Filmic Tone)",
-        "summary": (
-            "本算子通过分段平滑 S 曲线抬升基底黑电平并平缓压缩高光，建立"
-            "胶片级动态范围滚降响应。"
-        ),
-        "principle": (
-            "基于三次 Hermite 多项式拟合胶片感光特性曲线（Hurter-Driffiel"
-            "d Curve），压制纯白过曝溢出。"
-        ),
-        "scenarios": "适用于修复高动态范围反差失衡、解决画面高光死白与暗部死黑问题。",
+        "title": "胶片色调 (Filmic Tone)",
+        "summary": "使用幂函数 LUT 调整黑白端点，并调节饱和度与冷暖色偏。",
+        "principle": "在编码 RGB 上应用查找表映射，不恢复已经截断的高光或暗部。",
+        "scenarios": "适用于复古调色；抬黑与压白会改变对比度和可用色阶。",
     },
     "chromatic_aberration": {
         "title": "镜头边缘色差 (Chromatic Aberration)",
         "summary": (
-            "本算子通过红蓝通道径向空间离散错位，模拟透镜材料折射率随光波"
-            "长变化引起的横向色散现象。"
+            "本算子通过红蓝通道径向空间离散错位，模拟透镜材料折射率随光波长变化引起的横向色散现象。"
         ),
         "principle": (
-            "基于光学透镜色散物理模型，以视口几何中心为极点对色通道执行双"
-            "线性径向重采样缩放。"
+            "基于光学透镜色散物理模型，以视口几何中心为极点对色通道执行双线性径向重采样缩放。"
         ),
         "scenarios": (
-            "适用于打破完美计算机成像的几何死板感，赋予画面真实广角光学镜"
-            "头的边缘成像物理特征。"
+            "适用于打破完美计算机成像的几何死板感，赋予画面真实广角光学镜头的边缘成像物理特征。"
         ),
     },
     # --- 电影级与色彩空间变换 ---
     "ACES电影级色调": {
         "title": "ACES电影色调 (ACES Filmic)",
         "summary": (
-            "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精"
-            "确映射至标准显示色彩空间。"
+            "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精确映射至标准显示色彩空间。"
         ),
         "principle": (
-            "基于 Krzysztof Narkowicz 与 Stephen Hill (SIGGRAPH 2015) 的 "
-            "ACES S曲线有理多项式拟合。"
+            "基于 Krzysztof Narkowicz 与 Stephen Hill (SIGGRAPH 2015) 的 ACES S曲线有理多项式拟合。"
         ),
         "scenarios": (
-            "适用于大光比场景、复杂逆光与发光体渲染，实现平滑的高光肩部滚"
-            "降与渐进暗部过渡。"
+            "适用于大光比场景、复杂逆光与发光体渲染，实现平滑的高光肩部滚降与渐进暗部过渡。"
         ),
     },
     "aces_tonemap": {
         "title": "ACES电影色调 (ACES Filmic)",
         "summary": (
-            "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精"
-            "确映射至标准显示色彩空间。"
+            "本算子采用影视工业标准学院色彩编码系统，将高动态场景辐射度精确映射至标准显示色彩空间。"
         ),
         "principle": (
-            "基于 Krzysztof Narkowicz 与 Stephen Hill (SIGGRAPH 2015) 的 "
-            "ACES S曲线有理多项式拟合。"
+            "基于 Krzysztof Narkowicz 与 Stephen Hill (SIGGRAPH 2015) 的 ACES S曲线有理多项式拟合。"
         ),
         "scenarios": (
-            "适用于大光比场景、复杂逆光与发光体渲染，实现平滑的高光肩部滚"
-            "降与渐进暗部过渡。"
+            "适用于大光比场景、复杂逆光与发光体渲染，实现平滑的高光肩部滚降与渐进暗部过渡。"
         ),
     },
     "引导滤波细节增强": {
         "title": "细节增强 (Guided Filter)",
         "summary": (
-            "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现"
-            "无振铃效应的细节增强。"
+            "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现无振铃效应的细节增强。"
         ),
         "principle": (
             "基于 He et al. (ECCV 2010 / IEEE TPAMI 2013) 局部线性平移不"
             "变模型，精准分离与强化微观高频纹理。"
         ),
-        "scenarios": (
-            "适用于发丝细节、皮肤微孔、衣物布料纹理的真实感恢复，消除过度"
-            "涂抹平滑感。"
-        ),
+        "scenarios": ("适用于发丝细节、皮肤微孔、衣物布料纹理的真实感恢复，消除过度涂抹平滑感。"),
     },
     "guided_filter": {
         "title": "细节增强 (Guided Filter)",
         "summary": (
-            "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现"
-            "无振铃效应的细节增强。"
+            "本算子利用引导图像的结构先验实施保边平滑与高频残差倍增，实现无振铃效应的细节增强。"
         ),
         "principle": (
             "基于 He et al. (ECCV 2010 / IEEE TPAMI 2013) 局部线性平移不"
             "变模型，精准分离与强化微观高频纹理。"
         ),
-        "scenarios": (
-            "适用于发丝细节、皮肤微孔、衣物布料纹理的真实感恢复，消除过度"
-            "涂抹平滑感。"
-        ),
+        "scenarios": ("适用于发丝细节、皮肤微孔、衣物布料纹理的真实感恢复，消除过度涂抹平滑感。"),
     },
     "桑原二次元平涂": {
         "title": "动漫平涂滤波 (Kuwahara Filter)",
         "summary": (
-            "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯"
-            "净的平面手绘插画质感。"
+            "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯净的平面手绘插画质感。"
         ),
         "principle": (
             "基于 Papari et al. (IEEE TIP 2007) 四象限局部方差最小化判决"
@@ -1574,8 +2074,7 @@ INTROS: dict[str, dict[str, str]] = {
     "kuwahara": {
         "title": "动漫平涂滤波 (Kuwahara Filter)",
         "summary": (
-            "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯"
-            "净的平面手绘插画质感。"
+            "本算子在保全主要结构轮廓锐利度的同时平滑色块内部细节，生成纯净的平面手绘插画质感。"
         ),
         "principle": (
             "基于 Papari et al. (IEEE TIP 2007) 四象限局部方差最小化判决"
@@ -1586,107 +2085,75 @@ INTROS: dict[str, dict[str, str]] = {
     "剧场版宽银幕眩光": {
         "title": "宽银幕眩光 (Anamorphic Flare)",
         "summary": (
-            "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽"
-            "银幕镜头的水平光斑条纹。"
+            "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽银幕镜头的水平光斑条纹。"
         ),
         "principle": (
-            "基于横向非对称长条高斯卷积核与阈值能量提取，沿水平轴向生成具"
-            "有特定波长着色的衍射光斑。"
+            "基于横向非对称长条高斯卷积核与阈值能量提取，沿水平轴向生成具有特定波长着色的衍射光斑。"
         ),
-        "scenarios": (
-            "适用于科幻场景、强逆光人像、夜景光源与舞台灯光下的电影宽银幕"
-            "视觉重构。"
-        ),
+        "scenarios": ("适用于科幻场景、强逆光人像、夜景光源与舞台灯光下的电影宽银幕视觉重构。"),
     },
     "anamorphic_flare": {
         "title": "宽银幕眩光 (Anamorphic Flare)",
         "summary": (
-            "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽"
-            "银幕镜头的水平光斑条纹。"
+            "本算子通过高光阈值提取与横向一维卷积核扩展，模拟好莱坞变形宽银幕镜头的水平光斑条纹。"
         ),
         "principle": (
-            "基于横向非对称长条高斯卷积核与阈值能量提取，沿水平轴向生成具"
-            "有特定波长着色的衍射光斑。"
+            "基于横向非对称长条高斯卷积核与阈值能量提取，沿水平轴向生成具有特定波长着色的衍射光斑。"
         ),
-        "scenarios": (
-            "适用于科幻场景、强逆光人像、夜景光源与舞台灯光下的电影宽银幕"
-            "视觉重构。"
-        ),
+        "scenarios": ("适用于科幻场景、强逆光人像、夜景光源与舞台灯光下的电影宽银幕视觉重构。"),
     },
     "日系晴空色彩迁移": {
         "title": "色彩风格迁移 (Color Transfer)",
         "summary": (
-            "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参"
-            "考图像色彩风格的全局迁移。"
+            "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参考图像色彩风格的全局迁移。"
         ),
         "principle": (
             "基于 Reinhard et al. (IEEE CG&A 2001) 算法，在 CIE-Lab 色彩"
             "空间执行一阶矩与二阶矩的线性映射转换。"
         ),
-        "scenarios": (
-            "适用于调整阴郁灰暗图像的整体色调，快速赋予其晴朗通透的明快色"
-            "调氛围。"
-        ),
+        "scenarios": ("适用于调整阴郁灰暗图像的整体色调，快速赋予其晴朗通透的明快色调氛围。"),
     },
     "color_transfer": {
         "title": "色彩风格迁移 (Color Transfer)",
         "summary": (
-            "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参"
-            "考图像色彩风格的全局迁移。"
+            "本算子通过在正交去相关色彩空间中对齐均值与方差统计量，实现参考图像色彩风格的全局迁移。"
         ),
         "principle": (
             "基于 Reinhard et al. (IEEE CG&A 2001) 算法，在 CIE-Lab 色彩"
             "空间执行一阶矩与二阶矩的线性映射转换。"
         ),
-        "scenarios": (
-            "适用于调整阴郁灰暗图像的整体色调，快速赋予其晴朗通透的明快色"
-            "调氛围。"
-        ),
+        "scenarios": ("适用于调整阴郁灰暗图像的整体色调，快速赋予其晴朗通透的明快色调氛围。"),
     },
     "日系通透空气感": {
-        "title": "通透空气感 (Airy Glow)",
-        "summary": (
-            "本预设管线复合微暖色温偏移、高光滤色漫射与四次余弦暗角，模拟"
-            "通透清澈的环境空气透视感。"
-        ),
-        "principle": (
-            "复合微调黑体辐射普朗克色温曲线、多尺度高斯漫射滤色混合以及光"
-            "学镜头边缘照度平缓衰减。"
-        ),
-        "scenarios": (
-            "适用于户外自然光照、日常插画与风景原画，提升图像的空气透视深"
-            "度与柔和感。"
-        ),
+        "title": "暖色柔光与暗角",
+        "summary": "依次调整 RGB 冷暖色偏、叠加高光柔光并压暗边缘。",
+        "principle": "组合通道 LUT、高光模糊混合与径向暗角掩模。",
+        "scenarios": "适用于插画和风景的氛围调色；可能降低局部对比度。",
     },
     "热血集中线": {
         "title": "漫画集中线 (Focus Rays)",
         "summary": (
-            "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣"
-            "中心的动态放射构图。"
+            "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣中心的动态放射构图。"
         ),
         "principle": (
-            "基于极坐标逆映射与离散角向随机游走算法，留出中心视场椭球保留"
-            "区并向外发散射线。"
+            "基于极坐标逆映射与离散角向随机游走算法，留出中心视场椭球保留区并向外发散射线。"
         ),
         "scenarios": "适用于强调动作瞬间、视觉中心引导与夸张冲击力构图表达。",
     },
     "focus_lines": {
         "title": "漫画集中线 (Focus Rays)",
         "summary": (
-            "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣"
-            "中心的动态放射构图。"
+            "本算子在极坐标系下沿角向生成离散高反差射线，建立指向视觉兴趣中心的动态放射构图。"
         ),
         "principle": (
-            "基于极坐标逆映射与离散角向随机游走算法，留出中心视场椭球保留"
-            "区并向外发散射线。"
+            "基于极坐标逆映射与离散角向随机游走算法，留出中心视场椭球保留区并向外发散射线。"
         ),
         "scenarios": "适用于强调动作瞬间、视觉中心引导与夸张冲击力构图表达。",
     },
     "黑白漫画网点": {
         "title": "漫画网点 (Manga Screentone)",
         "summary": (
-            "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体"
-            "黑白漫画与印刷光栅工艺。"
+            "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体黑白漫画与印刷光栅工艺。"
         ),
         "principle": (
             "基于 45 度正交网点旋转矩阵与空间亮度能量卷积量化，精确再现传"
@@ -1697,8 +2164,7 @@ INTROS: dict[str, dict[str, str]] = {
     "screentone": {
         "title": "漫画网点 (Manga Screentone)",
         "summary": (
-            "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体"
-            "黑白漫画与印刷光栅工艺。"
+            "本算子通过局部照度调制固定角度与密度的网格圆点面积，模拟实体黑白漫画与印刷光栅工艺。"
         ),
         "principle": (
             "基于 45 度正交网点旋转矩阵与空间亮度能量卷积量化，精确再现传"
@@ -1709,32 +2175,27 @@ INTROS: dict[str, dict[str, str]] = {
     "立绘贴纸白边": {
         "title": "贴纸白边 (Sticker Outline)",
         "summary": (
-            "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，"
-            "生成立绘裁切轮廓边框。"
+            "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，生成立绘裁切轮廓边框。"
         ),
         "principle": (
-            "基于二值形态学膨胀算子与高斯环境遮蔽投影合成，构建高精度各向"
-            "同性轮廓包络层。"
+            "基于二值形态学膨胀算子与高斯环境遮蔽投影合成，构建高精度各向同性轮廓包络层。"
         ),
         "scenarios": "适用于透明背景立绘衍生品预览、贴纸裁切设计与图形界面标识突出。",
     },
     "sticker_outline": {
         "title": "贴纸白边 (Sticker Outline)",
         "summary": (
-            "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，"
-            "生成立绘裁切轮廓边框。"
+            "本算子通过 Alpha 透明通道的形态学欧氏距离场膨胀与阴影卷积，生成立绘裁切轮廓边框。"
         ),
         "principle": (
-            "基于二值形态学膨胀算子与高斯环境遮蔽投影合成，构建高精度各向"
-            "同性轮廓包络层。"
+            "基于二值形态学膨胀算子与高斯环境遮蔽投影合成，构建高精度各向同性轮廓包络层。"
         ),
         "scenarios": "适用于透明背景立绘衍生品预览、贴纸裁切设计与图形界面标识突出。",
     },
     "XDoG动漫线稿": {
         "title": "XDoG动漫线稿 (XDoG Lineart)",
         "summary": (
-            "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅"
-            "笔质感的连续边缘线稿。"
+            "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅笔质感的连续边缘线稿。"
         ),
         "principle": (
             "基于 Winnemöller et al. (2012) XDoG 算子，结合双尺度高斯差分"
@@ -1745,8 +2206,7 @@ INTROS: dict[str, dict[str, str]] = {
     "lineart_extract": {
         "title": "XDoG动漫线稿 (XDoG Lineart)",
         "summary": (
-            "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅"
-            "笔质感的连续边缘线稿。"
+            "本算子通过不同方差高斯核相减与非线性阈值映射，提取具有手绘铅笔质感的连续边缘线稿。"
         ),
         "principle": (
             "基于 Winnemöller et al. (2012) XDoG 算子，结合双尺度高斯差分"
@@ -1756,37 +2216,27 @@ INTROS: dict[str, dict[str, str]] = {
     },
     "复古90年代胶片": {
         "title": "90年代复古胶片 (90s Film)",
-        "summary": (
-            "本预设管线复合暖色色温偏移、暗部电平抬升、四次余弦暗角与银盐"
-            "颗粒，还原 90 年代胶片成像特性。"
-        ),
-        "principle": (
-            "复合胶片感光曲线特性、透镜边缘四次余弦光照衰减公式与多通道彩"
-            "色随机微粒噪声。"
-        ),
-        "scenarios": "适用于人像写真与怀旧摄影，重构传统胶片相机沉稳、温暖的物理质感。",
+        "summary": "组合 RGB LUT 色调、径向暗角和随机颗粒。",
+        "principle": "先做通道查找表映射，再应用边缘掩模与噪点合成。",
+        "scenarios": "适用于复古风格；会改变色阶并增加颗粒。",
     },
     "动漫超分辨率 4x": {
         "title": "动漫超分 4x (Anime SR)",
         "summary": (
-            "本算子采用专精动漫图像的深度神经网络，以 4 倍放大比例无损重"
-            "构清晰边缘与纯净色块。"
+            "本算子采用专精动漫图像的深度神经网络，以 4 倍放大比例无损重构清晰边缘与纯净色块。"
         ),
         "principle": (
-            "基于 Real-ESRGAN 残差密集特征网络推理，在潜空间抑制高频振铃"
-            "并平滑各向异性边缘。"
+            "基于 Real-ESRGAN 残差密集特征网络推理，在潜空间抑制高频振铃并平滑各向异性边缘。"
         ),
         "scenarios": "适用于动漫截图高清化、二次元插画大尺寸输出与印刷级高分辨率重构。",
     },
     "通用超分辨率 4x": {
         "title": "通用超分 4x (General SR)",
         "summary": (
-            "本算子采用高保真深度生成网络，以 4 倍比例重构自然图像的高频"
-            "微观纹理与结构细节。"
+            "本算子采用高保真深度生成网络，以 4 倍比例重构自然图像的高频微观纹理与结构细节。"
         ),
         "principle": (
-            "基于 Real-ESRGAN 通用模型推理，利用深层残差连接与感知损失重"
-            "建真实感自然图像高频分量。"
+            "基于 Real-ESRGAN 通用模型推理，利用深层残差连接与感知损失重建真实感自然图像高频分量。"
         ),
         "scenarios": "适用于真实摄影照片、复杂写实人像与宏大风景图像的高清分辨率重建。",
     },
@@ -1796,10 +2246,7 @@ INTROS: dict[str, dict[str, str]] = {
             "本预设管线结合高光多尺度滤色扩散、自然饱和度保护与线稿自适应"
             "染色，营造柔美清澈的视觉调性。"
         ),
-        "principle": (
-            "复合亮度阈值高斯扩散、HSV 肤色饱和度保护增益以及邻域低频基底"
-            "线稿融合计算。"
-        ),
+        "principle": ("复合亮度阈值高斯扩散、HSV 肤色饱和度保护增益以及邻域低频基底线稿融合计算。"),
         "scenarios": "适用于插画人物特写、顺光/逆光风景原画以及需要柔和光感渲染的场景。",
     },
     "大魄力动感鱼眼": {
@@ -1809,59 +2256,45 @@ INTROS: dict[str, dict[str, str]] = {
             "构建强烈的广角动感透视构图。"
         ),
         "principle": (
-            "基于径向几何反向映射与极坐标多项式变形模型，协同生成视场向外"
-            "凸起的球面透视冲击力。"
+            "基于径向几何反向映射与极坐标多项式变形模型，协同生成视场向外凸起的球面透视冲击力。"
         ),
         "scenarios": "适用于动作特写镜头、运动俯冲视角以及具有极度张力的视觉构图表现。",
     },
     "橙青影视色彩平衡": {
         "title": "橙青影视平衡 (Teal & Orange)",
         "summary": (
-            "本预设管线采用经典影视冷暖互补调色理论，建立暗部偏青、高光偏"
-            "橙金的电影级色彩对冲关系。"
+            "本预设管线采用经典影视冷暖互补调色理论，建立暗部偏青、高光偏橙金的电影级色彩对冲关系。"
         ),
-        "principle": (
-            "复合三段式影调亮度权重矩阵、胶片高光滚降映射曲线与微观感光颗"
-            "粒噪声。"
-        ),
+        "principle": ("复合三段式影调亮度权重矩阵、胶片高光滚降映射曲线与微观感光颗粒噪声。"),
         "scenarios": "适用于城市夜景、霓虹街景、赛博朋克风格渲染与电影感人像调色。",
     },
     "line_color": {
         "title": "线稿自适应染色 (Line Color)",
         "summary": (
-            "本算子通过提取暗部边缘轮廓并依据邻域低频色彩进行平滑加权染色"
-            "，消除生硬的死黑线条。"
+            "本算子通过提取暗部边缘轮廓并依据邻域低频色彩进行平滑加权染色，消除生硬的死黑线条。"
         ),
         "principle": (
-            "基于照度掩模非线性加权与大核邻域基底色彩空间插值，将暗部边缘"
-            "向局部环境色彩平滑过渡。"
+            "基于照度掩模非线性加权与大核邻域基底色彩空间插值，将暗部边缘向局部环境色彩平滑过渡。"
         ),
-        "scenarios": (
-            "适用于二次元线稿融入背景、软化 AI 容易产生的死硬黑边线条并统"
-            "一画面色调。"
-        ),
+        "scenarios": ("适用于二次元线稿融入背景、软化 AI 容易产生的死硬黑边线条并统一画面色调。"),
     },
     "color_balance": {
         "title": "三段色彩平衡 (Color Balance)",
         "summary": (
-            "本算子通过亮度区间平滑权重分割，独立调节阴影、中间调与高光区"
-            "域的三通道色彩偏移量。"
+            "本算子通过亮度区间平滑权重分割，独立调节阴影、中间调与高光区域的三通道色彩偏移量。"
         ),
         "principle": (
-            "基于照度区间高斯平滑基函数分离影调，实施红绿蓝三通道加性色彩"
-            "向量的精准受控位移。"
+            "基于照度区间高斯平滑基函数分离影调，实施红绿蓝三通道加性色彩向量的精准受控位移。"
         ),
         "scenarios": "适用于精细校正画面色偏、构建特定影视调色风格与冷暖色调对冲布局。",
     },
     "fisheye": {
         "title": "鱼眼广角透视 (Fisheye Lens)",
         "summary": (
-            "本算子通过高阶多项式坐标逆映射，模拟真实超广角与鱼眼镜头产生"
-            "的桶形或枕形几何畸变。"
+            "本算子通过高阶多项式坐标逆映射，模拟真实超广角与鱼眼镜头产生的桶形或枕形几何畸变。"
         ),
         "principle": (
-            "基于 Brown-Conrady 径向几何畸变多项式方程，执行亚像素双线性"
-            "插值坐标重采样。"
+            "基于 Brown-Conrady 径向几何畸变多项式方程，执行亚像素双线性插值坐标重采样。"
         ),
         "scenarios": "适用于模拟超广角与鱼眼镜头透视、夸张画面纵深与边缘视场拉伸效果。",
     },
@@ -1876,54 +2309,33 @@ INTROS: dict[str, dict[str, str]] = {
             "免高饱和度与肤色区域色彩溢出。"
         ),
         "scenarios": (
-            "适用于风景画面生动化、人像气色提亮以及需要提升鲜艳度且防止色"
-            "彩断阶的调色场景。"
+            "适用于风景画面生动化、人像气色提亮以及需要提升鲜艳度且防止色彩断阶的调色场景。"
         ),
     },
     "diffuse_glow": {
         "title": "扩散柔光 (Diffuse Glow)",
         "summary": (
-            "本算子通过亮度阈值分割与多尺度高斯核滤色混合，模拟强光源在光"
-            "学介质中的漫反射光晕现象。"
+            "本算子通过亮度阈值分割与多尺度高斯核滤色混合，模拟强光源在光学介质中的漫反射光晕现象。"
         ),
-        "principle": (
-            "基于高光照度截断阈值提取、大核空间滤波与滤色（Screen）通道线"
-            "性叠加算法。"
-        ),
-        "scenarios": (
-            "适用于增强发光体漫射、营造朦胧梦幻氛围与消除边缘生硬的数字化"
-            "锯齿反差。"
-        ),
+        "principle": ("基于高光照度截断阈值提取、大核空间滤波与滤色（Screen）通道线性叠加算法。"),
+        "scenarios": ("适用于增强发光体漫射、营造朦胧梦幻氛围与消除边缘生硬的数字化锯齿反差。"),
     },
     "vignette": {
-        "title": "镜头暗角 (Vignette)",
-        "summary": (
-            "本算子通过距视口中心的径向距离多项式衰减，模拟真实光学镜头孔"
-            "径引起的自然边缘照度衰减。"
-        ),
-        "principle": (
-            "基于光学透镜余弦四次方照度定律（Cosine-Fourth Law），执行向"
-            "边缘平滑过渡的亮度衰减。"
-        ),
-        "scenarios": "适用于聚焦画面主体、模拟大光圈镜头光学特征与增强画面构图沉浸感。",
+        "title": "边缘暗角 (Vignette)",
+        "summary": "按径向距离生成渐变掩模，压暗图像边缘。",
+        "principle": "中心范围、羽化宽度和暗度共同控制径向亮度权重。",
+        "scenarios": "适用于突出画面中心；边缘主体也会随掩模变暗。",
     },
     "color_temperature": {
-        "title": "色温微调 (Color Temperature)",
-        "summary": (
-            "本算子通过沿普朗克黑体辐射轨迹调整红蓝通道比例，实现物理准确"
-            "的色温与色彩微调。"
-        ),
-        "principle": (
-            "基于普朗克黑体辐射定律与 CIE 1931 色品坐标近似模型，对三通道"
-            "增益执行非线性对冲调节。"
-        ),
-        "scenarios": "适用于校正拍摄白平衡失衡、营造温暖黄昏或清冷蓝调光照环境。",
+        "title": "冷暖与色偏 (Color Temperature)",
+        "summary": "使用 RGB 通道 LUT 调节冷暖与绿品红色偏。",
+        "principle": "分别映射通道增益，不估计光源光谱或开尔文色温。",
+        "scenarios": "适用于主观调色；强调整可能造成通道裁切。",
     },
     "superres": {
         "title": "神经超分辨率 (Super-Resolution)",
         "summary": (
-            "本算子采用轻量化 ONNX 深度残差卷积神经网络，实现 4 倍分辨率"
-            "下的结构保持超分重建。"
+            "本算子采用轻量化 ONNX 深度残差卷积神经网络，实现 4 倍分辨率下的结构保持超分重建。"
         ),
         "principle": (
             "基于 Real-ESRGAN 残差密集块（Residual-in-Residual Dense Bloc"
@@ -1933,83 +2345,116 @@ INTROS: dict[str, dict[str, str]] = {
     },
     "二次元线条强化与描墨": {
         "title": "二次元线条强化与描墨 (Anime Line Inking)",
-        "summary": (
-            "本算子通过流向差分高斯与定向形态学闭合理论，提取动漫插画暗部"
-            "轮廓骨架并加深描墨。"
-        ),
-        "principle": (
-            "基于差分高斯（FDoG）多尺度空间边缘响应提取暗部轮廓，经由形态学"
-            "定向闭运算与非线性伽马压墨融合。"
-        ),
-        "scenarios": "适用于加深强化二次元手绘线稿、缝合AI断线微隙以及消除线条边缘虚灰毛刺。",
+        "summary": "使用各向同性 DoG 与方形闭运算提取暗线，再压暗原图。",
+        "principle": "依次计算高斯差分、闭运算、百分位归一化和乘法混合。",
+        "scenarios": "适用于加深暗部轮廓；可能连接相邻线条，需检查文字与交叉点。",
     },
     "二次元赛璐珞顶级精修": {
-        "title": "二次元赛璐珞顶级精修 (Anime Cel Master)",
-        "summary": (
-            "整合保边色块平滑、连贯线稿描墨与暗部阴影提纯，提供全套顶级"
-            "二次元赛璐珞风格后处理重构。"
-        ),
-        "principle": (
-            "三阶段协同管线：首先表面保边去AI杂斑，其次流向差分高斯描墨增强"
-            "轮廓，最后暗部掩模色彩提纯去脏。"
-        ),
-        "scenarios": (
-            "适用于AI二次元生成图的一键顶级动漫化精修，重塑纯净平涂赛璐珞与"
-            "紧致利落的手绘质感。"
-        ),
+        "title": "色块、线条与阴影调整",
+        "summary": "依次平滑色块、加深暗线并调整暗部饱和度。",
+        "principle": "组合 surface_blur、各向同性 DoG 暗线增强与 color_purity。",
+        "scenarios": "适用于平涂插画风格调整；可能丢失细线与改变阴影配色。",
     },
     "anime_line_enhance": {
         "title": "动漫线条增强 (Line Inking)",
-        "summary": "基于流向差分高斯与形态学定向闭合的二次元线稿边缘强化与连贯描墨算子。",
-        "principle": (
-            "基于差分高斯（DoG）多尺度响应与形态学闭运算，增强暗部线条黑度并"
-            "保全平涂色块。"
-        ),
-        "scenarios": "适用于消除AI二次元图像线条虚浮断线缺陷并增强日系动漫描墨质感。",
+        "summary": "使用各向同性 DoG 与方形形态学闭运算提取暗线，再乘法压暗原图。",
+        "principle": "对 RGB 图像执行方形邻域闭运算和百分位归一化，得到压暗权重。",
+        "scenarios": "适用于加深暗部轮廓；可能连接邻近线条并压暗细节。",
     },
 }
 
 
+for _op, (_principle, _scenarios) in {
+    "guided_smooth": (
+        "在编码 sRGB 中做局部线性回归；epsilon 为归一化引导值的平方单位。",
+        "适用于平涂色块平滑；低对比细线可能被减弱。",
+    ),
+    "rolling_guidance": (
+        "初始尺度抑制后迭代联合双边引导；不是普通双边滤波的重复。",
+        "适用于减少细碎纹理；小文字与排线也可能被抹去。",
+    ),
+    "flow_line": (
+        "ETF 平滑切线场，在法向计算 DoG 并沿切向积分；lines 输出独立黑线白底图。",
+        "适用于提取或加深轮廓；需检查交叉点、细线与线条末端。",
+    ),
+    "kuwahara_anisotropic": (
+        "由结构张量确定椭圆方向与伸长率，按扇区均值和方差加权。",
+        "适用于方向性色块抽象；可能改变小结构的形状。",
+    ),
+    "bounded_sharpen": (
+        "对编码 sRGB 亮度代理高频残差加噪声门限，并约束局部范围过冲。",
+        "适用于受控锐化；可能削弱真实高光或放大纹理。",
+    ),
+    "multiscale_detail": (
+        "分解亮度代理的多尺度高斯残差，各尺度增益为 1 时不改变该层。",
+        "适用于分尺度对比度调整；增强高频也可能放大噪声。",
+    ),
+    "linear_resize": (
+        "解码到线性 sRGB，预乘 Alpha 后浮点重采样，再解预乘并编码。",
+        "适用于透明边缘缩放；倍率与尺寸互斥，非学习型细节恢复。",
+    ),
+}.items():
+    INTROS[_op] = {
+        "title": OPERATORS_BY_OP[_op].name,
+        "principle": _principle,
+        "scenarios": _scenarios,
+    }
+for _op in _NEW_OPERATORS:
+    INTROS[_op]["summary"] = OPERATORS_BY_OP[_op].description
+    INTROS[_op]["principle"] += " 实验性实现，尚未完成真实图像质量验收。"
+
+
 PRESET_CATEGORIES: dict[str, str] = {
-    "像素化": "风格滤波",
-    "调色板": "风格滤波",
-    "线稿": "二次元动漫",
-    "抖动": "风格滤波",
-    "锐化": "风格滤波",
-    "赛璐璐": "二次元动漫",
-    "去AI塑料感": "去AI感",
-    "抗AI生成伪影综合治理": "去AI感",
-    "二次元平涂去杂": "去AI感",
-    "动漫色彩提纯": "二次元动漫",
-    "二次元线条强化与描墨": "二次元动漫",
-    "二次元赛璐珞顶级精修": "二次元动漫",
-    "动漫线条增强": "二次元动漫",
-    "anime_line_enhance": "二次元动漫",
-    "日系通透空气感": "二次元动漫",
-    "热血集中线": "二次元动漫",
-    "黑白漫画网点": "二次元动漫",
-    "立绘贴纸白边": "风格滤波",
-    "XDoG动漫线稿": "二次元动漫",
-    "ACES电影级色调": "色彩光影",
-    "引导滤波细节增强": "风格滤波",
-    "桑原二次元平涂": "二次元动漫",
-    "剧场版宽银幕眩光": "二次元动漫",
-    "日系晴空色彩迁移": "色彩光影",
-    "复古90年代胶片": "色彩光影",
-    "动漫超分辨率 4x": "超分辨率",
-    "通用超分辨率 4x": "超分辨率",
-    "日系治愈空气柔光": "二次元动漫",
-    "大魄力动感鱼眼": "二次元动漫",
-    "橙青影视色彩平衡": "色彩光影",
+    "像素化": "风格光学",
+    "调色板": "风格光学",
+    "线稿": "线条与色块",
+    "抖动": "风格光学",
+    "锐化": "风格光学",
+    "赛璐璐": "线条与色块",
+    "去AI塑料感": "平滑与缺陷",
+    "抗AI生成伪影综合治理": "平滑与缺陷",
+    "二次元平涂去杂": "平滑与缺陷",
+    "动漫色彩提纯": "线条与色块",
+    "二次元线条强化与描墨": "线条与色块",
+    "二次元赛璐珞顶级精修": "线条与色块",
+    "动漫线条增强": "线条与色块",
+    "anime_line_enhance": "线条与色块",
+    "日系通透空气感": "线条与色块",
+    "热血集中线": "线条与色块",
+    "黑白漫画网点": "线条与色块",
+    "立绘贴纸白边": "风格光学",
+    "XDoG动漫线稿": "线条与色块",
+    "XDoG动漫手绘线稿": "线条与色块",
+    "像素复古风": "风格光学",
+    "赛璐璐手绘": "线条与色块",
+    "ACES电影级色调": "颜色明暗",
+    "引导滤波细节增强": "风格光学",
+    "桑原二次元平涂": "线条与色块",
+    "剧场版宽银幕眩光": "线条与色块",
+    "日系晴空色彩迁移": "颜色明暗",
+    "复古90年代胶片": "颜色明暗",
+    "动漫超分辨率 4x": "模型恢复",
+    "通用超分辨率 4x": "模型恢复",
+    "日系治愈空气柔光": "线条与色块",
+    "大魄力动感鱼眼": "线条与色块",
+    "橙青影视色彩平衡": "颜色明暗",
 }
+
+PRESET_CATEGORIES.update({op: OPERATORS_BY_OP[op].category_label for op in _NEW_OPERATORS})
+PRESET_CATEGORIES.update({
+    name: PRESET_CATEGORIES[name.split(" (", 1)[0]]
+    for name in PRESET_PIPELINES
+    if name not in PRESET_CATEGORIES
+})
 
 CATEGORIES_LIST: list[str] = [
     "全部",
-    "去AI感",
-    "二次元动漫",
-    "色彩光影",
-    "风格滤波",
-    "超分辨率",
+    "平滑与缺陷",
+    "线条与色块",
+    "颜色明暗",
+    "风格光学",
+    "模型恢复",
+    "尺寸几何",
 ]
 
 

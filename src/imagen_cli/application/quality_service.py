@@ -45,4 +45,5 @@ def compare(
         "identical": math.isinf(score),
         "psnr": None if math.isinf(score) else round(score, 4),
         "ssim": round(similarity, 6),
+        "ssim_metric": "local_gaussian_pillow_l_v1",
     }

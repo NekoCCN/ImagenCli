@@ -42,6 +42,7 @@ def test_compare_reports_scores(workspace):
     assert result["identical"] is True
     assert result["psnr"] is None
     assert result["ssim"] == 1.0
+    assert result["ssim_metric"] == "local_gaussian_pillow_l_v1"
     different = quality_service.compare(
         repositories, store, "art_" + "a" * 32, "art_" + "b" * 32
     )

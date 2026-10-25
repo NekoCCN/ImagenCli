@@ -134,7 +134,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         "session remove-image": {"purge"},
         "asset gc": {"dry_run", "yes"},
         "cache purge": {"plan", "yes"},
-        "transform": {"pipeline", "op", "preset", "session"},
+        "transform": {"pipeline", "op", "preset", "session", "timeout"},
         "ops": {"op", "preset", "verbose"},
         "models refresh": {"profile", "send_credential"},
         "models add": {"profile", "id"},
@@ -221,6 +221,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         if len(words) != 1:
             raise ValueError("one artifact identity required")
         parameters["artifact"] = words[0]
+        if "timeout" in controls:
+            parameters["timeout"] = options.timeout
         if "pipeline" not in parameters and "op" not in parameters and "preset" not in parameters:
             raise ValueError("pipeline, op or preset is required")
         validate(parameters, schema)

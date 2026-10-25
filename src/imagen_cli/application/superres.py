@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import time
 from collections.abc import Callable
@@ -115,7 +116,11 @@ def weights_path(model: str, suffix: str = ".onnx") -> Path:
         raise ValueError("unknown super-resolution model")
     if suffix not in {".onnx", ".pt"}:
         raise ValueError("weights suffix must be .onnx or .pt")
-    return weights_directory() / f"{model}{suffix}"
+    path = weights_directory() / f"{model}{suffix}"
+    for candidate in (path, path.with_suffix(".sha256"), path.with_suffix(".part")):
+        if any(part.is_symlink() for part in (candidate, *candidate.parents)):
+            raise ValueError("model paths must not contain symlinks")
+    return path
 
 
 def digest_path(model: str, suffix: str = ".onnx") -> Path:
@@ -159,6 +164,8 @@ def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
     path = weights_path(model, suffix)
     pinned = MANIFEST[model].get("sha256") if suffix == ".onnx" else None
     if path.exists():
+        if not path.is_file() or path.stat().st_size > MAX_WEIGHT_BYTES:
+            raise ValueError("weights exceed the size limit or are not a regular file")
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         expected = pinned or _recorded_digest(model, suffix)
         if expected is not None and expected != actual:
@@ -187,34 +194,61 @@ def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
 
 def _make_torch_runner(model: str, *, device: str | None,
                        accept: bool) -> tuple[Runner, dict[str, Any]]:
-    numpy = _numpy()
-    try:
-        import torch
-    except ImportError as error:
-        raise ValueError("the torch backend requires the ai-torch extra") from error
-    path = ensure_weights(model, accept=accept, suffix=".pt")
-    target = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    try:
-        session = torch.jit.load(  # type: ignore[no-untyped-call, unused-ignore]
-            str(path), map_location=target
-        )
-    except Exception as error:  # noqa: BLE001 - torch raises backend-specific errors
-        raise ValueError("weights are not a loadable TorchScript model") from error
+    raise ValueError(
+        "unsafe local TorchScript loading is disabled, including with ai-torch; "
+        "use a pinned ONNX export; no automatic backend substitution"
+    )
 
-    def run(tile: Any) -> Any:
-        tensor = torch.from_numpy(
-            numpy.asarray(tile, dtype=numpy.float32) / 255.0
-        ).permute(2, 0, 1)[None].to(target)
-        with torch.no_grad():
-            output = session(tensor)
-        result = output.clamp(0, 1)[0].permute(1, 2, 0).cpu().numpy()
-        return result * 255
 
-    engine = {
-        "backend": "torch", "provider": "torch", "device": target, "dtype": "fp32",
-        "weights_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-    }
-    return run, engine
+def _preflight_onnx(data: bytes) -> None:
+    """Reject external files and nonstandard semantics before any ORT session.
+
+    This is format/policy validation, not a sandbox or a resource-exhaustion guard.
+    Only the canonical standard ONNX domain ("") is accepted, not ai.onnx.ml.
+    No custom-op library is registered. SHA pinning remains a separate prior gate.
+    Local functions are rejected to avoid overriding standard operator semantics.
+    See https://onnx.ai/onnx/repo-docs/ExternalData.html and
+    https://onnx.ai/onnx/api/checker.html for loader/checker behavior.
+    """
+    try:
+        import onnx
+    except ImportError as error:  # pragma: no cover - depends on the extra
+        raise ValueError("ONNX safety preflight requires the ai-onnx extra") from error
+    try:
+        model = onnx.load_model(io.BytesIO(data), load_external_data=False)
+        pending = [model]
+        has_local_functions = False
+        while pending:
+            message = pending.pop()
+            kind = message.DESCRIPTOR.full_name
+            if kind == "onnx.TensorProto" and (
+                message.data_location == 1 or message.external_data
+            ):
+                raise ValueError("ONNX external data is not allowed")
+            if kind in {"onnx.NodeProto", "onnx.FunctionProto", "onnx.OperatorSetIdProto"}:
+                if message.domain != "":
+                    raise ValueError("nonstandard ONNX domain is not allowed")
+                if kind == "onnx.FunctionProto":
+                    has_local_functions = True
+            if kind == "onnx.NodeProto" and not onnx.defs.has(message.op_type, ""):
+                raise ValueError("nonstandard ONNX operator/domain is not allowed")
+            if kind == "onnx.OperatorSetIdProto" and not (
+                1 <= message.version <= onnx.defs.onnx_opset_version()
+            ):
+                raise ValueError("unsupported ONNX opset")
+            # Walk every nested message. upb repeated containers expose only a
+            # sequence protocol (no __iter__), and descriptor labels differ
+            # across protobuf versions, so detect containers structurally.
+            for _field, value in message.ListFields():
+                if hasattr(value, "ListFields"):
+                    pending.append(value)
+                elif not isinstance(value, (str, bytes)) and hasattr(value, "__len__"):
+                    pending.extend(item for item in value if hasattr(item, "ListFields"))
+        if has_local_functions:
+            raise ValueError("local functions cannot redefine standard ONNX domain semantics")
+        onnx.checker.check_model(model)
+    except Exception as error:  # noqa: BLE001 - parser/checker have native error types
+        raise ValueError(f"ONNX safety preflight failed: {error}") from error
 
 
 def _make_runner(model: str, *, backend: str | None, device: str | None,
@@ -228,7 +262,14 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
         raise ValueError("super-resolution requires the ai-onnx extra") from error
     providers = _choose_provider(backend, device)
     path = ensure_weights(model, accept=accept)
-    session = onnxruntime.InferenceSession(str(path), providers=providers)
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    expected = MANIFEST[model].get("sha256") or _recorded_digest(model, ".onnx")
+    if expected is not None and digest != expected:
+        raise ValueError("weights digest mismatch")
+    _preflight_onnx(data)
+    # Use the checked bytes, not a path that could change after preflight.
+    session = onnxruntime.InferenceSession(data, providers=providers)
     inputs = session.get_inputs()
     if len(inputs) != 1:
         raise ValueError("super-resolution model must take one input")
@@ -266,7 +307,7 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
         "provider": session.get_providers()[0],
         "device": device or "auto",
         "dtype": "fp32",
-        "weights_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "weights_sha256": digest,
     }
     return run, engine
 
@@ -427,6 +468,7 @@ def benchmark(
             "input": [small.width, small.height],
             "psnr": round(filters_numpy.psnr(reference, measured), 4),
             "ssim": round(filters_numpy.ssim(reference, measured), 6),
+            "ssim_metric": "local_gaussian_pillow_l_v1",
             "duration_ms": elapsed,
             "engine": engine,
         })

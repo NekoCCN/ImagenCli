@@ -247,6 +247,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "op": text,
             "preset": text,
             "session": text,
+            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 120},
         }
         required = ("artifact",)
     elif name == "sheet":
@@ -344,7 +345,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
             "width": {"type": "integer"}, "height": {"type": "integer"},
             "identical": {"type": "boolean"}, "psnr": {"type": ["number", "null"]},
             "ssim": {"type": "number"},
-        }, ("first", "second", "identical", "psnr", "ssim"))
+            "ssim_metric": {"type": "string"},
+        }, ("first", "second", "identical", "psnr", "ssim", "ssim_metric"))
     if command.name.startswith("models "):
         return _object({
             "models": {"type": "array", "items": {"type": "object"}},

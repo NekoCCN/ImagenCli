@@ -283,6 +283,70 @@ def test_transform_preview_writes_only_on_enter(deps):
     assert len(calls) == 1
 
 
+def test_transform_default_path_publishes_from_isolated_worker(deps):
+    from imagen_cli.cli.tui.app import TransformScreen
+
+    deps_value, _ = deps
+    _publish_output(deps_value)
+    before = len(deps_value.repositories.list("artifacts"))
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, TransformScreen)
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not isinstance(app.screen, TransformScreen), str(screen.status.render())
+
+    asyncio.run(run())
+    outputs = deps_value.repositories.list("artifacts")
+    assert len(outputs) == before + 1
+    derived = [row for row in outputs if row["origin_manifest"].get("kind") == "postprocess"]
+    assert derived[0]["origin_manifest"]["execution"]["isolation"] == "spawn_process"
+
+
+def test_transform_escape_cancels_without_publishing(deps, monkeypatch):
+    import threading
+
+    from imagen_cli.cli.tui.app import TransformScreen
+
+    deps_value, _ = deps
+    _publish_output(deps_value)
+    before = len(deps_value.repositories.list("artifacts"))
+    started = threading.Event()
+
+    def slow_compute(*args, cancelled, **kwargs):
+        started.set()
+        assert cancelled.wait(timeout=5)
+        raise ValueError("postprocess cancelled")
+
+    monkeypatch.setattr("imagen_cli.application.postprocess_worker.execute", slow_compute)
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        app.current = "ses_" + "0" * 32
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, TransformScreen)
+            await pilot.press("enter")
+            assert await asyncio.to_thread(started.wait, 2)
+            await pilot.press("escape")
+            await app.workers.wait_for_complete()
+            assert screen.cancelled.is_set()
+            assert not screen.running
+            assert isinstance(app.screen, TransformScreen)
+
+    asyncio.run(run())
+    assert len(deps_value.repositories.list("artifacts")) == before
+
+
 def test_transform_param_tuning(deps):
     from imagen_cli.cli.tui.app import ParamEditScreen
 

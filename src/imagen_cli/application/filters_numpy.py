@@ -412,6 +412,42 @@ def psnr(first: Image.Image, second: Image.Image) -> float:
 
 
 def ssim(first: Image.Image, second: Image.Image) -> float:
+    """Single-scale local SSIM on Pillow L, without automatic downsampling.
+
+    Uses valid 11x11 Gaussian statistics (sigma 1.5), population covariance.
+    Images smaller than 11 use the largest fitting odd window, including 1.
+    Alpha is ignored, as in the legacy comparison path.
+    """
+    left = np.asarray(first.convert("L"), dtype=np.float64)
+    right = np.asarray(second.convert("L"), dtype=np.float64)
+    if left.shape != right.shape:
+        raise ValueError("comparison requires identical dimensions")
+    size = min(11, *left.shape)
+    size -= 1 - size % 2
+    coordinates = np.arange(size, dtype=np.float64) - size // 2
+    kernel = np.exp(-coordinates ** 2 / (2 * 1.5 ** 2))
+    kernel /= kernel.sum()
+
+    def average(values: np.ndarray) -> np.ndarray:
+        horizontal = np.zeros((values.shape[0], values.shape[1] - size + 1))
+        for i, weight in enumerate(kernel):
+            horizontal += weight * values[:, i:i + horizontal.shape[1]]
+        result = np.zeros((values.shape[0] - size + 1, horizontal.shape[1]))
+        for i, weight in enumerate(kernel):
+            result += weight * horizontal[i:i + result.shape[0], :]
+        return result
+
+    mu_left, mu_right = average(left), average(right)
+    var_left = np.maximum(0, average(left * left) - mu_left * mu_left)
+    var_right = np.maximum(0, average(right * right) - mu_right * mu_right)
+    covariance = average(left * right) - mu_left * mu_right
+    c1, c2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
+    numerator = (2 * mu_left * mu_right + c1) * (2 * covariance + c2)
+    denominator = (mu_left ** 2 + mu_right ** 2 + c1) * (var_left + var_right + c2)
+    return float(np.mean(numerator / denominator))
+
+
+def ssim_global_legacy(first: Image.Image, second: Image.Image) -> float:
     left = np.asarray(first.convert("L"), dtype=np.float64)
     right = np.asarray(second.convert("L"), dtype=np.float64)
     if left.shape != right.shape:

@@ -5,6 +5,8 @@ import pytest
 pytest.importorskip("numpy")
 
 import io
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
@@ -45,6 +47,59 @@ def test_unknown_model_and_backend_are_refused():
         superres.upscale(image, model="realesrgan-x4plus", backend="cuda")
     with pytest.raises(ValueError, match="ai-torch"):
         superres.upscale(image, model="realesrgan-x4plus", backend="torch")
+
+
+def test_torchscript_is_rejected_before_deserialization(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    (tmp_path / "realesrgan-x4plus.pt").write_bytes(b"untrusted checkpoint")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("untrusted TorchScript reached deserialization")
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: False),
+        jit=SimpleNamespace(load=forbidden),
+    ))
+    with pytest.raises(ValueError, match="unsafe.*TorchScript"):
+        superres.upscale(Image.new("RGB", (4, 4)), backend="torch")
+
+
+@pytest.mark.parametrize("suffix", [".onnx", ".pt"])
+def test_weights_symlink_is_rejected_without_touching_target(tmp_path, monkeypatch, suffix):
+    root = tmp_path / "models"
+    root.mkdir()
+    external = tmp_path / "external"
+    external.write_bytes(b"private bytes")
+    (root / ("realesrgan-x4plus" + suffix)).symlink_to(external)
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(root))
+    with pytest.raises(ValueError, match="symlink"):
+        superres.ensure_weights("realesrgan-x4plus", suffix=suffix)
+    assert external.read_bytes() == b"private bytes"
+
+
+def test_weights_size_checked_before_reading(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(superres, "MAX_WEIGHT_BYTES", 4)
+    (tmp_path / "realesrgan-x4plus.onnx").write_bytes(b"too large")
+    with pytest.raises(ValueError, match="size limit"):
+        superres.ensure_weights("realesrgan-x4plus")
+
+
+def test_digest_sidecar_symlink_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setitem(superres.MANIFEST, "manual", {
+        "url": None, "sha256": None, "scale": 2, "license": "test", "source": "local",
+    })
+    (tmp_path / "manual.onnx").write_bytes(b"weights")
+    external = tmp_path / "external"
+    external.write_bytes(b"private bytes")
+    (tmp_path / "manual.sha256").symlink_to(external)
+    with pytest.raises(ValueError, match="symlink"):
+        superres.ensure_weights("manual")
+    assert external.read_bytes() == b"private bytes"
 
 
 def test_models_without_an_upstream_export_require_a_local_file(tmp_path, monkeypatch):
@@ -140,6 +195,165 @@ def test_benchmark_compares_models_without_writing(tmp_path, monkeypatch):
     ]
     for item in result["results"]:
         assert item["psnr"] > 0 and 0 < item["ssim"] <= 1
+        assert item["ssim_metric"] == "local_gaussian_pillow_l_v1"
         assert item["duration_ms"] >= 0
     assert len(repositories.list("artifacts", limit=10)) == len(before)
     repositories.connection.close()
+
+
+class Repeated:
+    """Mimic protobuf's upb repeated container: sequence, but no __iter__."""
+
+    def __init__(self, items):
+        self._items = list(items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __getitem__(self, index):
+        return self._items[index]
+
+
+class Proto:
+    """Small protobuf-shaped double; ONNX is an optional, absent dependency in CI."""
+
+    def __init__(self, kind, **fields):
+        self.DESCRIPTOR = SimpleNamespace(full_name="onnx." + kind)
+        self.__dict__.update(fields)
+
+    def ListFields(self):
+        return [
+            (None, Repeated(value) if isinstance(value, list) else value)
+            for key, value in self.__dict__.items()
+            if key != "DESCRIPTOR"
+        ]
+
+
+def standard_model(**fields):
+    return Proto(
+        "ModelProto", graph=Proto("GraphProto", node=[
+            Proto("NodeProto", domain="", op_type="Identity")
+        ]), opset_import=[Proto("OperatorSetIdProto", domain="", version=13)], **fields
+    )
+
+
+@pytest.fixture
+def onnx_boundary(tmp_path, monkeypatch):
+    path = tmp_path / "manual.onnx"
+    path.write_bytes(b"local model stub")
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setitem(superres.MANIFEST, "manual", {
+        "url": None, "sha256": None, "scale": 2,
+    })
+    state = SimpleNamespace(model=standard_model(), events=[], session_bytes=None)
+
+    def load_model(source, *, load_external_data):
+        assert load_external_data is False
+        state.events.append("load")
+        return state.model
+
+    def check_model(model):
+        state.events.append("check")
+        if getattr(model, "invalid", False):
+            raise RuntimeError("graph is not topologically sorted")
+
+    def session(source, *, providers):
+        state.events.append("session")
+        state.session_bytes = source
+        return SimpleNamespace(
+            get_inputs=lambda: [SimpleNamespace(name="X", shape=[1, 3, None, None])],
+            get_providers=lambda: providers,
+        )
+
+    # SessionOptions/custom-op registration is deliberately not provided.
+    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"], InferenceSession=session,
+    ))
+    monkeypatch.setitem(sys.modules, "onnx", SimpleNamespace(
+        load_model=load_model, checker=SimpleNamespace(check_model=check_model),
+        defs=SimpleNamespace(
+            onnx_opset_version=lambda: 23,
+            has=lambda name, domain="": name == "Identity" and domain == "",
+        ),
+    ))
+    return state
+
+
+def make_local_runner():
+    return superres._make_runner("manual", backend="cpu", device=None, accept=False)
+
+
+@pytest.mark.parametrize("container", ["initializer", "nested_graph", "function", "sparse"])
+@pytest.mark.parametrize("marker", ["location", "metadata"])
+def test_external_data_is_rejected_before_ort(onnx_boundary, container, marker):
+    tensor = Proto("TensorProto", data_location=1 if marker == "location" else 0,
+                   external_data=[] if marker == "location" else [Proto("StringStringEntryProto")])
+    holder = {
+        "initializer": tensor,
+        "nested_graph": Proto("AttributeProto", graphs=[Proto("GraphProto", tensor=tensor)]),
+        "function": Proto("FunctionProto", domain="", attribute_proto=[
+            Proto("AttributeProto", t=tensor)
+        ]),
+        "sparse": Proto("SparseTensorProto", values=tensor, indices=tensor),
+    }[container]
+    onnx_boundary.model.payload = [holder]
+    with pytest.raises(ValueError, match="external data"):
+        make_local_runner()
+    assert "session" not in onnx_boundary.events
+    assert "check" not in onnx_boundary.events
+
+
+@pytest.mark.parametrize("kind,fields", [
+    ("NodeProto", {"domain": "", "op_type": "RunArbitraryCode"}),
+    ("NodeProto", {"domain": "com.microsoft", "op_type": "FusedConv"}),
+    ("NodeProto", {"domain": "ai.onnx.ml", "op_type": "TreeEnsemble"}),
+    ("OperatorSetIdProto", {"domain": "custom", "version": 1}),
+    ("OperatorSetIdProto", {"domain": "ai.onnx.ml", "version": 3}),
+    ("OperatorSetIdProto", {"domain": "", "version": 0}),
+    ("OperatorSetIdProto", {"domain": "", "version": 9999}),
+    ("FunctionProto", {"domain": "", "name": "Identity"}),
+    ("FunctionProto", {"domain": "custom", "name": "Run"}),
+])
+def test_nonstandard_domains_and_opsets_are_rejected(onnx_boundary, kind, fields):
+    onnx_boundary.model.payload = [Proto("GraphProto", node=[Proto(kind, **fields)])]
+    with pytest.raises(ValueError, match="domain|opset"):
+        make_local_runner()
+    assert "session" not in onnx_boundary.events
+
+
+def test_checker_failure_is_rejected_before_ort(onnx_boundary):
+    onnx_boundary.model.invalid = True
+    with pytest.raises(ValueError, match="ONNX.*preflight"):
+        make_local_runner()
+    assert "session" not in onnx_boundary.events
+
+
+def test_standard_model_is_checked_before_mock_ort(onnx_boundary):
+    _runner, engine = make_local_runner()
+    assert onnx_boundary.events == ["load", "check", "session"]
+    assert onnx_boundary.session_bytes == b"local model stub"
+    assert engine["provider"] == "CPUExecutionProvider"
+
+
+def test_missing_onnx_explains_extra_without_starting_ort(onnx_boundary, monkeypatch):
+    monkeypatch.setitem(sys.modules, "onnx", None)
+    with pytest.raises(ValueError, match="ai-onnx"):
+        make_local_runner()
+    assert "session" not in onnx_boundary.events
+
+
+def test_pinned_digest_is_enforced_before_preflight(onnx_boundary, monkeypatch):
+    monkeypatch.setitem(superres.MANIFEST["manual"], "sha256", "0" * 64)
+    with pytest.raises(ValueError, match="digest mismatch"):
+        make_local_runner()
+    assert not onnx_boundary.events
+
+
+def test_malformed_model_is_rejected_before_ort(onnx_boundary, monkeypatch):
+    def bad_load(*args, **kwargs):
+        raise RuntimeError("invalid protobuf")
+
+    monkeypatch.setattr(sys.modules["onnx"], "load_model", bad_load)
+    with pytest.raises(ValueError, match="ONNX.*preflight"):
+        make_local_runner()
+    assert "session" not in onnx_boundary.events

@@ -540,8 +540,16 @@ def _commit(
         }
         for item in validated["native_contexts"]
     ]
+    from imagen_cli.application.postprocess_service import replay_status
+
+    postprocess_replay = {}
+    for artifact in artifacts:
+        compatibility = replay_status(artifact["origin_manifest"])
+        if compatibility is not None:
+            postprocess_replay[artifact_map[artifact["id"]]] = compatibility
     return {
         "session": repositories.get("sessions", session_id),
+        "postprocess_replay": postprocess_replay,
         "turns": len(turns),
         "artifacts": len(artifacts),
         "references": len(references),

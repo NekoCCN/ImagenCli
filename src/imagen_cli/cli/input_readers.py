@@ -116,12 +116,12 @@ def _check(value: Any) -> None:
             _check(item)
 
 
-def read_json(source: Any) -> dict[str, Any]:
+def read_json(source: Any, *, allow_array: bool = False) -> Any:
     try:
         value = json.loads(_decode(_bytes(source, JSON_LIMIT)), object_pairs_hook=_pairs)
         _check(value)
     except (json.JSONDecodeError, RecursionError):
         raise ValueError("invalid JSON") from None
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) and not (allow_array and isinstance(value, list)):
         raise ValueError("JSON object required")
     return value

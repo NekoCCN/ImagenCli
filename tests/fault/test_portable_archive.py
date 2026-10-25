@@ -66,6 +66,34 @@ def _rewrite(source, destination, mutate):
             archive.writestr(name, data)
 
 
+@pytest.mark.parametrize("origin,status", [
+    ({"kind": "postprocess", "schema_version": 999, "custom": {"keep": True}}, "unsupported"),
+    ({"kind": "postprocess", "pipeline": [{"op": "kuwahara"}]}, "legacy_ambiguous"),
+])
+def test_unknown_postprocess_provenance_imports_without_execution(
+    tmp_path, png_bytes, monkeypatch, origin, status,
+):
+    from imagen_cli.application import media_ops
+
+    with Container(workspace=str(tmp_path / "work")) as container:
+        session_id, _, _ = _seed(container, png_bytes)
+        original, modified = tmp_path / "original.zip", tmp_path / "modified.zip"
+        _export(container, session_id, original)
+        _rewrite(original, modified, lambda manifest: manifest["artifacts"][0].update(
+            origin_manifest=origin))
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("import must not execute image operations")
+
+        monkeypatch.setitem(media_ops.OPS, "kuwahara", forbidden)
+        result = _import(container, modified)
+        artifact_id = next(iter(result["origin_map"]["artifacts"].values()))
+        saved = container.repositories.get("artifacts", artifact_id)["origin_manifest"]
+        for key, value in origin.items():
+            assert saved[key] == value
+        assert result["postprocess_replay"][artifact_id]["status"] == status
+
+
 def _raw_archive(path, entries):
     with zipfile.ZipFile(path, "w") as archive:
         for name, data in entries.items():

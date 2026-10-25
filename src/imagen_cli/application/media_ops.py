@@ -1983,7 +1983,12 @@ def anime_line_enhance(
     return result
 
 
+def _missing_kuwahara(image: Image.Image, *, size: int = 5) -> Image.Image:
+    raise ValueError("kuwahara requires NumPy; install the postprocess extra")
+
+
 OPS: dict[str, Callable[..., Image.Image]] = {
+    "kuwahara_pillow_legacy": kuwahara,
     "resize": resize,
     "crop": crop,
     "trim": trim,
@@ -2049,7 +2054,7 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "lineart_extract": lineart_extract,
     "aces_tonemap": aces_tonemap,
     "guided_filter": guided_filter,
-    "kuwahara": kuwahara,
+    "kuwahara": _missing_kuwahara,
     "anamorphic_flare": anamorphic_flare,
     "color_transfer": color_transfer,
     "line_color": line_color,
@@ -2070,11 +2075,24 @@ def _optional_ops() -> dict[str, Callable[..., Image.Image]]:
     import importlib
 
     operations: dict[str, Callable[..., Image.Image]] = {}
-    for module in ("filters_numpy", "superres"):
+    for module in (
+        "filters_numpy", "filters_structure", "filters_advanced", "filters_restoration",
+        "filters_rank", "filters_fast", "filters_frequency", "superres"
+    ):
         try:
-            operations.update(importlib.import_module(f"imagen_cli.application.{module}").OPS)
-        except ImportError:  # the optional extra is not installed
-            continue
+            registered = importlib.import_module(f"imagen_cli.application.{module}").OPS
+        except ModuleNotFoundError as error:
+            if error.name == "numpy":
+                continue
+            raise
+        for name, operation in registered.items():
+            if name in operations or (name in OPS and name != "kuwahara"):
+                raise ValueError(f"duplicate operation ID: {name}")
+            if name == "kuwahara" and module != "filters_numpy":
+                raise ValueError("duplicate operation ID: kuwahara")
+            operations[name] = operation
+        if module == "filters_numpy":
+            operations["kuwahara_numpy_legacy"] = registered["kuwahara"]
     return operations
 
 
@@ -2116,6 +2134,8 @@ def encode(
         options = {"quality": 100 if lossless else quality, "lossless": lossless, "method": 4}
     else:
         options = {"quality": quality}
+    if image.info.get("icc_profile"):
+        options["icc_profile"] = image.info["icc_profile"]
     if target_bytes is None:
         return _save(source, name, options)
     if name == "PNG":

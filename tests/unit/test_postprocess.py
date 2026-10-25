@@ -90,6 +90,8 @@ def test_encode_step_sets_the_media_type_and_is_recorded(workspace):
                 {"op": "encode", "params": {"format": "jpeg", "quality": 80}}]
     result = postprocess_service.apply(repositories, store, "art_" + "a" * 32, pipeline)
     assert result["media_type"] == "image/jpeg"
+    with Image.open(store.get(result["id"])) as output:
+        assert output.info.get("icc_profile")
     assert result["origin_manifest"]["pipeline"] == pipeline
 
 
@@ -142,6 +144,59 @@ def test_paper_based_pipeline_execution(workspace):
     assert result["id"] != "art_" + "a" * 32
     assert result["origin_manifest"]["kind"] == "postprocess"
     assert len(result["origin_manifest"]["pipeline"]) == 5
+def test_reference_image_identity_is_recorded(workspace, tmp_path):
+    import hashlib
+
+    repositories, store = workspace
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (5, 4), (100, 90, 80)).save(reference)
+    result = postprocess_service.apply(repositories, store, "art_" + "a" * 32, [
+        {"op": "chroma_transfer", "params": {"reference": str(reference)}},
+    ])
+    record = result["origin_manifest"]["references"][0]
+    assert record["step"] == 0
+    assert record["sha256"] == hashlib.sha256(reference.read_bytes()).hexdigest()
+    assert record["color"]["input_profile"] == "assumed_srgb"
 
 
+def test_timeout_never_publishes_partial_artifact(workspace):
+    repositories, store = workspace
+    before = repositories.list("artifacts")
+    with pytest.raises(ValueError, match="timeout"):
+        postprocess_service.apply(repositories, store, "art_" + "a" * 32,
+                                  [{"op": "invert"}], timeout=0.001)
+    assert repositories.list("artifacts") == before
+
+
+def test_cancelled_pipeline_never_publishes_partial_artifact(workspace):
+    import threading
+
+    repositories, store = workspace
+    cancelled = threading.Event()
+    cancelled.set()
+    before = repositories.list("artifacts")
+    with pytest.raises(ValueError, match="cancelled"):
+        postprocess_service.apply(repositories, store, "art_" + "a" * 32,
+                                  [{"op": "invert"}], cancelled=cancelled)
+    assert repositories.list("artifacts") == before
+
+
+def test_cancellation_at_worker_return_does_not_publish(workspace, monkeypatch):
+    import threading
+
+    repositories, store = workspace
+    cancelled = threading.Event()
+    before = repositories.list("artifacts")
+
+    def completed_but_cancelled(*args, **kwargs):
+        cancelled.set()
+        return b"not published", {}
+
+    monkeypatch.setattr(
+        "imagen_cli.application.postprocess_worker.execute", completed_but_cancelled,
+    )
+    with pytest.raises(ValueError, match="cancelled"):
+        postprocess_service.apply(repositories, store, "art_" + "a" * 32,
+                                  [{"op": "invert"}], cancelled=cancelled)
+    assert repositories.list("artifacts") == before
 

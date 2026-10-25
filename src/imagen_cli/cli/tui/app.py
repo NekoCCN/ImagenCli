@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 from typing import Any, cast
 
 from PIL import Image
@@ -20,6 +22,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Static
 
 from imagen_cli.application import cache_service, media_ops
+from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
 from imagen_cli.cli.human import render as human_render
 from imagen_cli.cli.options import SharedOptions
 from imagen_cli.cli.registry import COMMANDS, discover
@@ -30,140 +33,6 @@ from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 from . import preview
-
-PRESETS: dict[str, list[dict[str, Any]]] = {
-    "像素化": [{"op": "pixelate", "params": {"scale": 4}}],
-    "调色板": [{"op": "quantize", "params": {"colors": 16, "dither": True}}],
-    "线稿": [
-        {"op": "grayscale"},
-        {"op": "autocontrast"},
-        {"op": "highpass", "params": {"radius": 2, "boost": 2}},
-    ],
-    "抖动": [{"op": "dither", "params": {"mode": "atkinson"}}],
-    "锐化": [{"op": "sharpen", "params": {"radius": 2, "percent": 160}}],
-    "赛璐璐": [{"op": "cel_shade", "params": {"levels": 3}}],
-    "去AI塑料感": [
-        {
-            "op": "surface_blur",
-            "params": {"radius": 3, "threshold": 18.0, "blend": 0.8},
-        },
-        {
-            "op": "filmic_tone",
-            "params": {"lift_black": 2, "compress_white": 250, "saturation": 0.98},
-        },
-        {
-            "op": "de_ai_bloom",
-            "params": {"radius": 4, "intensity": 0.08, "threshold": 230, "preserve_lines": True},
-        },
-    ],
-    "抗AI生成伪影综合治理": [
-        {"op": "anti_checkerboard", "params": {"strength": 0.3, "cutoff": 0.85}},
-        {"op": "de_haloing", "params": {"radius": 2, "strength": 0.5, "threshold": 25}},
-        {
-            "op": "surface_blur",
-            "params": {"radius": 4, "threshold": 20.0, "blend": 0.85},
-        },
-        {
-            "op": "subsurface_scattering",
-            "params": {"radius": 3, "scatter_strength": 0.12, "skin_only": True},
-        },
-        {
-            "op": "filmic_tone",
-            "params": {"lift_black": 2, "compress_white": 250, "saturation": 0.98},
-        },
-    ],
-    "二次元平涂去杂": [
-        {
-            "op": "surface_blur",
-            "params": {"radius": 4, "threshold": 22.0, "blend": 0.9},
-        },
-        {
-            "op": "color_purity",
-            "params": {"shadow_desat": 0.3, "shadow_threshold": 65.0, "vibrance_boost": 0.12},
-        },
-    ],
-    "动漫色彩提纯": [
-        {
-            "op": "color_purity",
-            "params": {"shadow_desat": 0.4, "shadow_threshold": 70.0, "vibrance_boost": 0.2},
-        },
-    ],
-    "日系通透空气感": [
-        {"op": "color_temperature", "params": {"temperature": 0.15, "tint": -0.05}},
-        {
-            "op": "de_ai_bloom",
-            "params": {"radius": 10, "intensity": 0.35, "threshold": 170, "preserve_lines": True},
-        },
-        {"op": "vignette", "params": {"radius": 0.8, "feather": 0.4, "darkness": 0.3}},
-    ],
-    "热血集中线": [
-        {"op": "focus_lines", "params": {"lines": 140, "inner_radius": 0.35, "max_width": 3}},
-    ],
-    "黑白漫画网点": [
-        {"op": "screentone", "params": {"frequency": 35, "angle": 45.0, "contrast": 1.2}},
-    ],
-    "立绘贴纸白边": [
-        {"op": "sticker_outline", "params": {"width": 8, "color": "#ffffff", "shadow": True}},
-    ],
-    "XDoG动漫线稿": [
-        {
-            "op": "lineart_extract",
-            "params": {"radius": 1.0, "k": 1.6, "gamma": 0.98, "threshold": 0.02},
-        },
-    ],
-    "ACES电影级色调": [
-        {"op": "aces_tonemap", "params": {"exposure": 1.0, "contrast": 1.05}},
-    ],
-    "引导滤波细节增强": [
-        {"op": "guided_filter", "params": {"radius": 4, "eps": 0.04, "boost": 1.5}},
-    ],
-    "桑原二次元平涂": [
-        {"op": "kuwahara", "params": {"size": 5}},
-    ],
-    "剧场版宽银幕眩光": [
-        {
-            "op": "anamorphic_flare",
-            "params": {"threshold": 215, "length": 36, "tint": "#4a90e2", "intensity": 0.65},
-        },
-    ],
-    "日系晴空色彩迁移": [
-        {"op": "color_transfer", "params": {"style": "anime_sky", "strength": 0.8}},
-    ],
-    "复古90年代胶片": [
-        {"op": "filmic_tone", "params": {"lift_black": 10, "compress_white": 238, "warmth": 0.2}},
-        {"op": "vignette", "params": {"radius": 0.7, "feather": 0.5, "darkness": 0.45}},
-        {"op": "film_grain", "params": {"amount": 0.08, "monochrome": False}},
-    ],
-    "动漫超分辨率 4x": [
-        {
-            "op": "superres",
-            "params": {"model": "realesrgan-x4plus-anime", "tile": 256, "overlap": 16},
-        },
-    ],
-    "通用超分辨率 4x": [
-        {"op": "superres", "params": {"model": "realesrgan-x4plus", "tile": 256, "overlap": 16}},
-    ],
-    "日系治愈空气柔光": [
-        {"op": "diffuse_glow", "params": {"intensity": 0.4, "radius": 20, "threshold": 175}},
-        {"op": "vibrance", "params": {"amount": 0.25}},
-        {"op": "line_color", "params": {"strength": 0.7, "darkness": 0.4}},
-    ],
-    "大魄力动感鱼眼": [
-        {"op": "fisheye", "params": {"strength": 0.35, "zoom": 1.05}},
-        {"op": "focus_lines", "params": {"lines": 60, "inner_radius": 0.35, "max_width": 2}},
-    ],
-    "橙青影视色彩平衡": [
-        {
-            "op": "color_balance",
-            "params": {
-                "shadows": [-0.15, -0.05, 0.2],
-                "highlights": [0.2, 0.05, -0.15],
-            },
-        },
-        {"op": "filmic_tone", "params": {"lift_black": 8, "compress_white": 242}},
-        {"op": "film_grain", "params": {"amount": 0.05, "monochrome": True}},
-    ],
-}
 
 
 @dataclass
@@ -590,6 +459,8 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                     label = f"{prefix}{p_meta.label} ({k})"
                     placeholder = f"默认 {p_meta.default} · {p_meta.description}"
                     expected_type = p_meta.param_type
+                    if expected_type == "choice" and type(p_meta.default) is int:
+                        expected_type = "int"
                 else:
                     label = f"{op}.{k}"
                     placeholder = f"当前值: {v}"
@@ -696,6 +567,8 @@ class TransformScreen(ModalScreen[bool]):
         self.artifact = artifact
         self.session = session
         self.path = path
+        self.running = False
+        self.cancelled = Event()
         self.all_names = list(PRESETS)
         self.filtered_names = list(self.all_names)
         self.names = self.filtered_names
@@ -878,12 +751,20 @@ class TransformScreen(ModalScreen[bool]):
         self.app.push_screen(ParamEditScreen(name, pipeline), on_saved)
 
     def action_apply(self) -> None:
+        if self.running:
+            return
         row = self.table.cursor_row
         if not 0 <= row < len(self.names):
             return
         name = self.names[row]
         assert self.deps.transform is not None
         pipeline = self.pipelines.get(name, PRESETS[name])
+        if self.deps.transform == self.deps._transform:
+            self.running = True
+            self.cancelled.clear()
+            self.status.update("处理中 · Esc 取消，成功后保存新产物")
+            self.run_worker(self._apply_isolated(pipeline), exclusive=True)
+            return
         try:
             result = self.deps.transform(self.artifact, pipeline, self.session)
         except (ValueError, KeyError, OSError, RuntimeError) as error:
@@ -891,7 +772,38 @@ class TransformScreen(ModalScreen[bool]):
             return
         self.dismiss(bool(result))
 
+    async def _apply_isolated(self, pipeline: list[dict[str, Any]]) -> None:
+        from imagen_cli.application import postprocess_service
+        from imagen_cli.application.postprocess_worker import execute
+
+        try:
+            # Only file computation leaves the UI thread; SQLite publication stays here.
+            steps = postprocess_service.validate(pipeline)
+            data, metadata = await asyncio.to_thread(
+                execute, self.path, steps, cancelled=self.cancelled,
+            )
+            if self.cancelled.is_set():
+                self.status.update("处理已取消，未保存产物")
+                return
+            result = postprocess_service.publish_result(
+                self.deps.repositories, self.deps.store, self.artifact, steps,
+                data, metadata, session_id=self.session,
+            )
+        except (ValueError, KeyError, OSError, RuntimeError) as error:
+            self.status.update(_sanitize(error))
+        else:
+            self.dismiss(bool(result))
+        finally:
+            self.running = False
+
+    def on_unmount(self) -> None:
+        self.cancelled.set()
+
     def action_cancel(self) -> None:
+        if self.running:
+            self.cancelled.set()
+            self.status.update("正在取消处理…")
+            return
         self.dismiss(False)
 
 
