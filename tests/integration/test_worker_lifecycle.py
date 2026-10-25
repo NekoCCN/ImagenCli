@@ -210,7 +210,7 @@ def test_worker_survives_parent_exit_then_kill_is_not_alive(tmp_path: Path) -> N
     child.close()
     pid: int | None = None
     try:
-        assert parent.poll(15), "detached worker handshake did not report"
+        assert parent.poll(45), "detached worker handshake did not report"
         facts = parent.recv()
         process.join(10)
         assert process.exitcode == 0

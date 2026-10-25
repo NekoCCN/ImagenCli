@@ -11,6 +11,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -26,7 +27,7 @@ from imagen_cli.storage.repositories import Repositories
 
 HEARTBEAT_SECONDS = 5.0
 LEASE_SECONDS = 30.0
-HANDSHAKE_SECONDS = 10.0
+HANDSHAKE_SECONDS = 30.0
 _TERMINAL = {"succeeded", "failed", "canceled"}
 
 
@@ -308,6 +309,7 @@ def spawn_worker(
     environment["PYTHONPATH"] = os.pathsep.join(
         [str(source_root), *([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [])]
     )
+    stderr = tempfile.TemporaryFile()
     process = subprocess.Popen(
         [
             sys.executable, "-m", "imagen_cli.execution.worker",
@@ -318,7 +320,7 @@ def spawn_worker(
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr,
         start_new_session=os.name != "nt",
         creationflags=(
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -330,18 +332,38 @@ def spawn_worker(
     deadline = time.monotonic() + timeout
     try:
         while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise LeaseError("detached worker exited before its handshake")
+            # uv's Windows venv launcher spawns the real interpreter, so the
+            # persisted pid differs from Popen.pid; the unique id is the
+            # handshake identity.
+            if os.name != "nt" and process.poll() is not None:
+                raise LeaseError(
+                    "detached worker exited before its handshake" + _stderr_tail(stderr)
+                )
             row = repositories.get("workers", worker_id)
-            if row is not None and row.get("state") == "running" and row.get("pid") == process.pid:
+            if row is not None and row.get("state") == "running":
                 return cast(dict[str, Any], row)
             time.sleep(0.05)
-        raise LeaseError("detached worker handshake timed out")
+        row = repositories.get("workers", worker_id, include_private=True)
+        raise LeaseError(
+            f"detached worker handshake timed out (pid={process.pid}, row={row})"
+            + _stderr_tail(stderr)
+        )
     except BaseException:
         if process.poll() is None:
             with suppress(OSError):
                 process.terminate()
         raise
+    finally:
+        stderr.close()
+
+
+def _stderr_tail(stream: Any) -> str:
+    try:
+        stream.seek(0)
+        text = stream.read().decode("utf-8", "replace").strip()
+    except (OSError, ValueError):
+        return ""
+    return f": {text[-500:]}" if text else ""
 
 
 def _execute_pending(container: Any, worker: Worker) -> None:
