@@ -26,5 +26,5 @@ def test_nonfinite_parameters_are_rejected(value):
 
 
 def test_unknown_parameter_is_rejected_before_processing():
-    with pytest.raises(ValueError, match="parameters"):
+    with pytest.raises(ValueError, match="no_such"):
         postprocess_service.validate([{"op": "brightness", "params": {"no_such": 1}}])

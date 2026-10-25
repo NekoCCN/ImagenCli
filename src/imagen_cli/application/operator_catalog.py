@@ -23,6 +23,21 @@ class Parameter:
     is_advanced: bool = False
     required: bool = False
 
+    def as_dict(self) -> dict[str, Any]:
+        """What a caller needs to type `name=value` without reading source."""
+        return {
+            "name": self.name,
+            "label": self.label,
+            "type": self.param_type,
+            "default": self.default,
+            "min": self.min_value,
+            "max": self.max_value,
+            "choices": list(self.choices) if self.choices else None,
+            "description": self.description,
+            "advanced": self.is_advanced,
+            "required": self.required,
+        }
+
 
 @dataclass(frozen=True)
 class OperatorItem:
@@ -2565,14 +2580,20 @@ _BROWSE_NAMES = {
 }
 
 
-def browse_entries() -> list[dict[str, str]]:
-    """Human-facing entries; legacy keys remain valid for execution."""
+def browse_entries(*, include_aliases: bool = False) -> list[dict[str, str]]:
+    """Human-facing recipes; every preset key stays valid for execution.
+
+    A single-operator preset is not a recipe: it is that operator with tuned
+    parameters, so it is documented on the operator page instead of listed here.
+    """
     entries = []
     pipelines: list[list[dict[str, Any]]] = []
     for key, pipeline in PRESET_PIPELINES.items():
         if pipeline in pipelines:
             continue
         pipelines.append(pipeline)
+        if not include_aliases and len(pipeline) == 1:
+            continue
         item = get_operator_item(key)
         if not i18n.is_chinese():
             name = operator_catalog_en.PRESET_NAMES.get(
@@ -2600,7 +2621,7 @@ def display_preset_name(key: str) -> str:
     if i18n.is_chinese():
         return key
     base = key.split(" (", 1)[0]
-    for entry in browse_entries():
+    for entry in browse_entries(include_aliases=True):
         if entry["key"] in {key, base}:
             return entry["name"]
     item = get_operator_item(key)

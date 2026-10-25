@@ -1,5 +1,6 @@
 """Dependency composition root; offline commands have no provider or storage side effects."""
 
+import difflib
 from dataclasses import dataclass, field
 from functools import cached_property, partial
 from types import TracebackType
@@ -14,6 +15,118 @@ if TYPE_CHECKING:
     from imagen_cli.storage.private_state import PrivateStateStore
     from imagen_cli.storage.repositories import Repositories
     from imagen_cli.storage.workspace import Workspace
+
+_KINDS = {"operator": ("operator", "算子"), "preset": ("preset", "预设")}
+
+
+def _unknown_identifier(value: str, options: Any, kind: str, command: str) -> str:
+    """Name the miss, suggest a near match, and point at the full list."""
+    english, chinese = _KINDS[kind]
+    matches = difflib.get_close_matches(value, sorted(map(str, options)), n=3)
+    if matches:
+        suggestion_en = f" Did you mean {', '.join(matches)}?"
+        suggestion_zh = f"是不是 {', '.join(matches)}？"
+    else:
+        suggestion_en = suggestion_zh = ""
+    return str(
+        i18n.t(
+            f"Unknown {english} '{value}'.{suggestion_en} Run `{command}` to list them.",
+            f"未知{chinese} '{value}'。{suggestion_zh}运行 `{command}` 查看列表。",
+        )
+    )
+
+
+def _op_spec(item: Any) -> str:
+    """A runnable `name:key=value` spec built from the operator's defaults."""
+    pairs = []
+    for parameter in item.basic_parameters:
+        value = parameter.default
+        if isinstance(value, bool):
+            value = "true" if value else "false"
+        elif isinstance(value, str) and (not value or "," in value):
+            value = f'"{value}"'
+        pairs.append(f"{parameter.name}={value}")
+    op = str(item.default_op)
+    return op + (":" + ",".join(pairs) if pairs else "")
+
+
+def _signature_parameters(op: str) -> list[dict[str, Any]]:
+    """Fallback for operators the curated catalog does not describe yet."""
+    import inspect
+
+    from imagen_cli.application import media_ops
+
+    operation = media_ops.OPS.get(op)
+    if operation is None:
+        return []
+    try:
+        parameters = list(inspect.signature(operation).parameters.values())[1:]
+    except (TypeError, ValueError):
+        return []
+    kinds = {int: "int", float: "float", bool: "bool", str: "str"}
+    rows = []
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            continue
+        annotation = parameter.annotation
+        missing = parameter.default is inspect.Parameter.empty
+        rows.append(
+            {
+                "name": parameter.name,
+                "label": parameter.name,
+                "type": kinds.get(annotation, str(annotation).strip("'\""))
+                if annotation is not inspect.Parameter.empty
+                else "value",
+                "default": None if missing else parameter.default,
+                "min": None,
+                "max": None,
+                "choices": None,
+                "description": "",
+                "advanced": False,
+                "required": missing,
+            }
+        )
+    return rows
+
+
+def _operator_details(catalog: Any, op: str) -> dict[str, Any]:
+    """Intro plus the parameters a caller types after `--op`."""
+    details: dict[str, Any] = dict(catalog.localized_intro(op) or {})
+    details["op"] = op
+    # The operator page is the hub: name the recipes that use it, and the
+    # single-operator presets whose tuned parameters differ from the defaults.
+    details["presets"] = [
+        key
+        for key, pipeline in catalog.PRESET_PIPELINES.items()
+        if key != op and len(pipeline) > 1 and any(step.get("op") == op for step in pipeline)
+    ][:6]
+    item = catalog.get_operator_item(op)
+    defaults = item.default_params if item is not None else None
+    variants = []
+    for key, pipeline in catalog.PRESET_PIPELINES.items():
+        if key == op or len(pipeline) != 1:
+            continue
+        step = pipeline[0]
+        if step.get("op") != op:
+            continue
+        params = step.get("params", {})
+        if defaults is not None and params == defaults:
+            continue
+        variants.append({"preset": key, "params": params})
+    if variants:
+        details["variants"] = variants
+    if item is None:
+        details.setdefault("title", op)
+        details["parameters"] = _signature_parameters(op)
+        details.setdefault("example", f"imagen transform ARTIFACT --op '{op}'")
+        return details
+    shown = catalog.localized_operator(item)
+    details.setdefault("title", shown.name)
+    details.setdefault("summary", shown.description)
+    details["category"] = shown.category_label
+    details["parameters"] = [parameter.as_dict() for parameter in shown.parameters]
+    details["example"] = f"imagen transform ARTIFACT --op '{_op_spec(shown)}'"
+    return details
 
 
 @dataclass
@@ -333,22 +446,14 @@ class Container:
             target_op = args.get("op")
             target_preset = args.get("preset")
             verbose = args.get("verbose") is True
+            if target_op and target_op not in media_ops.OPS:
+                raise ValueError(
+                    _unknown_identifier(target_op, media_ops.OPS, "operator", "imagen ops")
+                )
             if target_op or target_preset or verbose:
                 details: dict[str, Any] = {}
                 if target_op:
-                    intro = operator_catalog.localized_intro(target_op)
-                    if intro is not None:
-                        details[target_op] = intro
-                    elif op_item := operator_catalog.get_operator_item(target_op):
-                        shown = operator_catalog.localized_operator(op_item)
-                        details[target_op] = {
-                            "title": shown.name,
-                            "summary": shown.description,
-                            "principle": shown.category_label,
-                            "scenarios": "CLI / TUI interactive parameter tuning"
-                            if not i18n.is_chinese()
-                            else "CLI / TUI 交互调参",
-                        }
+                    details[target_op] = _operator_details(operator_catalog, target_op)
                 elif target_preset:
                     match_key = next(
                         (
@@ -358,12 +463,23 @@ class Container:
                         ),
                         None,
                     )
-                    if match_key:
-                        intro_data = operator_catalog.localized_intro(match_key) or {}
-                        details[match_key] = {
-                            "pipeline": operator_catalog.PRESET_PIPELINES[match_key],
-                            "intro": intro_data,
-                        }
+                    if match_key is None:
+                        raise ValueError(
+                            _unknown_identifier(
+                                target_preset,
+                                list(operator_catalog.PRESET_PIPELINES),
+                                "preset",
+                                "imagen ops",
+                            )
+                        )
+                    details[match_key] = {
+                        "pipeline": operator_catalog.PRESET_PIPELINES[match_key],
+                        "intro": operator_catalog.localized_intro(match_key) or {},
+                        "steps": [
+                            _operator_details(operator_catalog, step["op"])
+                            for step in operator_catalog.PRESET_PIPELINES[match_key]
+                        ],
+                    }
                 else:
                     details = {
                         key: operator_catalog.localized_intro(key) or {}

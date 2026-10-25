@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import inspect
 import io
@@ -14,6 +15,7 @@ from typing import Any
 import PIL
 from PIL import Image
 
+from imagen_cli import i18n
 from imagen_cli.application import media_ops
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.storage import queries
@@ -59,7 +61,18 @@ def validate(pipeline: Any) -> list[dict[str, Any]]:
             if index != len(pipeline) - 1:
                 raise ValueError("encode must be the final step")
         elif name not in media_ops.OPS:
-            raise ValueError(f"unknown operation: {name}")
+            matches = difflib.get_close_matches(name, sorted(media_ops.OPS), n=3)
+            suggestion = ""
+            if matches:
+                suggestion = i18n.t(
+                    f" Did you mean {', '.join(matches)}?", f"是不是 {'、'.join(matches)}？"
+                )
+            raise ValueError(
+                i18n.t(
+                    f"Unknown operation '{name}'.{suggestion} Run `imagen ops` to list them.",
+                    f"未知算子 '{name}'。{suggestion}运行 `imagen ops` 查看列表。",
+                )
+            )
         params = step.get("params", {})
         if not isinstance(params, dict):
             raise ValueError("operation params must be an object")
@@ -70,10 +83,17 @@ def validate(pipeline: Any) -> list[dict[str, Any]]:
         if type(revision) is not int or revision != 1:
             raise ValueError("unsupported algorithm version")
         operation = media_ops.encode if name == "encode" else media_ops.OPS[name]
+        signature = inspect.signature(operation)
         try:
-            inspect.signature(operation).bind(None, **params)
+            signature.bind(None, **params)
         except TypeError as error:
-            raise ValueError(f"invalid parameters for {name}") from error
+            accepted = ", ".join(list(signature.parameters)[1:])
+            raise ValueError(
+                i18n.t(
+                    f"Invalid parameters for {name}: {error}. Accepted: {accepted}",
+                    f"{name} 的参数不合法：{error}。可用参数：{accepted}",
+                )
+            ) from error
         def check_finite(value: Any) -> None:
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError("operation parameters must be finite")
@@ -400,7 +420,12 @@ def apply(
     steps = validate(pipeline)
     row = repositories.get("artifacts", source, include_private=True)
     if row is None:
-        raise KeyError(source)
+        raise ValueError(
+            i18n.t(
+                f"Artifact {source} was not found in this workspace.",
+                f"产物 {source} 不在当前工作区中。",
+            )
+        )
     if row["save_state"] != "published":
         raise ValueError("source artifact is not published")
     path = store.get(source)
@@ -408,7 +433,7 @@ def apply(
         raise ValueError("source artifact bytes are unavailable")
     session = session_id or _owner(repositories, source)
     if repositories.get("sessions", session) is None:
-        raise KeyError(session)
+        raise ValueError(i18n.t(f"Session {session} was not found.", f"会话 {session} 不存在。"))
     from imagen_cli.application.postprocess_worker import execute
 
     data, metadata = execute(path, steps, timeout=timeout, cancelled=cancelled)

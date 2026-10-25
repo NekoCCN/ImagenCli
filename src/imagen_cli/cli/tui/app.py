@@ -608,7 +608,7 @@ class TransformScreen(ModalScreen[bool]):
         self.cancelled = Event()
         from imagen_cli.application.operator_catalog import browse_entries
 
-        self.entries = {entry["key"]: entry for entry in browse_entries()}
+        self.entries = {entry["key"]: entry for entry in browse_entries(include_aliases=True)}
         self.categories = (
             [
                 "All",

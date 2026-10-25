@@ -57,7 +57,7 @@ def test_same_pipeline_is_byte_identical(workspace):
 
 def test_unknown_op_and_step_limit_are_refused(workspace):
     repositories, store = workspace
-    with pytest.raises(ValueError, match="unknown operation"):
+    with pytest.raises(ValueError, match="nope"):
         postprocess_service.apply(repositories, store, "art_" + "a" * 32, [{"op": "nope"}])
     with pytest.raises(ValueError, match="step limit"):
         postprocess_service.apply(

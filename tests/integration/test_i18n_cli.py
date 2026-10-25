@@ -79,9 +79,10 @@ def test_operation_intro_is_chinese_with_lang(tmp_path):
 def test_operation_catalog_lists_english_names(tmp_path):
     _, text = invoke(tmp_path, "ops")
     assert "experimental" in text
-    assert "Pixelate" in text
-    # Preset keys stay unchanged for compatibility; only display names translate.
+    assert "Anti-AI Organic" in text
+    # Operators keep their ASCII identifiers; only recipe display names translate.
     assert "  像素化\n" not in text
+    assert "  pixelate\n" in text
 
 
 def test_unknown_language_is_a_validation_error(tmp_path):

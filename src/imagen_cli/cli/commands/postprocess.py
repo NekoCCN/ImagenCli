@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 from typing import Any, cast
 
+from imagen_cli import i18n
 from imagen_cli.application.postprocess_service import apply
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.repositories import Repositories
@@ -104,7 +106,18 @@ def transform_(
                     match = v
                     break
         if match is None:
-            raise ValueError(f"preset '{preset}' not found")
+            matches = difflib.get_close_matches(preset, list(PRESET_PIPELINES), n=3)
+            suggestion = ""
+            if matches:
+                suggestion = i18n.t(
+                    f" Did you mean {', '.join(matches)}?", f"是不是 {'、'.join(matches)}？"
+                )
+            raise ValueError(
+                i18n.t(
+                    f"Unknown preset '{preset}'.{suggestion} Run `imagen ops` to list them.",
+                    f"未知预设 '{preset}'。{suggestion}运行 `imagen ops` 查看列表。",
+                )
+            )
         steps = match
     else:
         raise ValueError("pipeline, op or preset is required")
