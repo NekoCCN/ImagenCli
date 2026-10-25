@@ -83,12 +83,14 @@ def test_asset_open_uses_startfile_on_windows(tmp_path, png_bytes, monkeypatch):
     target.write_bytes(png_bytes)
     opened: list[str] = []
     monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(os, "startfile", lambda path: opened.append(path), raising=False)
     open_path(target)
     open_path(target, folder=True)
     assert opened == [str(target), str(target.parent)]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX open handler")
 def test_asset_open_uses_open_on_darwin(tmp_path, png_bytes, monkeypatch):
     binary = tmp_path / "bin"
     binary.mkdir()

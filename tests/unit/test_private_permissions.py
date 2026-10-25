@@ -78,7 +78,7 @@ def test_windows_file_verification_failure_closes_handle(tmp_path, monkeypatch, 
             events.append("open")
             return 123
 
-        def create(self, path, *, directory):
+        def create(self, path, *, directory, share_delete=False):
             events.append("create")
             return 123
 

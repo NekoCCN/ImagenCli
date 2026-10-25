@@ -6,6 +6,7 @@ from imagen_cli.application import skill_targets
 def test_targets_cover_upstream_and_resolve_scopes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     rows = skill_targets.targets()
     assert len(rows) >= 79
     assert len({row["name"] for row in rows}) == len(rows)

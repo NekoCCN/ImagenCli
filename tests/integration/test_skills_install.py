@@ -16,6 +16,7 @@ def _run(*args: str) -> tuple[int, dict]:
 def test_bundled_skills_are_discoverable(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     status, data = skills_service.list_()
     assert status == "succeeded"
     names = {row["name"] for row in data["skills"]}
@@ -30,6 +31,7 @@ def test_bundled_skills_are_discoverable(tmp_path, monkeypatch):
 def test_install_chooses_scope_and_skills(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
     status, data = skills_service.install_(["imagen"], scope="project")
     assert status == "succeeded"
@@ -47,6 +49,7 @@ def test_install_chooses_scope_and_skills(tmp_path, monkeypatch):
 def test_existing_skill_needs_force(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     skills_service.install_(["imagen"], scope="project")
     target = tmp_path / ".claude" / "skills" / "imagen" / "SKILL.md"
     target.write_text("stale", encoding="utf-8")
@@ -63,6 +66,7 @@ def test_existing_skill_needs_force(tmp_path, monkeypatch):
 def test_unknown_skill_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     status, data = skills_service.install_(["nope"], scope="project")
     assert status == "not_found"
     assert "imagen" in data["available"]
@@ -72,6 +76,7 @@ def test_unknown_skill_writes_nothing(tmp_path, monkeypatch):
 def test_cli_install_and_list_are_wired(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
     code, response = _run("skills", "list")
     assert code == 0 and response["ok"] is True
@@ -95,6 +100,7 @@ def test_project_scope_is_the_current_folder(tmp_path, monkeypatch):
     first.mkdir()
     second.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
     monkeypatch.chdir(first)
     assert skills_service.install_(["imagen"])[0] == "succeeded"
@@ -160,6 +166,7 @@ def test_all_targets_in_project(tmp_path, monkeypatch):
 
 def test_all_global_skips_project_only_targets(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     status, data = skills_service.install_(["imagen"], scope="global", agents=["all"])
     assert status == "succeeded"

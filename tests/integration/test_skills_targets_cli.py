@@ -7,6 +7,7 @@ from imagen_cli.cli.entrypoint import main
 def test_targets_and_uninstall_cli(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     for command in ("install", "uninstall"):
         out = io.StringIO()
         code = main(
