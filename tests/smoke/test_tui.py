@@ -478,7 +478,7 @@ def test_transform_intro_display(deps):
 
 
 def test_all_transform_presets_render_successfully(deps):
-    from imagen_cli.cli.tui.app import PRESETS, TransformScreen
+    from imagen_cli.cli.tui.app import TransformScreen
 
     deps_value, _ = deps
 
@@ -492,7 +492,10 @@ def test_all_transform_presets_render_successfully(deps):
             screen = app.screen
             assert isinstance(screen, TransformScreen)
 
-            for row_idx in range(len(PRESETS)):
+            for row_idx in range(len(screen.names)):
+                label = str(screen.table.get_cell_at((row_idx, 0)))
+                assert label == screen.entries[screen.names[row_idx]]["name"]
+                assert not any(char.isascii() and char.isalpha() for char in label)
                 screen.table.move_cursor(row=row_idx)
                 screen.render_preview()
                 view_str = str(screen.view.render())

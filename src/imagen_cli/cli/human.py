@@ -362,6 +362,21 @@ def _rich(value: dict[str, Any], width: int) -> str:
 
 def render(value: dict[str, Any], *, columns: int | None = None, color: bool = False) -> str:
     width = _columns(columns)
+    data = value.get("data") or {}
+    if value.get("ok") and data.get("presets") and not data.get("details"):
+        from imagen_cli.application.operator_catalog import browse_entries
+
+        lines = ["后处理目录（调用标识保留兼容）"]
+        entries = browse_entries()
+        for group in dict.fromkeys(entry["group"] for entry in entries):
+            lines.append(f"\n{group}")
+            for entry in entries:
+                if entry["group"] == group:
+                    key = entry["key"].split(" (", 1)[0]
+                    lines.extend((f"  {entry['name']}", f"    --preset \"{key}\""))
+        lines.append("\n全部底层算子（--op）：")
+        lines.extend(f"  {op}" for op in data.get("operations", []))
+        return "\n".join(lines)
     text = _rich(value, width) if color else "\n".join(_plain(value, width))
     return text.rstrip("\n")
 

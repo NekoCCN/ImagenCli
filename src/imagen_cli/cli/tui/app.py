@@ -569,7 +569,12 @@ class TransformScreen(ModalScreen[bool]):
         self.path = path
         self.running = False
         self.cancelled = Event()
-        self.all_names = list(PRESETS)
+        from imagen_cli.application.operator_catalog import browse_entries
+
+        self.entries = {entry["key"]: entry for entry in browse_entries()}
+        self.categories = ["全部", "综合配方", "平滑与缺陷", "线条与色块", "颜色明暗",
+                           "风格光学", "模型恢复", "尺寸几何"]
+        self.all_names = list(self.entries)
         self.filtered_names = list(self.all_names)
         self.names = self.filtered_names
         self.current_category_idx = 0
@@ -603,11 +608,9 @@ class TransformScreen(ModalScreen[bool]):
             )
 
     def on_mount(self) -> None:
-        from imagen_cli.application.operator_catalog import CATEGORIES_LIST
-
         self.category_table.cursor_type = "row"
         self.category_table.add_columns("分类")
-        for cat in CATEGORIES_LIST:
+        for cat in self.categories:
             self.category_table.add_row(cat)
         self.category_table.can_focus = False
         self.category_table.move_cursor(row=0)
@@ -623,20 +626,18 @@ class TransformScreen(ModalScreen[bool]):
     def _populate_table(self) -> None:
         self.table.clear()
         for name in self.filtered_names:
-            self.table.add_row(name)
+            self.table.add_row(self.entries[name]["name"])
 
     def action_toggle_category(self) -> None:
-        from imagen_cli.application.operator_catalog import CATEGORIES_LIST, PRESET_CATEGORIES
-
-        self.current_category_idx = (self.current_category_idx + 1) % len(CATEGORIES_LIST)
+        self.current_category_idx = (self.current_category_idx + 1) % len(self.categories)
         self.category_table.move_cursor(row=self.current_category_idx)
-        cat_filter = CATEGORIES_LIST[self.current_category_idx]
+        cat_filter = self.categories[self.current_category_idx]
         if cat_filter == "全部":
             self.filtered_names = list(self.all_names)
             self.header_title.update("变换预设与后处理工作室")
         else:
             self.filtered_names = [
-                n for n in self.all_names if PRESET_CATEGORIES.get(n) == cat_filter
+                n for n in self.all_names if self.entries[n]["group"] == cat_filter
             ]
             self.header_title.update(f"变换预设与后处理工作室  [dim cyan]({cat_filter})[/]")
         self.names = self.filtered_names

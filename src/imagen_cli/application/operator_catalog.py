@@ -2458,6 +2458,30 @@ CATEGORIES_LIST: list[str] = [
 ]
 
 
+def browse_entries() -> list[dict[str, str]]:
+    """Human-facing entries; legacy keys remain valid for execution."""
+    names = {
+        "XDoG动漫手绘线稿 (Line Art)": "动漫手绘线稿",
+        "去AI塑料感 (Anti-AI Organic)": "柔化塑料质感",
+        "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": "网格与光晕抑制",
+        "二次元赛璐珞顶级精修 (Anime Cel Master)": "赛璐璐平滑与描线",
+        "l0_smooth": "稀疏梯度平滑",
+    }
+    entries = []
+    pipelines: list[list[dict[str, Any]]] = []
+    for key, pipeline in PRESET_PIPELINES.items():
+        if pipeline in pipelines:
+            continue
+        pipelines.append(pipeline)
+        item = get_operator_item(key)
+        name = names.get(key, (item.name if item else key).split(" (", 1)[0]).replace("4x", "4倍")
+        entries.append({
+            "key": key, "name": name,
+            "group": "综合配方" if len(pipeline) > 1 else PRESET_CATEGORIES[key],
+        })
+    return entries
+
+
 def get_intro_text(key: str) -> str:
     """Return formatted introductory text for TUI transform screen."""
     item = INTROS.get(key)
