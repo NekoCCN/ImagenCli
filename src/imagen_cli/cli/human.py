@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import textwrap
 from typing import Any
 
 from imagen_cli.i18n import is_chinese, t
@@ -58,6 +59,91 @@ def _cost_line(cost: dict[str, Any]) -> str:
         f"Cost: {amount} {cost.get('currency') or ''}".rstrip(),
         f"费用：{amount} {cost.get('currency') or ''}".rstrip(),
     )
+
+
+def _detail_lines(key: str, entry: dict[str, Any]) -> list[str]:
+    """One catalog entry: what it does, what it costs, and how to tune it."""
+    nested = entry.get("intro")
+    intro: dict[str, Any] = nested if isinstance(nested, dict) else entry
+    lines = [f"  ✦ {intro.get('title', key)}"]
+    if intro.get("summary"):
+        lines.append(t(f"    Operation: {intro['summary']}", f"    操作：{intro['summary']}"))
+    if intro.get("benefit"):
+        lines.append(
+            t(
+                f"    Possible advantages: {intro['benefit']}",
+                f"    可能的优势：{intro['benefit']}",
+            )
+        )
+    if intro.get("loss"):
+        lines.append(
+            t(
+                f"    Possible drawbacks: {intro['loss']}",
+                f"    可能的缺点：{intro['loss']}",
+            )
+        )
+    if intro.get("use_case"):
+        lines.append(
+            t(
+                f"    May be useful for: {intro['use_case']}",
+                f"    可能用来：{intro['use_case']}",
+            )
+        )
+    if intro.get("principle"):
+        lines.append(t(f"    How: {intro['principle']}", f"    原理：{intro['principle']}"))
+    if entry.get("presets"):
+        from imagen_cli.application.operator_catalog import display_preset_name
+
+        used_by = "、".join(display_preset_name(str(key)) for key in entry["presets"])
+        lines.append(t(f"    Recipes using it: {used_by}", f"    使用它的配方：{used_by}"))
+    if entry.get("variants"):
+        lines.append(t("    Preset variants:", "    预设变体："))
+        for variant in entry["variants"]:
+            pairs = ",".join(f"{name}={_shown(value)}" for name, value in variant["params"].items())
+            lines.append(f"      {variant['preset']} · {pairs}")
+    for step in entry.get("steps") or [entry]:
+        lines.extend(_parameter_lines(step))
+    if entry.get("example"):
+        lines.append(t(f"    Example: {entry['example']}", f"    示例：{entry['example']}"))
+    return lines
+
+
+def _shown(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _parameter_lines(item: dict[str, Any]) -> list[str]:
+    """One readable line per tuning knob, so no one needs to read the source."""
+    parameters = item.get("parameters") or []
+    if not parameters:
+        return []
+    header = t("    Parameters", "    参数")
+    label = item.get("op") or item.get("title")
+    if label:
+        header += f" · {label}"
+    lines = [header + t(":", "：")]
+    for parameter in parameters:
+        parts = [str(parameter.get("name", "")), str(parameter.get("type", ""))]
+        if parameter.get("choices"):
+            parts.append("/".join(_shown(choice) for choice in parameter["choices"]))
+        elif parameter.get("min") is not None or parameter.get("max") is not None:
+            low = _shown(parameter["min"]) if parameter.get("min") is not None else ""
+            high = _shown(parameter["max"]) if parameter.get("max") is not None else ""
+            parts.append(f"{low}–{high}")
+        default = _shown(parameter.get("default"))
+        parts.append(t(f"default {default}", f"默认 {default}"))
+        if parameter.get("required"):
+            parts.append(t("required", "必填"))
+        if parameter.get("advanced"):
+            parts.append(t("advanced", "高级"))
+        if parameter.get("description"):
+            parts.append(str(parameter["description"]))
+        lines.append("      " + " · ".join(part for part in parts if part))
+    return lines
 
 
 def _plain_lines(value: dict[str, Any]) -> list[str]:
@@ -162,55 +248,28 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             t(f"  parameter {name} · {kind} · {detail}", f"  参数 {name} · {kind} · {detail}")
         )
     separator = "、" if is_chinese() else ", "
-    operations = data.get("operations")
-    if isinstance(operations, list) and operations:
-        lines.append(t("Operations: ", "操作：") + separator.join(str(item) for item in operations))
-    presets = data.get("presets")
-    if isinstance(presets, list) and presets:
-        from imagen_cli.application.operator_catalog import display_preset_name
-
-        lines.append(
-            t("Presets: ", "预设：")
-            + separator.join(display_preset_name(str(item)) for item in presets)
-        )
     details = data.get("details")
+    # A detail request is about one entry; the full identifier list would bury it.
+    if not details:
+        operations = data.get("operations")
+        if isinstance(operations, list) and operations:
+            lines.append(
+                t("Operations: ", "操作：") + separator.join(str(item) for item in operations)
+            )
+        presets = data.get("presets")
+        if isinstance(presets, list) and presets:
+            from imagen_cli.application.operator_catalog import display_preset_name
+
+            lines.append(
+                t("Presets: ", "预设：")
+                + separator.join(display_preset_name(str(item)) for item in presets)
+            )
     if isinstance(details, dict) and details:
         lines.append(t("Catalog and rationale:", "知识库与原理说明："))
-        for key, item in details.items():
-            if isinstance(item, dict):
-                if isinstance(item.get("intro"), dict):
-                    item = item["intro"]
-                title = item.get("title", key)
-                summary = item.get("summary", "")
-                principle = item.get("principle", "")
-                lines.append(f"  ✦ {title}")
-                if summary:
-                    lines.append(t(f"    Operation: {summary}", f"    操作：{summary}"))
-                if item.get("benefit"):
-                    lines.append(
-                        t(
-                            f"    Possible advantages: {item['benefit']}",
-                            f"    可能的优势：{item['benefit']}",
-                        )
-                    )
-                if item.get("loss"):
-                    lines.append(
-                        t(
-                            f"    Possible drawbacks: {item['loss']}",
-                            f"    可能的缺点：{item['loss']}",
-                        )
-                    )
-                if item.get("use_case"):
-                    lines.append(
-                        t(
-                            f"    May be useful for: {item['use_case']}",
-                            f"    可能用来：{item['use_case']}",
-                        )
-                    )
-                if principle:
-                    lines.append(t(f"    How: {principle}", f"    原理：{principle}"))
-            else:
-                lines.append(f"  ✦ {key}: {item}")
+        for key, entry in details.items():
+            lines.extend(
+                _detail_lines(key, entry) if isinstance(entry, dict) else [f"  ✦ {key}: {entry}"]
+            )
     if data.get("removed") and data.get("artifact_id"):
         purged_note = t(" (file reclaimed)", "（已回收文件）") if data.get("purged") else ""
         sess_lbl = data.get("session_id")
@@ -245,22 +304,40 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _error_lines(value: dict[str, Any]) -> list[str]:
+    error = value.get("error") or {}
+    message = error.get("message") or t("The command did not complete.", "命令未成功完成。")
+    lines = [t(f"Failed: {message}", f"失败：{message}")]
+    for action in error.get("next_actions") or []:
+        command = action.get("command") if isinstance(action, dict) else None
+        if command:
+            lines.append(t(f"Next: {command}", f"下一步：{command}"))
+    status = value.get("status", "unknown")
+    return lines + [t(f"status: {status}", f"状态：{status}")]
+
+
 def _plain(value: dict[str, Any], width: int) -> list[str]:
     if not value.get("ok"):
-        error = value.get("error") or {}
-        message = error.get("message") or t("The command did not complete.", "命令未成功完成。")
-        return [
-            t(
-                f"Failed: {message} (status: {value.get('status', 'unknown')})",
-                f"失败：{message}（状态：{value.get('status', 'unknown')}）",
-            )[:width]
-        ]
+        wrapped: list[str] = []
+        for line in _error_lines(value):
+            wrapped.extend(
+                textwrap.wrap(line, width, break_long_words=False, break_on_hyphens=False)
+                or [line[:width]]
+            )
+        return wrapped
     lines = _plain_lines(value)
     file_prefix = t("File: ", "文件：")
-    return [
-        line if line.startswith(file_prefix) or len(line) <= width else line[: width - 1] + "…"
-        for line in lines
-    ]
+    wrapped = []
+    for line in lines:
+        if line.startswith(file_prefix) or len(line) <= width:
+            wrapped.append(line)
+            continue
+        for piece in textwrap.wrap(
+            line, width, subsequent_indent=" ", break_long_words=False, break_on_hyphens=False
+        ):
+            # A token wider than the terminal (ids, URLs) still has to fit.
+            wrapped.append(piece if len(piece) <= width else piece[: width - 1] + "…")
+    return wrapped
 
 
 def _rich(value: dict[str, Any], width: int) -> str:
@@ -273,10 +350,13 @@ def _rich(value: dict[str, Any], width: int) -> str:
         file=buffer, width=width, force_terminal=True, color_system="standard", highlight=False
     )
     if not value.get("ok"):
-        message = (value.get("error") or {}).get("message") or t(
-            "The command did not complete.", "命令未成功完成。"
+        body = "\n".join(
+            [
+                f"[bold]{line}[/bold]" if index == 0 else f"[cyan]{line}[/cyan]"
+                for index, line in enumerate(_error_lines(value)[:-1])
+            ]
         )
-        console.print(Panel(message, title=t("Failed", "失败"), border_style="red"))
+        console.print(Panel(body, title=t("Failed", "失败"), border_style="red"))
         return buffer.getvalue()
     data = value.get("data") or {}
     language = data.get("language")
@@ -419,12 +499,24 @@ def _rich(value: dict[str, Any], width: int) -> str:
             )
         console.print(table)
     operations = data.get("operations")
-    if isinstance(operations, list) and operations:
+    details = data.get("details")
+    if isinstance(operations, list) and operations and not details:
         console.print(
             Panel(
                 ("、" if is_chinese() else ", ").join(str(item) for item in operations),
                 title=t("Operations", "操作"),
             )
+        )
+    if isinstance(details, dict) and details:
+        from rich.text import Text
+
+        detail_body: list[str] = []
+        for key, entry in details.items():
+            detail_body.extend(
+                _detail_lines(key, entry) if isinstance(entry, dict) else [f"  ✦ {key}: {entry}"]
+            )
+        console.print(
+            Panel(Text("\n".join(detail_body)), title=t("Catalog and rationale", "知识库与原理"))
         )
     manual = data.get("manual")
     if isinstance(manual, str) and manual:
@@ -465,6 +557,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
             turns,
             artifacts,
             parameters,
+            details,
         )
     ):
         console.print(json.dumps(data, ensure_ascii=False))
@@ -490,8 +583,17 @@ def render(value: dict[str, Any], *, columns: int | None = None, color: bool = F
                 if entry["group"] == group:
                     key = entry["key"].split(" (", 1)[0]
                     lines.extend((f"  {entry['name']}", f'    --preset "{key}"'))
-        lines.append(t("\nAll operations (--op):", "\n全部底层算子（--op）："))
-        lines.extend(f"  {op}" for op in data.get("operations", []))
+        lines.append(t("\nOperations (--op):", "\n底层算子（--op）："))
+        shown = {entry["key"] for entry in entries}
+        lines.extend(f"  {op}" for op in data.get("operations", []) if op not in shown)
+        lines.append(
+            t(
+                "\nInspect one: imagen ops --op NAME"
+                "  ·  apply: imagen transform ART --op 'NAME:key=value'",
+                "\n查看参数：imagen ops --op 名称"
+                "  ·  应用：imagen transform ART --op '名称:参数=值'",
+            )
+        )
         return "\n".join(lines)
     text = _rich(value, width) if color else "\n".join(_plain(value, width))
     return text.rstrip("\n")

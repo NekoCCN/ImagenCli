@@ -1,5 +1,6 @@
 """Standalone entrypoint. Never display raw parser/provider exceptions or locals."""
 
+import difflib
 import sys
 from typing import Any, TextIO
 
@@ -11,6 +12,7 @@ from imagen_cli.application.container import Container
 from .options import OPTION_METADATA, SharedOptions
 from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
+from .usage import UsageError, describe_pydantic, describe_validation, plain_detail
 
 
 def _utf8_stdio() -> None:
@@ -23,6 +25,52 @@ def _utf8_stdio() -> None:
             reconfigure(encoding="utf-8")
         except (OSError, ValueError):
             continue
+
+
+def _no_positional(command: str, words: list[str]) -> UsageError:
+    found = " ".join(words)
+    return UsageError(
+        i18n.t(
+            f"{command} takes no positional arguments; got '{found}'.",
+            f"{command} 不接受位置参数，实际收到 '{found}'。",
+        ),
+        f"imagen help {command}",
+    )
+
+
+def _no_arguments(command: str, words: list[str], parameters: Any) -> UsageError:
+    if words:
+        return _no_positional(command, words)
+    names = ", ".join("--" + str(name).replace("_", "-") for name in sorted(parameters))
+    return UsageError(
+        i18n.t(
+            f"{command} takes no options; got {names or 'extra arguments'}.",
+            f"{command} 不接受选项，实际收到 {names or '多余参数'}。",
+        ),
+        f"imagen help {command}",
+    )
+
+
+def _need(command: str, words: list[str], count: int, en: str, zh: str) -> UsageError:
+    return UsageError(
+        i18n.t(
+            f"{command} needs {en}; got {len(words)}.",
+            f"{command} 需要{zh}；实际收到 {len(words)} 个。",
+        ),
+        f"imagen help {command}",
+    )
+
+
+def _command_hint(argv: list[str]) -> str:
+    """The help command that lists what the caller was reaching for."""
+    for index, token in enumerate(argv):
+        if token.startswith("-"):
+            continue
+        for name in sorted(COMMANDS, key=len, reverse=True):
+            words = name.split()
+            if argv[index : index + len(words)] == words:
+                return f"imagen help {name}"
+    return "imagen help"
 
 
 def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOptions]:
@@ -39,27 +87,49 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             help_flag = True
         elif token == "--agent":
             if agent:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t("Option --agent appears twice.", "选项 --agent 重复出现。")
+                )
             agent = True
         elif token in {"--zh", "--en"}:
             if language_seen:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(
+                        "Choose one language option only (--zh, --en or --lang).",
+                        "只能指定一个语言选项（--zh、--en 或 --lang）。",
+                    )
+                )
             language_seen = True
         elif token == "--lang" or token.startswith("--lang="):
             # main() applies the language before parsing and removes the option,
             # so this branch only validates direct parser callers.
             if language_seen:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(
+                        "Choose one language option only (--zh, --en or --lang).",
+                        "只能指定一个语言选项（--zh、--en 或 --lang）。",
+                    )
+                )
             language_seen = True
             if token == "--lang":
                 index += 1
                 if index == len(argv) or argv[index].startswith("-"):
-                    raise ValueError("option needs value")
+                    raise UsageError(
+                        i18n.t(
+                            "Option --lang needs a value: en or zh-CN.",
+                            "选项 --lang 需要取值：en 或 zh-CN。",
+                        )
+                    )
                 language_value = argv[index]
             else:
                 language_value = token.partition("=")[2]
             if not language_value or i18n.normalize(language_value) is None:
-                raise ValueError("unsupported language")
+                raise UsageError(
+                    i18n.t(
+                        f"Unsupported language '{language_value}'. Use en or zh-CN.",
+                        f"不支持的语言 '{language_value}'。请使用 en 或 zh-CN。",
+                    )
+                )
         elif token.startswith("--"):
             name, separator, raw_value = token[2:].partition("=")
             local_option = name in {
@@ -116,7 +186,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "global",
             }
             if name not in OPTION_METADATA and not local_option:
-                raise ValueError("unknown option")
+                raise UsageError(i18n.t(f"Unknown option --{name}.", f"未知选项 --{name}。"))
             field = {"input": "inputs", "reference": "references"}.get(
                 name,
                 name.replace("-", "_") if name != "async" else "async_",
@@ -124,7 +194,9 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             target = parameters if local_option else controls
             repeated = name in {"input", "reference", "skill", "target"}
             if field in target and not repeated:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(f"Option --{name} appears twice.", f"选项 --{name} 重复出现。")
+                )
             value: Any = raw_value
             boolean = OPTION_METADATA.get(name, {}).get("type") == "boolean" or name in {
                 "send-credential",
@@ -137,7 +209,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
-                    raise ValueError("flag takes no value")
+                    raise UsageError(
+                        i18n.t(
+                            f"--{name} is a flag and takes no value; drop '={raw_value}'.",
+                            f"--{name} 是开关，不接受取值；请去掉 '={raw_value}'。",
+                        )
+                    )
                 value = True
             else:
                 if not separator:
@@ -146,7 +223,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                         argv[index].startswith("-")
                         and not (name == "input-json" and argv[index] == "-")
                     ):
-                        raise ValueError("option needs value")
+                        raise UsageError(
+                            i18n.t(
+                                f"Option --{name} needs a value, e.g. --{name}=VALUE.",
+                                f"选项 --{name} 需要一个取值，例如 --{name}=值。",
+                            )
+                        )
                     value = argv[index]
                 if name in {
                     "limit",
@@ -159,15 +241,28 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     "columns",
                     "cell",
                 }:
-                    value = int(value)
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        raise UsageError(
+                            i18n.t(
+                                f"--{name} must be a whole number, got '{value}'.",
+                                f"--{name} 必须是整数，当前为 '{value}'。",
+                            )
+                        ) from None
                 elif not value or "\0" in value:
-                    raise ValueError("option needs text")
+                    raise UsageError(
+                        i18n.t(
+                            f"--{name} needs non-empty text.",
+                            f"--{name} 需要非空文本。",
+                        )
+                    )
             if repeated:
                 target.setdefault(field, []).append(value)
             else:
                 target[field] = value
         elif token.startswith("-"):
-            raise ValueError("unknown option")
+            raise UsageError(i18n.t(f"Unknown option {token}.", f"未知选项 {token}。"))
         else:
             positional.append(token)
         index += 1
@@ -186,7 +281,21 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             "",
         )
         if not command:
-            raise ValueError("unknown command")
+            guess = difflib.get_close_matches(
+                " ".join(positional[:2]).strip(), sorted(COMMANDS), n=1, cutoff=0.6
+            ) or difflib.get_close_matches(positional[0], sorted(COMMANDS), n=1, cutoff=0.6)
+            if guess:
+                raise UsageError(
+                    i18n.t(
+                        f"Unknown command '{positional[0]}'. Did you mean '{guess[0]}'?",
+                        f"未知命令 '{positional[0]}'。是不是 '{guess[0]}'？",
+                    ),
+                    f"imagen help {guess[0]}",
+                )
+            raise UsageError(
+                i18n.t(f"Unknown command '{positional[0]}'.", f"未知命令 '{positional[0]}'。"),
+                "imagen help",
+            )
         words = positional[len(command.split()) :]
         if help_flag:
             command, words = "help", command.split()
@@ -196,9 +305,21 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     if command in {"help", "schema"}:
         target_command = " ".join(words) if words else None
         if parameters or set(controls) - common:
-            raise ValueError("unexpected option")
+            raise UsageError(
+                i18n.t(
+                    "help and schema accept only --workspace, --output and --no-interactive.",
+                    "help 和 schema 只接受 --workspace、--output 与 --no-interactive。",
+                ),
+                "imagen help",
+            )
         if target_command is not None and target_command not in COMMANDS:
-            raise ValueError("unknown help target")
+            raise UsageError(
+                i18n.t(
+                    f"Unknown help target '{target_command}'.",
+                    f"未知的帮助目标 '{target_command}'。",
+                ),
+                "imagen help",
+            )
         args = ([target_command] if target_command else []) + (["--agent"] if agent else [])
         return command, args, options
     extra_controls = {
@@ -230,12 +351,28 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         "generate": {"dry_run", "timeout", "wait", "async_"},
         "edit": {"dry_run", "timeout", "wait", "async_"},
     }.get(command, set())
-    if set(controls) - common - extra_controls:
-        raise ValueError("unexpected option")
+    unexpected = sorted(set(controls) - common - extra_controls)
+    if unexpected:
+        names = ", ".join("--" + name.replace("_", "-") for name in unexpected)
+        raise UsageError(
+            i18n.t(
+                f"{command} does not accept {names}.",
+                f"{command} 不接受 {names}。",
+            ),
+            f"imagen help {command}",
+        )
     schema = discover(command)["input_schema"]
     if command == "language":
-        if len(words) > 1 or parameters:
-            raise ValueError("unexpected arguments")
+        if parameters:
+            raise UsageError(
+                i18n.t(
+                    "language takes its value as a word: imagen language en",
+                    "language 的取值直接写在后面：imagen language en",
+                ),
+                "imagen help language",
+            )
+        if len(words) > 1:
+            raise _need(command, words, 1, "one language", "一个语言值")
         if words:
             parameters["language"] = words[0]
         validate(parameters, schema)
@@ -243,31 +380,31 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     if command.startswith("profile "):
         if command == "profile list":
             if words or parameters:
-                raise ValueError("unexpected arguments")
+                raise _no_arguments(command, words, parameters)
         else:
             if len(words) != 1:
-                raise ValueError("unexpected positional arguments")
+                raise _need(command, words, 1, "one profile id", "一个 profile 标识")
             parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command in {"providers", "models"}:
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         validate(parameters, schema)
         return command, parameters, options
     if command in {"plan show", "plan approve", "plan execute", "plan retry"}:
         if len(words) != 1:
-            raise ValueError("one plan identity required")
+            raise _need(command, words, 1, "one plan id", "一个 plan 标识")
         parameters["plan_id"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command in {"worker start", "worker status", "worker recover"}:
         if words or parameters:
-            raise ValueError("unexpected arguments")
+            raise _no_arguments(command, words, parameters)
         return command, {}, options
     if command in {"generate", "edit"}:
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         if not parameters:
             return command, [], options
         from imagen_cli.cli.creation_input import parse_creation
@@ -276,21 +413,32 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, creation.model_dump(mode="json", exclude_none=True), options
     if command == "batch submit":
         if words or set(parameters) - {"input_json", "concurrency"}:
-            raise ValueError("unexpected arguments")
+            raise _no_arguments(command, words, set(parameters) - {"input_json", "concurrency"})
         if "input_json" not in parameters:
-            raise ValueError("structured input is required")
+            raise UsageError(
+                i18n.t(
+                    "batch submit needs a JSON file: --input-json path.json",
+                    "batch submit 需要 JSON 文件：--input-json 路径.json",
+                ),
+                "imagen help batch submit",
+            )
         from imagen_cli.cli.input_readers import read_json
 
         payload = read_json(parameters["input_json"])
         if "concurrency" in parameters:
             if "concurrency" in payload:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(
+                        "concurrency is set both in the JSON file and with --concurrency.",
+                        "并发数同时出现在 JSON 文件和 --concurrency 中。",
+                    )
+                )
             payload["concurrency"] = parameters["concurrency"]
         validate(payload, schema)
         return command, payload, options
     if command in {"session fork", "session export", "session delete"}:
         if len(words) != 1:
-            raise ValueError("one session identity required")
+            raise _need(command, words, 1, "one session id", "一个会话标识")
         parameters["session"] = words[0]
         if command == "session delete" and options.yes:
             parameters["yes"] = True
@@ -298,43 +446,60 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, parameters, options
     if command in {"session remove-artifact", "session remove-image"}:
         if len(words) != 2:
-            raise ValueError("session and artifact identities required")
+            raise _need(command, words, 2, "a session id and an artifact id", "会话标识和产物标识")
         parameters["session"] = words[0]
         parameters["artifact"] = words[1]
         validate(parameters, schema)
         return command, parameters, options
     if command == "session import":
         if len(words) != 1 or parameters:
-            raise ValueError("one archive path required")
+            raise _need(command, words, 1, "one archive path", "一个归档路径")
         parameters["archive"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command == "transform":
         if len(words) != 1:
-            raise ValueError("one artifact identity required")
+            raise _need(command, words, 1, "one artifact id", "一个产物标识")
         parameters["artifact"] = words[0]
         if "timeout" in controls:
             parameters["timeout"] = options.timeout
         if "pipeline" not in parameters and "op" not in parameters and "preset" not in parameters:
-            raise ValueError("pipeline, op or preset is required")
+            raise UsageError(
+                i18n.t(
+                    "transform needs --preset, --op or --pipeline; "
+                    "run `imagen ops` to list them.",
+                    "transform 需要 --preset、--op 或 --pipeline；运行 `imagen ops` 查看列表。",
+                ),
+                "imagen ops",
+            )
         validate(parameters, schema)
         return command, parameters, options
     if command.startswith("models "):
         # Positional profile is shorthand for --profile, e.g. `models use demo --id m`.
         if len(words) > 1:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words[1:])
         if words:
             if "profile" in parameters:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(
+                        "Give the profile either as a word or with --profile, not both.",
+                        "profile 既作为位置参数又用了 --profile，二选一。",
+                    )
+                )
             parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command in {"skills list", "skills install", "skills uninstall"}:
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         if parameters.pop("global", False):
             if parameters.get("scope") == "project":
-                raise ValueError("conflicting scope options")
+                raise UsageError(
+                    i18n.t(
+                        "--global conflicts with --scope project; pick one.",
+                        "--global 与 --scope project 冲突，只能选一个。",
+                    )
+                )
             parameters["scope"] = "global"
         if options.yes:
             parameters["yes"] = True
@@ -342,49 +507,54 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, parameters, options
     if command.startswith("cache "):
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         if options.yes:
             parameters["yes"] = True
         validate(parameters, schema)
         return command, parameters, options
     if command == "ops":
         if len(words) > 1:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words[1:])
         if words:
             if "op" in parameters:
-                raise ValueError("duplicate option")
+                raise UsageError(
+                    i18n.t(
+                        "Give the operator either as a word or with --op, not both.",
+                        "算子既作为位置参数又用了 --op，二选一。",
+                    )
+                )
             parameters["op"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command == "superres models":
         if words or parameters:
-            raise ValueError("unexpected arguments")
+            raise _no_arguments(command, words, parameters)
         return command, {}, options
     if command == "superres fetch" and words:
         if len(words) != 1 or "model" in parameters:
-            raise ValueError("one model required")
+            raise _need(command, words, 1, "one model name", "一个模型名")
         parameters["model"] = words[0]
         words = []
     if command in {"compare", "sheet", "superres fetch", "superres benchmark"}:
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         validate(parameters, discover(command)["input_schema"])
         return command, parameters, options
     if command in {"asset show", "asset delete", "asset remove"}:
         if len(words) != 1:
-            raise ValueError("one artifact identity required")
+            raise _need(command, words, 1, "one artifact id", "一个产物标识")
         parameters["artifact"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command == "asset open":
         if len(words) != 1:
-            raise ValueError("one artifact identity required")
+            raise _need(command, words, 1, "one artifact id", "一个产物标识")
         parameters["artifact_id"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command == "asset gc":
         if words:
-            raise ValueError("unexpected positional arguments")
+            raise _no_positional(command, words)
         if options.dry_run:
             parameters["dry_run"] = True
         if options.yes:
@@ -416,14 +586,20 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         )
         required_words = 0 if command == "session list" else 1
         if len(words) != required_words:
-            raise ValueError("unexpected positional arguments")
+            raise _need(
+                command,
+                words,
+                required_words,
+                "one identity" if required_words else "no identities",
+                "一个标识" if required_words else "不接受标识",
+            )
         if words:
             parameters[identity] = words[0]
         validate(parameters, schema)
         return command, parameters, options
 
     if words or parameters:
-        raise ValueError("unexpected arguments")
+        raise _no_arguments(command, words, parameters)
     return command, {}, options
 
 
@@ -503,8 +679,20 @@ def main(
         with Container(workspace=options.workspace, options=options) as container:
             status, data = container.execute(command, args)
         value = result(status, data)
-    except (ValueError, KeyError, ValidationError):
-        value = result("validation_error")
+    except UsageError as error:
+        error.next_command = error.next_command or _command_hint(argv)
+        value = result("validation_error", error=error.detail())
+    except ValidationError as error:
+        usage = describe_validation(error)
+        usage.next_command = usage.next_command or _command_hint(argv)
+        value = result("validation_error", error=usage.detail())
+    except (ValueError, KeyError) as error:
+        described = describe_pydantic(error)
+        if described is not None:
+            described.next_command = described.next_command or _command_hint(argv)
+            value = result("validation_error", error=described.detail())
+        else:
+            value = result("validation_error", error=plain_detail(error))
     except KeyboardInterrupt:
         value = result("canceled")
     except Exception:

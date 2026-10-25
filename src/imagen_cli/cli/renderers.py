@@ -41,10 +41,16 @@ ERROR_REASONS = {
     "authentication_error": "the credential is invalid or missing",
     "permission_denied": "permission to this resource is denied",
     "validation_error": "the request parameters are invalid",
+    "unsupported_capability": "this provider or model does not support the requested capability",
+    "not_found": "no matching record exists in this workspace",
+    "conflict": "the record changed since it was read",
+    "wait_timeout": "the job did not finish before the timeout; it may still be running",
+    "approval_required": "this step needs an explicit approval first",
     "provider_error": "the provider returned an error",
     "outcome_unknown": "cannot confirm whether the provider accepted the request "
     "(no automatic retry)",
     "internal_error": "a local execution error occurred",
+    "canceled": "the command was canceled",
     "save_failed": "the result was returned but saving it locally failed",
 }
 ERROR_REASONS_ZH = {
@@ -52,9 +58,15 @@ ERROR_REASONS_ZH = {
     "authentication_error": "凭据无效或缺失",
     "permission_denied": "没有访问该资源的权限",
     "validation_error": "请求参数不合法",
+    "unsupported_capability": "当前供应商或模型不支持该能力",
+    "not_found": "当前工作区中没有匹配的记录",
+    "conflict": "记录在读取后被修改过",
+    "wait_timeout": "任务在超时前未结束，可能仍在运行",
+    "approval_required": "该步骤需要先显式批准",
     "provider_error": "供应商返回错误",
     "outcome_unknown": "无法确认供应商是否已受理（不自动重试）",
     "internal_error": "本地执行出错",
+    "canceled": "命令已取消",
     "save_failed": "结果已返回，但本地保存失败",
 }
 
@@ -99,11 +111,13 @@ def result(
         }
     if error is None:
         detail = data_error(data)
+        reasons = ERROR_REASONS_ZH if i18n.is_chinese() else ERROR_REASONS
         error = {
             "type": str(detail.get("type"))
             if isinstance(detail, dict) and detail.get("type")
             else ERROR_TYPES.get(status, status),
             "message": error_message(detail)
+            or reasons.get(status)
             or i18n.t("The command did not complete.", "命令未成功完成。"),
             "retryable": False,
             "accepted_maybe": status in {"unknown", "partial_success"},
