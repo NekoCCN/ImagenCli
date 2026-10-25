@@ -21,11 +21,36 @@ def read_stdin(
     deadline = time.monotonic() + timeout
     chunks = bytearray()
     if sys.platform == "win32":
+        # Windows has no select() for pipes. Poll PeekNamedPipe for pipes and
+        # kbhit for the console; regular files read straight through.
+        import ctypes
+        import msvcrt
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined, unused-ignore]
+        handle = ctypes.c_void_p(msvcrt.get_osfhandle(stream.fileno()))
+        kind = kernel32.GetFileType(handle)
+        available = ctypes.c_ulong()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ValueError("stdin timeout")
-            chunk = stream.read(min(65536, limit + 1 - len(chunks)))
+            if kind == 3:  # pipe
+                if not kernel32.PeekNamedPipe(
+                    handle, None, 0, None, ctypes.byref(available), None
+                ):
+                    return bytes(chunks)
+                if not available.value:
+                    time.sleep(min(0.01, remaining))
+                    continue
+                size = min(available.value, 65536, limit + 1 - len(chunks))
+            elif kind == 2:  # console
+                if not msvcrt.kbhit():
+                    time.sleep(min(0.01, remaining))
+                    continue
+                size = min(65536, limit + 1 - len(chunks))
+            else:  # regular file
+                size = min(65536, limit + 1 - len(chunks))
+            chunk = os.read(stream.fileno(), size)
             if not chunk:
                 return bytes(chunks)
             chunks.extend(chunk)
