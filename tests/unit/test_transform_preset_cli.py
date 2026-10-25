@@ -82,8 +82,10 @@ def test_cli_ops_specific_op_details(tmp_path: Path):
     assert resp["ok"] is True
     assert "details" in resp["data"]
     detail = resp["data"]["details"]["diffuse_glow"]
-    assert "扩散柔光" in detail["title"]
-    assert "原理" in detail or "principle" in detail
+    assert "高光模糊" in detail["title"]
+    assert detail["principle"]
+    assert detail["benefit"]
+    assert detail["loss"]
 
 
 def test_cli_transform_with_anime_presets(tmp_path: Path):

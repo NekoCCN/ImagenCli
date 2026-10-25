@@ -2461,10 +2461,24 @@ CATEGORIES_LIST: list[str] = [
 def browse_entries() -> list[dict[str, str]]:
     """Human-facing entries; legacy keys remain valid for execution."""
     names = {
-        "XDoG动漫手绘线稿 (Line Art)": "动漫手绘线稿",
-        "去AI塑料感 (Anti-AI Organic)": "柔化塑料质感",
-        "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": "网格与光晕抑制",
-        "二次元赛璐珞顶级精修 (Anime Cel Master)": "赛璐璐平滑与描线",
+        "XDoG动漫手绘线稿 (Line Art)": "高斯差分线稿提取",
+        "去AI塑料感 (Anti-AI Organic)": "局部平滑与高光扩散",
+        "抗AI生成伪影综合治理 (Anti-AI Artifacts Suppression)": "高频衰减与局部平滑",
+        "二次元平涂去杂 (Anime Cel Surface Smoothing)": "局部平滑与暗部降饱和",
+        "动漫色彩提纯 (Anime Color Purity)": "暗部降饱和与色差增益",
+        "二次元线条强化与描墨 (Anime Line Inking)": "暗线提取与加深",
+        "二次元赛璐珞顶级精修 (Anime Cel Master)": "局部平滑、暗线加深与降饱和",
+        "日系通透空气感 (Shinkai Airy)": "通道调色、高光扩散与边缘压暗",
+        "热血集中线 (Manga Action Focus)": "叠加径向线条",
+        "黑白漫画网点 (Manga Screentone)": "亮度转网点",
+        "立绘贴纸白边 (Die-cut Sticker)": "透明轮廓扩边与投影",
+        "复古90年代胶片 (Retro 90s Film)": "色阶压缩、边缘压暗与噪声叠加",
+        "动漫超分辨率 4x (Anime SR)": "插画模型四倍放大",
+        "通用超分辨率 4x (General SR)": "通用模型四倍放大",
+        "日系治愈空气柔光 (Anime Soft Glow)": "高光扩散、饱和度与暗线颜色调整",
+        "大魄力动感鱼眼 (Anime Fisheye)": "径向畸变与线条叠加",
+        "橙青影视色彩平衡 (Teal & Orange)": "分区调色、色阶压缩与噪声叠加",
+        "赛璐璐": "色阶量化与轮廓叠加",
         "l0_smooth": "稀疏梯度平滑",
     }
     entries = []
@@ -2482,6 +2496,163 @@ def browse_entries() -> list[dict[str, str]]:
     return entries
 
 
+# Shared descriptions for individual operations and composed recipes.
+_OPERATION_EFFECTS = {
+    "quantize": ("调色板量化", "将 RGB 映射到有限调色板，可启用误差扩散。",
+                 "减少使用的颜色数量。", "原始颜色与渐变层次会丢失，可能出现色带或颗粒。"),
+    "dither": ("量化误差扩散", "按所选规则将量化误差分配到邻近像素。",
+               "以空间点阵近似连续色阶。", "增加点状纹理，微小结构可能与点阵混叠。"),
+    "sharpen": ("高频残差增强", "通过模糊差分增强高频分量。",
+                "增加边缘局部对比度。", "噪声、光晕和过冲可能增加。"),
+    "grayscale": ("转换灰度", "将颜色通道转换为单通道亮度代理。",
+                  "去除颜色差异以处理明暗结构。", "颜色信息会丢失。"),
+    "autocontrast": ("直方图端点拉伸", "按直方图端点重新映射像素范围。",
+                     "扩大使用的明暗范围。", "噪声与微小亮度差可能放大。"),
+    "highpass": ("高频残差提取", "从原图减去低通分量并按增益映射。",
+                 "突出局部亮度变化。", "缓慢明暗结构会减弱，噪声也可能增强。"),
+    "surface_blur": (
+        "局部色差加权平滑",
+        "按原图与 Gaussian 模糊图的 RGB 距离加权，混合 Gaussian 与中值结果。",
+        "减小局部小幅颜色变化。", "低对比细线、纹理与小色块可能被平滑。",
+    ),
+    "anti_checkerboard": (
+        "指定高频区域衰减",
+        "对 RGB 分通道做 FFT，在指定半径与轴向条件的频区衰减后混回原图；不检测伪影来源。",
+        "减小所选频区的周期变化。", "同频率的网点、排线和真实纹理也会衰减。",
+    ),
+    "de_haloing": (
+        "局部中值偏差压缩",
+        "计算各通道相对局部中值的差值，压缩超过阈值的正负偏差。",
+        "减小孤立明暗过冲。", "真实高光、小字与细线也可能被压弱。",
+    ),
+    "filmic_tone": (
+        "黑白端点与色阶调整",
+        "在编码 RGB 上以幂函数 LUT 抬黑、压白，并调整饱和度与通道色偏。",
+        "改变亮暗端点及色阶分布。", "原有对比度和颜色关系会改变，不能恢复已截断信息。",
+    ),
+    "de_ai_bloom": (
+        "高光提取与模糊混合",
+        "按亮度阈值提取高光，模糊后混合，并可用暗线权重限制作用范围。",
+        "扩大高光周围的亮区过渡。", "局部对比度可能下降，细线可能变淡。",
+    ),
+    "subsurface_scattering": (
+        "分通道模糊混合",
+        "以不同半径模糊 RGB 通道后回混，可用肤色权重限制区域；不求解次表面光传输。",
+        "减弱局部明暗与颜色变化。", "细节可能模糊，颜色掩模可能误选。",
+    ),
+    "color_purity": (
+        "暗部降饱和与色差增益",
+        "按编码亮度代理生成暗部掩模，向灰度混合；按低饱和度权重调整非暗部色差。",
+        "降低暗部饱和度并改变其他区域的颜色强度。", "有意的阴影配色可能丢失，强增益可能裁切通道。",
+    ),
+    "anime_line_enhance": (
+        "暗线提取与加深",
+        "使用各向同性 DoG、方形闭运算与百分位归一化生成权重，再乘法压暗原图。",
+        "提高暗部轮廓的对比度。", "相邻线条可能连接，细小间隙与灰阶细节可能丢失。",
+    ),
+    "color_temperature": (
+        "通道冷暖与色偏调整",
+        "使用 RGB 通道 LUT 调整冷暖及绿品红色偏，不估计光源光谱。",
+        "改变整体通道平衡。", "原有配色会偏移，强调整可能裁切通道。",
+    ),
+    "vignette": (
+        "径向边缘压暗",
+        "按距中心的径向距离生成渐变亮度掩模。",
+        "降低画面边缘的亮度。", "边缘主体与暗部细节也会变暗。",
+    ),
+    "focus_lines": (
+        "径向线条叠加",
+        "按固定随机种子生成角度与宽度扰动，沿中心外侧叠加三角形线条。",
+        "增加指向中心的线条结构。", "原有背景可能被遮挡，画面结构会改变。",
+    ),
+    "screentone": (
+        "亮度转网点",
+        "按亮度与设定的网点频率、角度生成离散点阵。",
+        "将连续亮度转为网点密度或大小变化。", "颜色与连续色阶可能丢失，缩放可能产生摩尔纹。",
+    ),
+    "sticker_outline": (
+        "透明轮廓扩边与投影",
+        "扩张 Alpha 轮廓并叠加指定颜色的边框，可添加投影。",
+        "增加可见轮廓与背景的分隔。", "原有透明边界会改变，细小间隙可能填满。",
+    ),
+    "lineart_extract": (
+        "高斯差分线稿提取",
+        "以不同尺度 Gaussian 差分及非线性阈值映射提取明暗边缘。",
+        "将部分亮度变化转为线条。", "颜色和连续明暗会丢失，噪声也可能成为线条。",
+    ),
+    "film_grain": (
+        "亮度加权噪声叠加",
+        "按亮度权重叠加固定随机种子的噪声；不是对真实胶片或传感器的标定。",
+        "增加像素级随机变化。", "平坦区域不再均匀，信噪比可能下降。",
+    ),
+    "cel_shade": (
+        "色阶量化与轮廓叠加",
+        "先模糊并量化色阶，再以 FIND_EDGES 阈值与最小值滤波生成深色轮廓。",
+        "减少颜色层次并强化边缘。", "渐变、小色差和细节可能丢失，可能出现断阶。",
+    ),
+    "pixelate": (
+        "块均值降采样与最近邻展开",
+        "以 BOX 降采样后用最近邻恢复原尺寸。",
+        "以大色块替代局部变化。", "空间细节不可恢复；不保证敏感信息已安全脱敏。",
+    ),
+    "superres": (
+        "模型推理放大",
+        "以所选模型执行切片推理并合成放大结果，模型与后端身份记录在产物来源中。",
+        "增加像素尺寸，并可能生成更鲜明的边缘或纹理。",
+        "可能生成原图不存在的细节、改变线条或产生接缝，不是真实细节恢复保证。",
+    ),
+    "diffuse_glow": (
+        "高光模糊与滤色混合",
+        "提取超过阈值的亮度区域，Gaussian 模糊后以 Screen 混合并回混原图。",
+        "扩大亮区并抬升邻近亮度。", "局部对比度和高光层次可能降低。",
+    ),
+    "vibrance": (
+        "饱和度加权颜色调整",
+        "按像素颜色与饱和度权重调整通道相对差异。",
+        "改变不同饱和度区域的颜色强度。", "原配色可能偏移，强调整可能裁切色域。",
+    ),
+    "line_color": (
+        "暗线颜色混合",
+        "按暗部权重将轮廓颜色与局部颜色混合。",
+        "减小暗线与邻近色块之间的颜色反差。", "暗线辨识度可能下降，文字与交叉点可能变淡。",
+    ),
+    "fisheye": (
+        "径向坐标重采样",
+        "按径向映射重采样像素，并用缩放参数调整可见范围。",
+        "改变画面中心与边缘的相对尺度。", "直线与比例会变形，重采样及裁切可能损失边缘内容。",
+    ),
+    "color_balance": (
+        "分亮度区间通道偏移",
+        "按阴影、中间调与高光权重调整 RGB 通道。",
+        "分别改变不同明暗区域的色偏。", "原有颜色关系会改变，过强偏移可能裁切通道。",
+    ),
+}
+for _op, (_title, _method, _benefit, _loss) in _OPERATION_EFFECTS.items():
+    INTROS[_op] = {
+        "title": _title, "summary": _method, "principle": _method,
+        "scenarios": f"可能带来：{_benefit} 可能失去：{_loss}",
+        "benefit": _benefit, "loss": _loss,
+    }
+for _key, _pipeline in PRESET_PIPELINES.items():
+    if _key in _NEW_OPERATORS:
+        continue
+    _steps = [INTROS[step["op"]] for step in _pipeline if step["op"] in _OPERATION_EFFECTS]
+    if len(_steps) != len(_pipeline):
+        continue
+    _entry = next((entry for entry in browse_entries() if entry["key"] == _key), None)
+    _title = _entry["name"] if _entry else _key.split(" (", 1)[0]
+    _intro = {
+        "title": _title,
+        "summary": "依次执行：" + "；".join(step["title"] for step in _steps) + "。",
+        "principle": " ".join(step["principle"] for step in _steps),
+        "benefit": " ".join(step["benefit"] for step in _steps),
+        "loss": " ".join(step["loss"] for step in _steps),
+        "scenarios": "各步骤作用叠加，结果取决于输入与参数，不代表画质提升保证。",
+    }
+    INTROS[_key] = _intro
+    INTROS[_key.split(" (", 1)[0]] = _intro
+
+
 def get_intro_text(key: str) -> str:
     """Return formatted introductory text for TUI transform screen."""
     item = INTROS.get(key)
@@ -2493,9 +2664,10 @@ def get_intro_text(key: str) -> str:
     if item:
         return (
             f"[bold cyan]{item['title']}[/]{category_badge}\n"
-            f"[white]{item['summary']}[/]\n"
-            f"[dim]原理：{item['principle']}[/]\n"
-            f"[dim green]适用：{item['scenarios']}[/]"
+            f"[white]做什么：{item['summary']}[/]\n"
+            f"[dim]怎么做：{item['principle']}[/]\n"
+            f"[dim green]可能带来：{item.get('benefit', item['scenarios'])}[/]\n"
+            f"[dim yellow]可能失去：{item.get('loss', '结果取决于输入与参数，请对照原图。')}[/]"
         )
     # Fallback to operator item if key matches op
     op_item = get_operator_item(key)

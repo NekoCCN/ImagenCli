@@ -588,7 +588,9 @@ class TransformScreen(ModalScreen[bool]):
         self.view = Static("")
         self.intro_view = Static("", id="transform-intro-view")
         self.params_view = Static("", id="transform-params-view")
-        self.header_title = Static("变换预设与后处理工作室", classes="panel-title")
+        self.header_title = Static(
+            "变换预设与后处理工作室（实验性 experimental）", classes="panel-title",
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="transform"):
@@ -634,12 +636,14 @@ class TransformScreen(ModalScreen[bool]):
         cat_filter = self.categories[self.current_category_idx]
         if cat_filter == "全部":
             self.filtered_names = list(self.all_names)
-            self.header_title.update("变换预设与后处理工作室")
+            self.header_title.update("变换预设与后处理工作室（实验性 experimental）")
         else:
             self.filtered_names = [
                 n for n in self.all_names if self.entries[n]["group"] == cat_filter
             ]
-            self.header_title.update(f"变换预设与后处理工作室  [dim cyan]({cat_filter})[/]")
+            self.header_title.update(
+                f"变换预设与后处理工作室（实验性 experimental）  [dim cyan]({cat_filter})[/]"
+            )
         self.names = self.filtered_names
         self._populate_table()
         if self.names:

@@ -121,6 +121,8 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         lines.append("知识库与原理说明：")
         for key, item in details.items():
             if isinstance(item, dict):
+                if isinstance(item.get("intro"), dict):
+                    item = item["intro"]
                 title = item.get("title", key)
                 summary = item.get("summary", "")
                 principle = item.get("principle", "")
@@ -131,7 +133,11 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
                 if principle:
                     lines.append(f"    原理：{principle}")
                 if scenarios:
-                    lines.append(f"    适用：{scenarios}")
+                    lines.append(f"    作用与限制：{scenarios}")
+                if item.get("benefit"):
+                    lines.append(f"    可能带来：{item['benefit']}")
+                if item.get("loss"):
+                    lines.append(f"    可能失去：{item['loss']}")
             else:
                 lines.append(f"  ✦ {key}: {item}")
     if data.get("removed") and data.get("artifact_id"):
@@ -366,7 +372,7 @@ def render(value: dict[str, Any], *, columns: int | None = None, color: bool = F
     if value.get("ok") and data.get("presets") and not data.get("details"):
         from imagen_cli.application.operator_catalog import browse_entries
 
-        lines = ["后处理目录（调用标识保留兼容）"]
+        lines = ["后处理目录（实验性 experimental；调用标识保留兼容）"]
         entries = browse_entries()
         for group in dict.fromkeys(entry["group"] for entry in entries):
             lines.append(f"\n{group}")
