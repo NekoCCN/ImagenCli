@@ -128,6 +128,18 @@ def test_install_method_detection(monkeypatch):
     assert update_service.install_method() == "unknown"
 
 
+def test_upgrade_refuses_an_unknown_installer(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "unknown")
+    with pytest.raises(ValueError, match="uv tool or pipx"):
+        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (0, ""))
+
+
+def test_upgrade_reports_a_failed_command(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "uv")
+    with pytest.raises(ValueError, match="upgrade command failed"):
+        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (1, "boom"))
+
+
 def test_the_cli_parses_install(monkeypatch):
     import io
 
