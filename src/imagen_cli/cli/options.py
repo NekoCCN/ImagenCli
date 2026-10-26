@@ -67,6 +67,7 @@ COMMAND_CONTROLS: dict[str, set[str]] = {
         "provider",
         "family",
         "base_url",
+        "models_path",
         "model_default",
         "credential_ref",
         "revision",

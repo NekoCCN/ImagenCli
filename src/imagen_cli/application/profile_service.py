@@ -28,6 +28,7 @@ class ProfileService:
         credential_ref: str,
         revision: int = 1,
         name: str | None = None,
+        models_path: str | None = "/v1/models",
     ) -> ProviderProfile:
         """Non-interactive profile construction; only env references are accepted."""
         if self._REFERENCE.fullmatch(credential_ref) is None:
@@ -38,6 +39,7 @@ class ProfileService:
             "provider": provider,
             "family": family,
             "base_url": base_url,
+            "models_path": models_path,
             "model_default": model_default,
             "credential_ref": credential_ref,
             "trust_policy": {"allowed_upload_targets": [base_url]},

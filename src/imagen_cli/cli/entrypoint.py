@@ -173,6 +173,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "provider",
                 "family",
                 "base-url",
+                "models-path",
                 "model-default",
                 "credential-ref",
                 "revision",

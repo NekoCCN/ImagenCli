@@ -18,6 +18,12 @@ def test_provider_credentials_and_family_follow_choices():
         async with app.run_test() as pilot:
             await pilot.pause()
             screen = app.screen
+            assert screen.values()["models_path"] == "/v1/models"
+            screen.query_one("#models-path-choice", Select).value = "/v1beta/models"
+            await pilot.pause()
+            assert screen.values()["models_path"] == "/v1beta/models"
+            screen.query_one("#models_path", Input).value = "/custom/catalog"
+            assert screen.values()["models_path"] == "/custom/catalog"
             screen.query_one("#provider", Select).value = "gemini"
             await pilot.pause()
             assert screen.values()["family"] == "generate_content"

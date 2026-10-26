@@ -1,14 +1,18 @@
 ---
 name: imagen
-version: 1.0.0
-description: Use when the user wants to generate or edit images, manage image sessions, or process local images using the Imagen CLI. Includes command discovery, structured output, user approval before provider requests, and safe handling of unknown outcomes.
+version: 1.1.0
+description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 
 # Imagen CLI
 
-用 `imagen` 完成用户的图像任务。生成和编辑使用已配置端点；会话、执行记录和产物保存在本机。不要把本地工作台理解为本地运行生成模型。
+Use Imagen's CLI to work with configured image providers and a persistent local workspace. Local storage does not mean generation runs locally.
 
-## 先发现能力
+## Communication
+
+Explain choices, approvals, errors, and results in the user's language. Keep commands, flags, JSON keys, status values, profile IDs, and model IDs unchanged. Preserve the user's prompt language unless they request translation. This English guide does not require English user-facing replies.
+
+## Discover first
 
 ```bash
 imagen help --agent
@@ -16,31 +20,32 @@ imagen schema generate
 imagen profile list --agent
 ```
 
-- 使用当前安装版本的 `help` 和 `schema`，不要凭记忆猜参数。
-- 机器调用显式加 `--agent`，或 `--output json`；同时检查退出码和 `ok/status/data/error`。
-- 缺少 profile 或模型时请用户选择，不读取密钥文件、不输出环境变量或凭据配置。
-- 查询或本地处理不需要调用付费生成端点。
+Use the installed version's help and schema; do not guess flags. For machine calls, use `--agent` or `--output json` and check the exit code plus `ok/status/data/error`. Ask the user to choose when profiles or models are missing or ambiguous. Never print credentials or inspect secret files to discover a key.
 
-## 生成与编辑
+## Providers and models
 
-1. 确认用户的提示词、输入、profile、模型和数量。说明输入将发送到该端点。
-2. 创建或复用会话，调用 `generate` 或 `edit` 生成冻结计划；此时未发送创建请求。
-3. 检查计划，将请求范围、目标与可获得的费用信息呈现给用户。`approval_required` 是待批准，不是失败或生成成功。
-4. 只有用户明确授权当前请求后，才调用 `plan approve` 与 `plan execute`。不要因为用户想看计划就替他们执行。
-5. 从结果读取实际 artifact ID 和路径，不编造文件名。费用为 `null` 代表未知，不代表免费。
+- OpenAI-compatible Images (`openai` / `images`) is the primary setup. Gemini native (`gemini` / `generate_content`) is optional. A model name or catalog schema does not select the generation protocol.
+- Prefer the user's selected profile and catalog model. If discovery fails, accept a user-supplied ID; do not silently switch provider, endpoint, or model.
+- `profile set PROFILE --models-path PATH` configures a same-origin catalog path independently of the generation URL. New profiles default to `/v1/models`; Google's native catalog needs `/v1beta/models`. Omitting the option when updating preserves the existing setting.
+- Every `models refresh` contacts the endpoint and requires network authorization. Adding `--send-credential` also sends the configured credential and requires approval for that disclosure. Without the flag, discovery sends no credential. A catalog entry is not capability or availability evidence. Do not probe alternate paths automatically.
+- Agents use the CLI. The human TUI uses selectors with custom text fallbacks; both share validation and execution logic.
 
-完整 JSON 示例和恢复步骤见 [工作流](references/workflows.md)。
+See [workflows](references/workflows.md) for configuration and request examples.
 
-## 不确定结果
+## Generate and edit
 
-`unknown`、`outcome_unknown` 或 `accepted_maybe=true` 时停止创建操作，检查 `job get`、`job reconcile` 等本地事实并告知用户。不要自动重新生成，也不要通过新建会话规避未知结果。
+1. Confirm prompt, inputs, profile, model, and count. Explain where inputs will be sent.
+2. Create or reuse the selected session. `generate` or `edit` freezes a plan without sending a creation request.
+3. Present the plan's scope, destination, and available cost information. `approval_required` is pending approval, not failure or generation success.
+4. Only after explicit authorization for this request, call `plan approve` and `plan execute`.
+5. Read actual artifact IDs and paths from the result. Open the output with `asset open`. A `null` cost is unknown, not free.
 
-`--async` 和 `batch submit` 会直接排队或执行，不是绕过用户授权的方法；必须事先获得对应批次或请求的明确发送授权。
+`--async` and `batch submit` can queue or execute paid requests; they require authorization for that scope, not just permission to plan.
 
-## 其他任务
+## Unknown outcomes
 
-- 会话、产物、变换、比较、联系表和超分：参见随包的 `imagen-assets` skill；也可直接查询 `imagen help COMMAND`。
-- 批量创建与部分失败处理：参见 `imagen-batch` skill。
-- 本地后处理为 experimental，会另存产物；不要覆盖原图，不把指标差异说成画质提升证明。
-- 查看模型目录不下载权重。用户选定模型并接受来源许可后才能执行 `superres fetch --accept`，不得擅自下载或安装推理依赖。
-- 删除、垃圾回收、覆盖或强制卸载先取得用户明确确认。
+For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and inspect local `job get` / `job reconcile` facts. Do not regenerate or create a new session to bypass uncertainty.
+
+## Related tasks
+
+Use `imagen-assets` for sessions, artifacts, transforms, exports, and upscaling; use `imagen-batch` for batches. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval.

@@ -23,18 +23,31 @@ from imagen_cli.storage.private_state import PrivateStateStore
 __all__ = ["GeminiAdapter", "ProviderFailure", "ValidatedRequest"]
 
 # Declared image-model suffixes; a gateway may prefix its own routing segment.
-_MODELS = {"gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image"}
-_OFFICIAL = "generativelanguage.googleapis.com"
+_MODELS = {
+    "gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image",
+    "nano-banana-2",
+}
 
 
 def _trusted_endpoint(base_url: str) -> bool:
     from urllib.parse import urlsplit
 
-    parts = urlsplit(base_url.rstrip("/"))
-    if not parts.path.rstrip("/").endswith("/v1beta"):
+    try:
+        parts = urlsplit(base_url)
+        _ = parts.port
+    except ValueError:
+        return False
+    if (
+        not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+        or not parts.path.rstrip("/").endswith("/v1beta")
+    ):
         return False
     if parts.scheme == "https":
-        return parts.hostname == _OFFICIAL or parts.hostname == "127.0.0.1"
+        return True
     # Plain HTTP is limited to the loopback gateway, never a remote host.
     return parts.scheme == "http" and parts.hostname in {"127.0.0.1", "localhost"}
 

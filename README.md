@@ -14,7 +14,7 @@ Configure your own image endpoint, create a session, and keep working from eithe
 ## What it provides
 
 - **One workspace, two interfaces.** The TUI and CLI read and write the same sessions, plans, jobs, and artifacts.
-- **Your endpoint, your models.** Profiles support OpenAI-compatible Images endpoints and other adapters. Available models and parameters come from the configured endpoint.
+- **Your endpoint, your models.** Profiles support OpenAI-compatible Images endpoints, Gemini native `generateContent`, and other adapters. Available models and parameters come from the configured endpoint.
 - **Explicit execution.** A plan freezes the request for review. Approval and execution are separate steps; creating a plan never sends a generation request.
 - **Local postprocessing.** Smoothing, line work, tone and color changes, periodic-frequency suppression, resizing, comparison, and contact sheets.
 - **Batch and background work.** Local queues, independent child jobs, and an async worker.
@@ -186,7 +186,7 @@ imagen profile set local \
 
 imagen profile list
 imagen profile show local
-imagen profile update local --model-default another-model
+imagen models use local --id another-model
 ```
 
 Credential references:
@@ -198,7 +198,7 @@ Credential references:
 To import a key file into the private store without echoing it:
 
 ```bash
-imagen profile secret --profile local --key-file ./key.txt
+imagen profile secret local --key-file ./key.txt
 ```
 
 Do not put credentials in command arguments, request files, or session exports.
@@ -212,7 +212,32 @@ imagen models list --profile local
 imagen models use local --id model-id   # set the profile default
 ```
 
-In the TUI, press `v` to add or update profiles, refresh models, choose a default model, or enter a model ID manually.
+In the TUI, press `v` to manage profiles. Protocol, official endpoint, catalog path, and model are selection-first; choose **Custom / manual input** to reveal a text field. Saved custom values are preserved. Generation and edit forms let you choose a saved profile and its models.
+
+### Gemini native
+
+Use `gemini` / `generate_content` for Gemini native requests, not the OpenAI Images protocol:
+
+```bash
+export GEMINI_API_KEY='your-api-key'
+imagen profile set gemini \
+  --provider gemini \
+  --family generate_content \
+  --base-url https://generativelanguage.googleapis.com/v1beta \
+  --models-path /v1beta/models \
+  --model-default gemini-3.1-flash-image \
+  --credential-ref env:GEMINI_API_KEY
+
+imagen models refresh gemini --send-credential
+```
+
+Custom HTTPS gateways are supported with a base URL ending in `/v1beta`; plain HTTP is limited to the supported loopback gateway addresses. The adapter sends `x-goog-api-key` and uses `models/{model}:generateContent` for generation and image editing. `nano-banana-2` is also accepted as a gateway model alias, including provider-prefixed IDs; actual availability depends on the gateway. Native continuation context is stored privately and can be restored for later edits. Gemini does not support masks in this adapter.
+
+`--models-path` is independent of the generation protocol. New CLI/TUI profiles default to `/v1/models`; Google's native catalog needs the explicit `/v1beta/models` above. A gateway may instead use `/v1/models` even when generation uses `/v1beta`. The path replaces the base URL's path on the same origin: `https://gateway.example/v1beta` plus `/v1/models` becomes `https://gateway.example/v1/models`. Full external URLs, query strings, and fragments are not accepted. Old profiles without this setting retain `base_url + /models`.
+
+Gemini catalog parsing prefers `models[].name`; only when `models` is absent does it accept `data[].id`. An empty native list is kept empty. No alternate-path request or generation retry is sent automatically. A catalog entry declares a model ID, not proof that it can generate images.
+
+Use `"profile": "gemini"` in the same generation/edit JSON workflow below. Model discovery sends credentials only with `--send-credential`; the TUI fetch button explicitly sends the selected credential to the configured endpoint.
 
 ## Generate and edit
 

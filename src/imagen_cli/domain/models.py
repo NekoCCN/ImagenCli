@@ -73,7 +73,18 @@ def endpoint_url(value: str) -> str:
     return value
 
 
+def models_path(value: str) -> str:
+    if not re.fullmatch(r"/(?:[A-Za-z0-9._~-]+/)*[A-Za-z0-9._~-]+", value) or any(
+        part in {".", ".."} for part in value.split("/")
+    ):
+        raise ValueError(
+            "models_path must be an absolute same-origin path without query or fragment"
+        )
+    return value
+
+
 ManagedPath = Annotated[str, AfterValidator(managed_path)]
+ModelsPath = Annotated[str, AfterValidator(models_path)]
 EndpointUrl = Annotated[str, AfterValidator(endpoint_url)]
 
 
@@ -300,6 +311,7 @@ class ProviderProfile(StrictModel):
     provider: NonEmptyString
     family: NonEmptyString
     base_url: EndpointUrl
+    models_path: ModelsPath | None = None
     model_default: NonEmptyString
     credential_ref: NonEmptyString
     trust_policy: JsonObject

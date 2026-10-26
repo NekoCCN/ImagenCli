@@ -279,7 +279,14 @@ def _input_schema(name: str) -> dict[str, Any]:
         elif name == "profile set":
             properties.update(
                 dict.fromkeys(
-                    ("provider", "family", "base_url", "model_default", "credential_ref"),
+                    (
+                        "provider",
+                        "family",
+                        "base_url",
+                        "models_path",
+                        "model_default",
+                        "credential_ref",
+                    ),
                     text,
                 )
             )

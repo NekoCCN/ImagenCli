@@ -958,7 +958,7 @@ def test_update_form_prefills_the_selected_profile(deps):
     assert saved == [{
         "profile": "p1", "provider": "openai", "family": "images",
         "base_url": "https://gateway.example/v1", "model_default": "m1",
-        "credential_ref": "env:KEY", "revision": 3,
+        "models_path": "/v1/models", "credential_ref": "env:KEY", "revision": 3,
     }]
 
 

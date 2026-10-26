@@ -43,7 +43,8 @@ FIELDS = {
         "live_evidence digest"
     ),
     "profiles": (
-        "id name provider family base_url model_default credential_ref trust_policy revision"
+        "id name provider family base_url models_path model_default "
+        "credential_ref trust_policy revision"
     ),
     "native_contexts": (
         "id provider family profile_identity model format_version private_relpath sha256 "
@@ -56,9 +57,7 @@ FIELDS = {
     ),
     "approvals": "id plan_id plan_digest state approved_at execution_job_id expires_at",
     "events": "id job_id job_seq event_type timestamp safe_payload",
-    "provider_models": (
-        "id profile_id model_id display_name fetched_at source_url evidence"
-    ),
+    "provider_models": ("id profile_id model_id display_name fetched_at source_url evidence"),
     "artifact_links": "session_id artifact_id role created_at",
     "workers": "id pid boot_identity state heartbeat_at start_nonce",
 }

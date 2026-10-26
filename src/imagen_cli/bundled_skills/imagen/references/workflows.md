@@ -1,8 +1,48 @@
-# Imagen 工作流
+# Imagen workflows
 
-## 创建与执行
+Use the user's language for explanations and approval requests. Keep CLI syntax and machine identifiers unchanged.
 
-先运行 `imagen session create "草稿" --agent`，使用返回的会话 ID 编写 request.json：
+## Configure endpoints: OpenAI-compatible first
+
+Prefer an existing user-selected profile. Create or update configuration only when requested. These commands store references, never literal keys:
+
+```bash
+imagen profile set local \
+  --provider openai --family images \
+  --base-url https://gateway.example/v1 \
+  --models-path /v1/models \
+  --model-default USER_SELECTED_MODEL \
+  --credential-ref env:IMAGEN_API_KEY --agent
+```
+
+Only when the user chooses Gemini native:
+
+```bash
+imagen profile set gemini \
+  --provider gemini --family generate_content \
+  --base-url https://generativelanguage.googleapis.com/v1beta \
+  --models-path /v1beta/models \
+  --model-default USER_SELECTED_MODEL \
+  --credential-ref env:GEMINI_API_KEY --agent
+```
+
+Custom Gemini HTTPS generation URLs must end in `/v1beta`. A gateway may use `/v1/models` for discovery and accept the `nano-banana-2` alias; let the user choose the actual model. Catalog paths replace the base URL's path on the same origin. External URLs, query strings, and fragments are rejected. New profiles default to `/v1/models`; existing profiles retain their setting when the option is omitted.
+
+After authorization to contact the endpoint:
+
+```bash
+imagen models refresh local --send-credential --agent
+imagen models list local --agent
+imagen models use local --id USER_SELECTED_MODEL --agent
+```
+
+Gemini discovery prefers `models`; it accepts `data[].id` only when that field is absent, without additional requests. Discovery does not prove generation availability. Gemini native supports generation, image editing, and private continuation context, but not masks. Gateway compatibility is not guaranteed.
+
+Updating with `profile set` requires `--revision CURRENT_REVISION`; query `profile show PROFILE` first. `profile update` takes `--config-file`, not individual fields. A user-authorized key-file import uses `profile secret PROFILE --key-file PATH`; never read or display the key yourself.
+
+## Create and execute
+
+Create a user-named session with `imagen session create NAME --agent`, or reuse their selected session. Put its returned ID in `request.json`:
 
 ```json
 {
@@ -19,16 +59,16 @@
 imagen generate --input-json request.json --agent
 ```
 
-返回 `approval_required` 时，读取 `data.plan.id` 和 `data.plan.plan_digest`，显示计划并获得用户授权，再执行：
+For `approval_required`, read `data.plan.id` and `data.plan.plan_digest`, present the plan, and obtain authorization before execution:
 
 ```bash
 imagen plan approve PLAN_ID --digest PLAN_DIGEST --agent
 imagen plan execute PLAN_ID --agent
 ```
 
-成功后检查 `data.artifacts` 和任务记录。`null` 费用是未知，不是零。编辑使用 `operation=edit`，输入字段先通过 `imagen schema edit` 查询，不能臆测模型支持编辑。
+Check `data.artifacts` and job facts. A `null` cost is unknown, not zero. Editing uses `operation=edit`; inspect `imagen schema edit` for input fields. Do not assume a listed model supports editing.
 
-## 恢复
+## Recover without resubmitting
 
 ```bash
 imagen job get JOB_ID --agent
@@ -36,31 +76,32 @@ imagen job reconcile JOB_ID --agent
 imagen job fetch JOB_ID --agent
 ```
 
-先检查事实再决定是否恢复；这些入口不代表可以重发创建请求。只有确定失败或取消的计划才考虑 `plan retry`，新计划仍需要用户授权。结果未知时让用户决定下一步。
+Inspect facts first. These commands do not authorize another creation request. Consider `plan retry` only for a definitely failed or canceled attempt; its new plan still needs authorization. Stop on unknown outcomes.
 
-## 本地处理与模型
+## Local processing and weights
 
 ```bash
 imagen ops --agent
 imagen superres models --agent
 ```
 
-后处理为 experimental。平滑可能损伤细线，锐化可能增加噪声，超分纹理不保证存在于原图。不同模型的依赖、许可和可下载性以当前目录为准。
+Postprocessing is experimental: smoothing can damage thin lines, sharpening can add noise, and upscaling can invent texture. Dependencies, licenses, and download availability come from the current catalog.
 
-用户选择模型、查阅来源与权重许可并明确同意下载后：
+Only after the user chooses the model, reviews its source/license, and authorizes downloading:
 
 ```bash
 imagen superres fetch --model realesrgan-x4plus --accept --agent
 ```
 
-不得默认选择模型或自动附加 `--accept`。缺少推理运行时应报告依赖，不自动安装；下载完成也不意味着能够执行推理。
+Never choose this example model or append `--accept` automatically. Report missing inference dependencies; do not install them without permission. Downloaded weights do not prove inference works.
 
-## 安装本指南
+## Install or update these guides
 
 ```bash
 imagen skills install --target codex --target claude-code --agent
 imagen skills list --target codex --agent
+imagen skills update --target codex --agent
 imagen skills uninstall --target codex --agent
 ```
 
-默认 project，使用 `--scope global` 可供跨项目使用。`--target all` 明确选择所有支持目标，可能创建许多工具目录，执行前说明范围。安装冲突或卸载发现本地修改时先报告，不擅自加 `--force --yes`。
+The default scope is project; `--scope global` affects other projects. `--target all` may create many agent directories: explain the scope first. Report conflicts or modified installed guides rather than adding `--force` or `--yes` without approval.

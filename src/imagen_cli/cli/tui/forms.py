@@ -45,7 +45,8 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
         with VerticalScroll(id="choice-form"):
             yield Static(self.heading, id="form-status")
             for name, placeholder, default in self.fields:
-                yield Static(name)
+                yield from self.field_choices(name, default)
+                yield Static(name, id=f"label-{name}")
                 if name in self.choices:
                     options = list(self.choices[name])
                     if default and default not in {value for _, value in options}:
@@ -60,6 +61,13 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
                     )
             yield from self.extra_fields()
             yield Button(t("Save", "保存"), id="submit", variant="primary")
+
+    def field_choices(self, name: str, default: str) -> ComposeResult:
+        yield from ()
+
+    def custom_input(self, name: str, visible: bool) -> None:
+        self.query_one("#" + name, Input).display = visible
+        self.query_one("#label-" + name, Static).display = visible
 
     def extra_fields(self) -> ComposeResult:
         yield from ()
@@ -129,6 +137,7 @@ class ProviderForm(ChoiceForm):
             ("provider", "", self.previous_provider),
             ("family", "", defaults.get("family", family)),
             ("base_url", "https://…", defaults.get("base_url") or endpoint),
+            ("models_path", "/v1/models", defaults.get("models_path", "/v1/models")),
             ("credential_mode", "", "keep" if self.original_reference else "key"),
             ("api_key", t("API key", "API key"), ""),
             ("credential_ref", t("Variable name or reference", "变量名或引用"), ""),
@@ -145,12 +154,46 @@ class ProviderForm(ChoiceForm):
             optional={"api_key", "credential_ref"},
             secrets={"api_key"},
             choices={
-                "provider": [(p, p) for p in self.ENDPOINTS],
+                "provider": [("OpenAI-compatible", "openai"), ("Gemini native", "gemini")],
                 "family": [(family, family)],
                 "credential_mode": modes,
             },
         )
         self.request_version = 0
+
+    def field_choices(self, name: str, default: str) -> ComposeResult:
+        custom = (t("Custom / manual input", "自定义 / 手动输入"), "custom")
+        if name in {"base_url", "models_path", "model_default"}:
+            yield Static(
+                {
+                    "base_url": t("Generation endpoint", "生成端点"),
+                    "models_path": t("Model catalog path", "模型目录路径"),
+                    "model_default": t("Default model", "默认模型"),
+                }[name]
+            )
+        if name == "base_url":
+            endpoint = self.ENDPOINTS.get(self.previous_provider, self.ENDPOINTS["openai"])[1]
+            yield Select[str](
+                [(t("Official endpoint", "官方端点"), endpoint), custom],
+                value=endpoint if default == endpoint else "custom",
+                id="endpoint-choice",
+                allow_blank=False,
+            )
+        elif name == "models_path":
+            paths = ["/v1/models", "/v1beta/models"]
+            yield Select[str](
+                [(path, path) for path in paths] + [custom],
+                value=default if default in paths else "custom",
+                id="models-path-choice",
+                allow_blank=False,
+            )
+        elif name == "model_default":
+            yield Select[str](
+                ([(default, default)] if default else []) + [custom],
+                value=default or "custom",
+                id="model-choice",
+                allow_blank=False,
+            )
 
     def extra_fields(self) -> ComposeResult:
         yield Static(
@@ -163,12 +206,17 @@ class ProviderForm(ChoiceForm):
             )
         )
         yield Button(t("Fetch models", "获取模型列表"), id="fetch-models")
-        yield Select[str]([], id="model-choice", prompt=t("Choose model", "选择模型"))
 
     def on_mount(self) -> None:
         super().on_mount()
         self._credential_visibility()
         self.query_one("#family", Select).disabled = True
+        for name, selector in (
+            ("base_url", "endpoint-choice"),
+            ("models_path", "models-path-choice"),
+            ("model_default", "model-choice"),
+        ):
+            self.custom_input(name, self.query_one("#" + selector, Select).value == "custom")
 
     def _credential_visibility(self) -> None:
         mode = self.query_one("#credential_mode", Select).value
@@ -189,6 +237,8 @@ class ProviderForm(ChoiceForm):
         return values
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.value != event.select.value:
+            return
         if event.select.id == "provider" and isinstance(event.value, str):
             if event.value != self.previous_provider:
                 old_endpoint = self.ENDPOINTS.get(self.previous_provider, ("", ""))[1]
@@ -197,15 +247,43 @@ class ProviderForm(ChoiceForm):
                 selector = self.query_one("#family", Select)
                 selector.set_options([(family, family)])
                 selector.value = family
+                endpoint_choice = self.query_one("#endpoint-choice", Select)
+                use_official = endpoint_choice.value != "custom"
+                endpoint_choice.set_options(
+                    [
+                        (t("Official endpoint", "官方端点"), endpoint),
+                        (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+                    ]
+                )
+                endpoint_choice.value = endpoint if use_official else "custom"
                 url = self.query_one("#base_url", Input)
-                if not url.value or url.value == old_endpoint:
+                if use_official and (not url.value or url.value == old_endpoint):
                     url.value = endpoint
                 self.query_one("#model_default", Input).value = ""
-                self.query_one("#model-choice", Select).set_options([])
+                self._model_options([])
+        elif event.select.id in {"endpoint-choice", "models-path-choice", "model-choice"}:
+            name = {
+                "endpoint-choice": "base_url",
+                "models-path-choice": "models_path",
+                "model-choice": "model_default",
+            }[str(event.select.id)]
+            self.custom_input(name, event.value == "custom")
+            if isinstance(event.value, str) and event.value != "custom":
+                self.query_one("#" + name, Input).value = event.value
         elif event.select.id == "credential_mode":
             self._credential_visibility()
-        elif event.select.id == "model-choice" and isinstance(event.value, str):
-            self.query_one("#model_default", Input).value = event.value
+
+    def _model_options(self, models: list[str]) -> None:
+        current = self.query_one("#model_default", Input).value
+        options = list(dict.fromkeys([current, *models]))
+        selector = self.query_one("#model-choice", Select)
+        selector.set_options(
+            [(m, m) for m in options if m]
+            + [
+                (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+            ]
+        )
+        selector.value = current if current else "custom"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "fetch-models":
@@ -235,7 +313,7 @@ class ProviderForm(ChoiceForm):
     ) -> None:
         if not self.is_mounted or version != self.request_version or values != self.values():
             return
-        self.query_one("#model-choice", Select).set_options([(m, m) for m in models])
+        self._model_options(models)
         self.query_one("#form-status", Static).update(message)
 
     def submit(self) -> None:
@@ -248,6 +326,7 @@ class ProviderForm(ChoiceForm):
                 provider=values["provider"],
                 family=values["family"],
                 base_url=values["base_url"],
+                models_path=values["models_path"],
                 model_default=values["model_default"],
                 credential_ref=values.get("credential_ref") or "private:draft",
                 revision=int(values["revision"]),
@@ -289,11 +368,27 @@ class CreationForm(ChoiceForm):
             fields,
             optional=optional,
             choices={
-                "profile": [(identity, identity) for identity in self.profiles],
+                "profile": [
+                    (
+                        f"{row.get('name') or identity} · {row.get('provider', '')} ({identity})",
+                        identity,
+                    )
+                    for identity, row in self.profiles.items()
+                ],
                 "async": [(t("Yes", "是"), "true"), (t("No", "否"), "false")],
             },
         )
         self.initial_profile = dict((name, value) for name, _, value in fields).get("profile", "")
+
+    def field_choices(self, name: str, default: str) -> ComposeResult:
+        if name == "model":
+            yield Static(t("Model", "模型"))
+            yield Select[str](
+                [(t("Custom / manual input", "自定义 / 手动输入"), "custom")],
+                value="custom",
+                id="model-choice",
+                allow_blank=False,
+            )
 
     def extra_fields(self) -> ComposeResult:
         if not self.profiles and self.add_profile:
@@ -302,11 +397,10 @@ class CreationForm(ChoiceForm):
             yield Button(
                 t("Fetch models for selected profile", "获取所选 profile 的模型"), id="fetch-models"
             )
-        yield Select[str]([], id="model-choice", prompt=t("Choose model", "选择模型"))
         yield Static(
             t(
-                "Model selection fills the editable model ID. Changes apply only to this form.",
-                "模型下拉会填入可编辑的模型 ID；本表单不会修改 profile 默认值。",
+                "Choose a model; select Custom for a manual ID. Changes apply only here.",
+                "优先选择模型；选择“自定义”可手输 ID，仅对本次表单生效。",
             )
         )
 
@@ -316,10 +410,19 @@ class CreationForm(ChoiceForm):
 
     def _models(self, identity: str, *, reset: bool) -> None:
         default = str(self.profiles.get(identity, {}).get("model_default") or "")
+        current = default if reset else self.query_one("#model", Input).value
         choices = list(dict.fromkeys([default, *self.models.get(identity, [])]))
-        self.query_one("#model-choice", Select).set_options([(m, m) for m in choices if m])
+        selector = self.query_one("#model-choice", Select)
+        selector.set_options(
+            [(m, m) for m in choices if m]
+            + [
+                (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+            ]
+        )
         if reset:
             self.query_one("#model", Input).value = default
+        selector.value = current if current and current in choices else "custom"
+        self.custom_input("model", selector.value == "custom")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "profile":
@@ -328,7 +431,9 @@ class CreationForm(ChoiceForm):
                 self.initial_profile = identity
                 self._models(identity, reset=True)
         elif event.select.id == "model-choice" and isinstance(event.value, str):
-            self.query_one("#model", Input).value = event.value
+            self.custom_input("model", event.value == "custom")
+            if event.value != "custom":
+                self.query_one("#model", Input).value = event.value
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add-profile" and self.add_profile:

@@ -1068,6 +1068,7 @@ class ProvidersScreen(ModalScreen[bool]):
         ("provider", "openai / gemini", "openai"),
         ("family", "images / generate_content", "images"),
         ("base_url", "https://…", ""),
+        ("models_path", "/v1/models", "/v1/models"),
         ("model_default", "model id", ""),
         (
             "credential_ref",
@@ -1207,6 +1208,11 @@ class ProvidersScreen(ModalScreen[bool]):
         if profile is None:
             self.status.update(t("No profile selected", "没有选中 profile"))
             return
+        from urllib.parse import urlsplit
+
+        profile = dict(profile)
+        if profile.get("models_path") is None:
+            profile["models_path"] = urlsplit(str(profile["base_url"])).path.rstrip("/") + "/models"
         defaults = [
             (
                 name,
