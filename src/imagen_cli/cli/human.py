@@ -171,7 +171,10 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
     if isinstance(language, str):
         suffix = t(" (saved)", "（已保存）") if data.get("saved") else ""
         lines.append(t(f"Language: {language}", f"语言：{language}") + suffix)
-    plan = data.get("plan") or {}
+    plan = data.get("plan")
+    if not isinstance(plan, dict):
+        # `asset gc` / `cache purge` use the same key for the dry-run inventory digest.
+        plan = {}
     if plan:
         lines.append(
             t(
@@ -388,7 +391,10 @@ def _rich(value: dict[str, Any], width: int) -> str:
         console.print(
             t(f"Language: [bold]{language}[/bold]", f"语言：[bold]{language}[/bold]") + suffix
         )
-    plan = data.get("plan") or {}
+    plan = data.get("plan")
+    if not isinstance(plan, dict):
+        # `asset gc` / `cache purge` use the same key for the dry-run inventory digest.
+        plan = {}
     if plan:
         lines = [
             f"[bold]{plan.get('id')}[/bold]",

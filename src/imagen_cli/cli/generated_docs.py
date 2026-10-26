@@ -113,6 +113,13 @@ def _sample(spec: dict[str, Any], root: dict[str, Any]) -> Any:
             key: _sample(properties[key], root) for key in spec.get("required", [])
         }
         _apply_conditionals(example, spec)
+        for branch in spec.get("anyOf", []):
+            missing = [key for key in branch.get("required", []) if key not in example]
+            if missing:
+                example.update(
+                    {key: _sample(properties.get(key, {}), root) for key in missing}
+                )
+                break
         return example
     if kind == "null":
         return None

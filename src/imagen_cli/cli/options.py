@@ -42,3 +42,34 @@ OPTION_METADATA: dict[str, dict[str, Any]] = {
     "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
     "cursor": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,2048}$"},
 }
+
+# Which shared options each command accepts; shared with the TUI's run forms.
+COMMAND_CONTROLS: dict[str, set[str]] = {
+    "providers": {"limit", "cursor"},
+    "models": {"limit", "cursor"},
+    "profile list": {"limit", "cursor"},
+    "session list": {"limit", "cursor"},
+    "job wait": {"timeout"},
+    "batch wait": {"timeout"},
+    "plan execute": {"timeout"},
+    "session delete": {"yes"},
+    "session remove-artifact": {"purge"},
+    "session remove-image": {"purge"},
+    "asset gc": {"dry_run", "yes"},
+    "cache purge": {"plan", "yes"},
+    "transform": {"pipeline", "op", "preset", "session", "timeout"},
+    "ops": {"op", "preset", "verbose"},
+    "models refresh": {"profile", "send_credential"},
+    "models add": {"profile", "id"},
+    "models list": {"profile"},
+    "profile set": {
+        "provider",
+        "family",
+        "base_url",
+        "model_default",
+        "credential_ref",
+        "revision",
+    },
+    "generate": {"dry_run", "timeout", "wait", "async_"},
+    "edit": {"dry_run", "timeout", "wait", "async_"},
+}

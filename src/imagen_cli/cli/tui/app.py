@@ -24,7 +24,7 @@ from textual.widgets import DataTable, Input, Static
 from imagen_cli.application import cache_service, media_ops
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
 from imagen_cli.cli.human import render as human_render
-from imagen_cli.cli.options import SharedOptions
+from imagen_cli.cli.options import COMMAND_CONTROLS, SharedOptions
 from imagen_cli.cli.registry import COMMANDS, command_summary, discover
 from imagen_cli.cli.renderers import data_error, error_message
 from imagen_cli.i18n import is_chinese, t
@@ -197,13 +197,15 @@ def _sanitize(value: object) -> str:
     return "".join(char for char in str(value) if char.isprintable())
 
 
-def _executor(deps: Deps) -> Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]]:
+def _executor(
+    deps: Deps, options: SharedOptions | None = None
+) -> Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]]:
     """Workers get their own connection; the app's connection stays on the UI thread."""
     assert deps.execute is not None
     if deps.workspace_root is None:
         return deps.execute
     root = str(deps.workspace_root)
-    options = deps.options or SharedOptions()
+    options = options or deps.options or SharedOptions()
 
     def run(command: str, arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         from imagen_cli.application.container import Container
@@ -255,6 +257,7 @@ _FIELD_LABELS = {
     "send_credential": ("Send credential", "发送凭证"),
     "timeout": ("Timeout", "超时"),
     "wait": ("Wait for completion", "等待完成"),
+    "async": ("Async", "异步"),
     "async_": ("Async", "异步"),
     "concurrency": ("Concurrency", "并发"),
     "skill": ("Skill", "技能"),
@@ -1574,6 +1577,51 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
     return fields, set(properties) - required
 
 
+# Shared options the TUI can pass as run options, keyed by form field name.
+_CONTROL_ATTRS = {
+    "async": "async_",
+    "dry_run": "dry_run",
+    "wait": "wait",
+    "timeout": "timeout",
+}
+
+
+def _control_fields(command: str) -> list[tuple[str, str, str]]:
+    """Run options this command accepts as shared options, not arguments."""
+    allowed = COMMAND_CONTROLS.get(command, set())
+    taken = {field[0] for field in command_fields(command)[0]}
+    fields = []
+    for name, attribute in _CONTROL_ATTRS.items():
+        if attribute not in allowed:
+            continue
+        # `asset gc` reads dry_run as an argument; the schema field already asks for it.
+        if name == "dry_run" and name in taken:
+            continue
+        fields.append((name, "seconds" if name == "timeout" else "true | false", ""))
+    return fields
+
+
+def _convert_controls(values: dict[str, str]) -> dict[str, Any]:
+    converted: dict[str, Any] = {}
+    for name, attribute in _CONTROL_ATTRS.items():
+        raw = values.get(name, "").strip()
+        if not raw:
+            continue
+        if name == "timeout":
+            converted[attribute] = int(raw)
+        else:
+            converted[attribute] = raw.lower() in {"1", "true", "yes", "on"}
+    return converted
+
+
+def _control_options(
+    base: SharedOptions | None, overrides: dict[str, Any]
+) -> SharedOptions | None:
+    if not overrides:
+        return base
+    return (base or SharedOptions()).model_copy(update=overrides)
+
+
 # Runtime lookup so the help panel follows IMAGEN_LANG even when the module was
 # imported before the fixture or command selected a language.
 _BINDING_TEXT = {
@@ -2107,6 +2155,10 @@ class WorkbenchApp(App[None]):
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         fields, optional = command_fields(command)
+        controls = _control_fields(command)
+        control_names = {name for name, _, _ in controls}
+        fields = [field for field in fields if field[0] not in control_names] + controls
+        optional |= control_names
         required = [f for f in fields if f[0] not in optional]
         if not required:
             self._run_command(command, {})
@@ -2116,27 +2168,41 @@ class WorkbenchApp(App[None]):
             if values is None:
                 return
             try:
-                arguments = _convert_arguments(command, values)
+                arguments = _convert_arguments(
+                    command, {key: value for key, value in values.items()
+                              if key not in control_names}
+                )
+                options = _control_options(self.deps.options, _convert_controls(values))
             except (ValueError, TypeError) as error:
                 self._say(t("Parameter error: ", "参数错误：") + _sanitize(error), "error")
                 return
-            self._run_command(command, arguments)
+            self._run_command(command, arguments, options)
 
         self.push_screen(
             FormScreen(t(f"Command {command}", f"命令 {command}"), fields, optional=optional), done
         )
 
-    def _run_command(self, command: str, arguments: dict[str, Any]) -> None:
+    def _run_command(
+        self,
+        command: str,
+        arguments: dict[str, Any],
+        options: SharedOptions | None = None,
+    ) -> None:
         if self.deps.execute is None:
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         self._say(t(f"Running {command}…", f"执行 {command}…"), "info")
-        self._run_command_worker(command, arguments)
+        self._run_command_worker(command, arguments, options)
 
     @work(thread=True, group="command", exclusive=True)
-    def _run_command_worker(self, command: str, arguments: dict[str, Any]) -> None:
+    def _run_command_worker(
+        self,
+        command: str,
+        arguments: dict[str, Any],
+        options: SharedOptions | None = None,
+    ) -> None:
         try:
-            status, data = _executor(self.deps)(command, arguments)
+            status, data = _executor(self.deps, options)(command, arguments)
         except Exception as error:  # noqa: BLE001 - surfaced in the panel
             self.call_from_thread(self._command_failed, command, _sanitize(error))
             return
@@ -2219,7 +2285,13 @@ class WorkbenchApp(App[None]):
         model = str(session.get("default_model") or (row or {}).get("model_default") or "")
         return identity, model
 
-    def _run_creation(self, operation: str, arguments: dict[str, Any], label: str) -> None:
+    def _run_creation(
+        self,
+        operation: str,
+        arguments: dict[str, Any],
+        label: str,
+        options: SharedOptions | None = None,
+    ) -> None:
         if self.deps.execute is None:
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
@@ -2231,7 +2303,7 @@ class WorkbenchApp(App[None]):
             return
         self.planning = True
         self._say(t("Planning…", "规划中…"), "info")
-        self._plan_creation(operation, arguments, label)
+        self._plan_creation(operation, arguments, label, options)
 
     @work(thread=True, group="creation", exclusive=True)
     def _plan_creation(
@@ -2239,9 +2311,10 @@ class WorkbenchApp(App[None]):
         operation: str,
         arguments: dict[str, Any],
         label: str,
+        options: SharedOptions | None = None,
     ) -> None:
         try:
-            status, data = _executor(self.deps)(operation, arguments)
+            status, data = _executor(self.deps, options)(operation, arguments)
         except Exception as error:  # noqa: BLE001 - surfaced in the panel
             self.call_from_thread(self._plan_failed, label, _sanitize(error))
             return
@@ -2283,7 +2356,8 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            self._run_creation("generate", arguments, t("Generate", "生成"))
+            options = _control_options(self.deps.options, _convert_controls(values))
+            self._run_creation("generate", arguments, t("Generate", "生成"), options)
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
@@ -2295,8 +2369,9 @@ class WorkbenchApp(App[None]):
                     ("model", t("model (optional)", "模型（可留空）"), model_default),
                     ("count", t("count", "数量"), "1"),
                     ("size", t("size", "尺寸"), "1024x1024"),
+                    ("async", "true | false", ""),
                 ],
-                optional={"profile", "model"},
+                optional={"profile", "model", "async"},
             ),
             done,
         )
@@ -2327,7 +2402,8 @@ class WorkbenchApp(App[None]):
                 arguments["profile"] = values["profile"]
             if values.get("model"):
                 arguments["model"] = values["model"]
-            self._run_creation("edit", arguments, t("Edit", "编辑"))
+            options = _control_options(self.deps.options, _convert_controls(values))
+            self._run_creation("edit", arguments, t("Edit", "编辑"), options)
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
@@ -2339,8 +2415,9 @@ class WorkbenchApp(App[None]):
                     ("model", t("model (optional)", "模型（可留空）"), model_default),
                     ("count", t("count", "数量"), "1"),
                     ("size", t("size", "尺寸"), "1024x1024"),
+                    ("async", "true | false", ""),
                 ],
-                optional={"profile", "model"},
+                optional={"profile", "model", "async"},
             ),
             done,
         )

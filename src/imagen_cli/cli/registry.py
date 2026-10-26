@@ -277,10 +277,11 @@ def _input_schema(name: str) -> dict[str, Any]:
                     text,
                 )
             )
+            properties["key_file"] = text
             properties["revision"] = {"type": "integer", "minimum": 1, "default": 1}
-            required += ("provider", "family", "base_url", "model_default", "credential_ref")
+            required += ("provider", "family", "base_url", "model_default")
     elif name == "session create":
-        properties = dict.fromkeys(("name", "intent_file", "profile", "model"), text)
+        properties = dict.fromkeys(("name", "intent", "intent_file", "profile", "model"), text)
         required = ("name",)
     elif name.startswith("session ") and name not in {"session list", "session import"}:
         properties = {"session": text}
@@ -403,7 +404,11 @@ def _input_schema(name: str) -> dict[str, Any]:
         }
     if name in {"providers", "models", "profile list", "session list"}:
         properties.update({key: OPTION_METADATA[key] for key in ("limit", "cursor")})
-    return _object(properties, required)
+    schema = _object(properties, required)
+    if name == "profile set":
+        # Either an existing credential reference, or a key file stored privately now.
+        schema["anyOf"] = [{"required": ["credential_ref"]}, {"required": ["key_file"]}]
+    return schema
 
 
 def _data_schema(command: Command) -> dict[str, Any]:

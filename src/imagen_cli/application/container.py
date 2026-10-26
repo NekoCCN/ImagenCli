@@ -551,7 +551,17 @@ class Container:
             if "config_file" in args:
                 profile_data = profile.read_config(args["config_file"], args["profile"])
             elif command == "profile set":
-                profile_data = profile.build_set(args)
+                parameters = dict(args)
+                key_file = parameters.pop("key_file", None)
+                if key_file:
+                    # Store the secret first, then point the profile at it; the value
+                    # never enters arguments or output.
+                    if self.private_state_store is None:
+                        raise ValueError("private credential storage is unavailable")
+                    parameters["credential_ref"] = self.private_state_store.write_credential(
+                        str(parameters["profile"]), profile.read_key(key_file)
+                    )
+                profile_data = profile.build_set(parameters)
             return profile.execute(
                 self.repositories,
                 command,
@@ -727,7 +737,11 @@ class Container:
         validate(args, discover(command)["input_schema"])
         if command == "session create":
             # Read bounded, explicitly selected text before initializing storage.
-            intent = read_text(args["intent_file"]) if "intent_file" in args else ""
+            if "intent" in args and "intent_file" in args:
+                raise ValueError("use intent or intent_file, not both")
+            intent = args.get("intent") or ""
+            if not intent and "intent_file" in args:
+                intent = read_text(args["intent_file"])
             return session.create(
                 SessionService(self.repositories, self.artifact_store),
                 name=args["name"],

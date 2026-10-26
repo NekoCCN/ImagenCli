@@ -14,14 +14,10 @@ def read_config(path: str, identity: str) -> dict[str, Any]:
     return load_profile(path, identity)
 
 
-def secret(
-    repositories: Repositories, private_store: Any, identity: str, key_file: str,
-) -> tuple[str, dict[str, Any]]:
-    """Store a key from a local file; the value never appears in output."""
+def read_key(key_file: str) -> str:
+    """One secret line from a bounded local file; the value is never logged."""
     from pathlib import Path
 
-    if private_store is None:
-        raise ValueError("private credential storage is unavailable")
     path = Path(key_file)
     if not path.is_file():
         raise ValueError("key file is missing")
@@ -30,6 +26,16 @@ def secret(
     value = path.read_bytes().decode("utf-8").strip("\r\n")
     if not value or any(char in value for char in "\r\n\0"):
         raise ValueError("key file must contain one secret line")
+    return value
+
+
+def secret(
+    repositories: Repositories, private_store: Any, identity: str, key_file: str,
+) -> tuple[str, dict[str, Any]]:
+    """Store a key from a local file; the value never appears in output."""
+    if private_store is None:
+        raise ValueError("private credential storage is unavailable")
+    value = read_key(key_file)
     row = repositories.get("profiles", identity)
     if row is None:
         matches = [item for item in queries.iter_all(repositories, "profiles")

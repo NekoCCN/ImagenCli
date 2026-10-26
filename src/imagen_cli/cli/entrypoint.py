@@ -9,7 +9,7 @@ from jsonschema import ValidationError, validate
 from imagen_cli import i18n
 from imagen_cli.application.container import Container
 
-from .options import OPTION_METADATA, SharedOptions
+from .options import COMMAND_CONTROLS, OPTION_METADATA, SharedOptions
 from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
 from .usage import UsageError, describe_pydantic, describe_validation, plain_detail
@@ -334,35 +334,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             )
         args = ([target_command] if target_command else []) + (["--agent"] if agent else [])
         return command, args, options
-    extra_controls = {
-        "providers": {"limit", "cursor"},
-        "models": {"limit", "cursor"},
-        "profile list": {"limit", "cursor"},
-        "session list": {"limit", "cursor"},
-        "job wait": {"timeout"},
-        "batch wait": {"timeout"},
-        "plan execute": {"timeout"},
-        "session delete": {"yes"},
-        "session remove-artifact": {"purge"},
-        "session remove-image": {"purge"},
-        "asset gc": {"dry_run", "yes"},
-        "cache purge": {"plan", "yes"},
-        "transform": {"pipeline", "op", "preset", "session", "timeout"},
-        "ops": {"op", "preset", "verbose"},
-        "models refresh": {"profile", "send_credential"},
-        "models add": {"profile", "id"},
-        "models list": {"profile"},
-        "profile set": {
-            "provider",
-            "family",
-            "base_url",
-            "model_default",
-            "credential_ref",
-            "revision",
-        },
-        "generate": {"dry_run", "timeout", "wait", "async_"},
-        "edit": {"dry_run", "timeout", "wait", "async_"},
-    }.get(command, set())
+    extra_controls = COMMAND_CONTROLS.get(command, set())
     unexpected = sorted(set(controls) - common - extra_controls)
     if unexpected:
         names = ", ".join("--" + name.replace("_", "-") for name in unexpected)
