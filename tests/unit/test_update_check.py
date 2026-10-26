@@ -25,7 +25,6 @@ def test_a_newer_tag_is_reported():
     assert status == "succeeded"
     assert data["latest"] == "9.9.9"
     assert data["update_available"] is True
-    assert data["url"].endswith("/v9.9.9")
 
 
 def test_the_installed_tag_is_not_an_update():
@@ -45,6 +44,18 @@ def test_a_broken_feed_is_an_error_not_a_guess():
         update_service.check(lambda url: b"not json")
     with pytest.raises(ValueError, match="release feed"):
         update_service.check(lambda url: b"{}")
+
+
+def test_release_url_tag_is_extracted_only_from_a_tag_page():
+    assert (
+        update_service._tag_from_release_url(
+            "https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.0"
+        )
+        == "v0.1.0"
+    )
+    assert update_service._tag_from_release_url(
+        "https://github.com/NekoCCN/ImagenCli/releases"
+    ) is None
 
 
 def test_the_cli_exposes_update(monkeypatch):

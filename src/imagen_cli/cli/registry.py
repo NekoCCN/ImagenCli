@@ -432,7 +432,6 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "installed": {"type": "string"},
                 "latest": {"type": "string"},
                 "update_available": {"type": "boolean"},
-                "url": {"type": "string"},
                 "published_at": {"type": "string"},
             },
             ("installed", "latest", "update_available"),
