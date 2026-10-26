@@ -73,6 +73,7 @@ def test_agents_installed_elsewhere_are_not_detected_in_this_project(tmp_path, m
 
 def test_an_empty_config_home_still_resolves_to_the_user_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CONFIG_HOME", "")
     assert skill_targets.root_for("opencode", "global") == (
         tmp_path / "home/.config/opencode/skills"
