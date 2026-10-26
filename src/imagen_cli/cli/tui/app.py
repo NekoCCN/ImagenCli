@@ -282,30 +282,64 @@ def _keybar(entries: list[tuple[str, str]]) -> Text:
 
 
 class ConfirmScreen(ModalScreen[bool]):
-    """Typed confirmation; Enter with the exact word authorizes the action."""
+    """Yes/No dialog with No selected first; Enter confirms the highlighted choice."""
 
-    BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
+    BINDINGS = [
+        Binding("left", "select_no", "", show=False),
+        Binding("right", "select_yes", "", show=False),
+        Binding("h", "select_no", "", show=False),
+        Binding("l", "select_yes", "", show=False),
+        Binding("enter", "confirm", t("Confirm", "确认")),
+        Binding("n", "answer_no", t("No", "否")),
+        Binding("y", "answer_yes", t("Yes", "是")),
+        Binding("escape", "cancel", t("Cancel", "取消")),
+    ]
 
-    def __init__(self, prompt: str, word: str) -> None:
+    def __init__(self, prompt: str) -> None:
         super().__init__()
         self.prompt = prompt
-        self.word = word
-        self.field = Input(placeholder=word)
+        self.yes = False
+        self.choice = Static("")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(self.prompt, classes="panel-title"),
-            self.field,
-            Static(t("enter confirm · esc cancel", "enter 确认 · esc 取消"), classes="panel-hint"),
+            self.choice,
+            Static(
+                t(
+                    "←/→ choose · enter confirm · esc cancels",
+                    "←/→ 选择 · enter 确认 · esc 取消",
+                ),
+                classes="panel-hint",
+            ),
             classes="panel",
             id="confirm",
         )
 
     def on_mount(self) -> None:
-        self.field.focus()
+        self._render_choice()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value == self.word)
+    def _render_choice(self) -> None:
+        no = Text(t("No", "否"), style="reverse" if not self.yes else "")
+        yes = Text(t("Yes", "是"), style="reverse" if self.yes else "")
+        self.choice.update(Text.assemble(no, "    ", yes))
+
+    def action_select_no(self) -> None:
+        self.yes = False
+        self._render_choice()
+
+    def action_select_yes(self) -> None:
+        self.yes = True
+        self._render_choice()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.yes)
+
+    def action_answer_no(self) -> None:
+        self.dismiss(False)
+
+    def action_answer_yes(self) -> None:
+        self.dismiss(True)
 
     def action_cancel(self) -> None:
         self.dismiss(False)
@@ -2165,6 +2199,25 @@ class WorkbenchApp(App[None]):
         if self.deps.execute is None:
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
+        if command == "worker start":
+
+            def confirmed(answer: bool | None) -> None:
+                if answer is True:
+                    self._open_command_form(command)
+
+            self.push_screen(
+                ConfirmScreen(
+                    t(
+                        "Start the worker? It consumes queued async jobs and can spend money.",
+                        "启动 worker？它会消费已排队的异步任务，可能产生费用。",
+                    )
+                ),
+                confirmed,
+            )
+            return
+        self._open_command_form(command)
+
+    def _open_command_form(self, command: str) -> None:
         fields, optional = command_fields(command)
         controls = _control_fields(command)
         control_names = {name for name, _, _ in controls}
@@ -2507,7 +2560,7 @@ class WorkbenchApp(App[None]):
             self._say(t(f"Session deleted: {name}", f"已删除会话：{name}"), "ok")
 
         self.push_screen(
-            ConfirmScreen(t(f"Type {name} to confirm deletion", f"输入 {name} 确认删除"), name),
+            ConfirmScreen(t(f"Delete session {name}?", f"删除会话 {name}？")),
             finished,
         )
 
@@ -2545,10 +2598,9 @@ class WorkbenchApp(App[None]):
         self.push_screen(
             ConfirmScreen(
                 t(
-                    f"Remove image {num}/{total} from this session? Type yes to confirm",
-                    f"确认从当前会话中移除第 {num}/{total} 张图片？输入 yes 确认",
-                ),
-                "yes",
+                    f"Remove image {num}/{total} from this session?",
+                    f"从当前会话中移除第 {num}/{total} 张图片？",
+                )
             ),
             finished,
         )

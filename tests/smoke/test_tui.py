@@ -1,4 +1,4 @@
-"""TUI pilot: read-only browsing, typed confirmation, no writes before it."""
+"""TUI pilot: read-only browsing, confirmation dialogs, no writes before consent."""
 
 import asyncio
 from pathlib import Path
@@ -102,24 +102,22 @@ def test_typed_purge_confirmation_runs_purge(deps):
     assert recorder.purges and len(recorder.purges[0]) == 64
 
 
-def test_delete_requires_the_session_name(deps):
+def test_delete_confirmation_defaults_to_no_and_accepts_yes(deps):
     deps_value, recorder = deps
     app = WorkbenchApp(deps_value)
-    app.current = "ses_" + "0" * 32
 
     async def run():
         async with app.run_test(size=(80, 24)) as pilot:
             app.current = "ses_" + "0" * 32
             await pilot.press("x")
             await pilot.pause()
-            await pilot.press(*"wrong")
-            await pilot.press("enter")
+            await pilot.press("enter")  # No is selected by default
             await pilot.pause()
             assert recorder.deleted == []
             app.current = "ses_" + "0" * 32
             await pilot.press("x")
             await pilot.pause()
-            await pilot.press(*"session-0")
+            await pilot.press("right")
             await pilot.press("enter")
             await pilot.pause()
 
@@ -157,8 +155,7 @@ def test_delete_is_hinted_on_screen_and_reported(deps):
             assert "删除" in keybar
             await pilot.press("x")
             await pilot.pause()
-            await pilot.press(*"session-0")
-            await pilot.press("enter")
+            await pilot.press("y")
             await pilot.pause()
             assert "已删除" in str(app.status.render())
 
@@ -876,6 +873,36 @@ def test_provider_form_creates_a_profile(deps):
     assert saved[0]["base_url"] == "https://gateway.example/v1"
 
 
+def test_worker_start_asks_before_consuming_the_queue(deps):
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        return "succeeded", {}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            app._open_command("worker start")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await pilot.press("enter")  # No by default
+            await pilot.pause()
+            assert calls == []
+            app._open_command("worker start")
+            await pilot.pause()
+            await pilot.press("y")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert calls == ["worker start"]
+
+
 def test_command_palette_shows_a_form_even_when_nothing_is_required(deps):
     deps_value, _ = deps
     calls = []
@@ -1147,9 +1174,8 @@ def test_tui_delete_artifact_key_binding(deps):
             await pilot.pause()
             assert isinstance(app.screen, ConfirmScreen)
 
-            # Type 'yes' and enter to confirm removal
-            for ch in "yes":
-                await pilot.press(ch)
+            # Move to Yes and confirm removal
+            await pilot.press("right")
             await pilot.press("enter")
             await pilot.pause()
 
