@@ -1,5 +1,10 @@
 """Configured dispatch reaches the Gemini adapter without touching the network."""
 
+import base64
+import json
+from dataclasses import replace
+
+import httpx
 import pytest
 
 from imagen_cli.application.container import Container
@@ -59,3 +64,53 @@ def test_unknown_family_is_refused(tmp_path):
         )
         with pytest.raises(ProviderFailure):
             adapter.create(_request("other"))
+
+
+def test_configured_native_roundtrip_uses_fresh_adapter(tmp_path, monkeypatch, png_bytes):
+    encoded = base64.b64encode(png_bytes).decode()
+    native = {"role": "model", "parts": [{
+        "inlineData": {"mimeType": "image/png", "data": encoded},
+        "thoughtSignature": "fixture-private-signature",
+    }]}
+    sent_contents = []
+
+    def send(sent):
+        assert str(sent.url) == (
+            "https://gateway.example/gemini/v1beta/models/nano-banana-2:generateContent"
+        )
+        assert sent.headers["x-goog-api-key"] == "fixture-key"
+        sent_contents.append(json.loads(sent.content)["contents"])
+        return httpx.Response(200, json={
+            "candidates": [{"content": native, "finishReason": "STOP"}],
+        })
+
+    monkeypatch.setattr(
+        "imagen_cli.providers.gemini.httpx.HTTPTransport",
+        lambda **kwargs: httpx.MockTransport(send),
+    )
+    monkeypatch.setattr(
+        "imagen_cli.execution.configured.resolve_credential", lambda *args, **kwargs: "fixture-key",
+    )
+    with Container(workspace=str(tmp_path)) as container:
+        container.repositories.insert("profiles", {
+            **PROFILE, "base_url": "https://gateway.example/gemini/v1beta",
+            "model_default": "nano-banana-2",
+        })
+        request = replace(_request(), model="nano-banana-2")
+        first = ConfiguredAdapter(
+            container.repositories, private_store=container.private_state_store,
+        ).create(request)
+        second = ConfiguredAdapter(
+            container.repositories, private_store=container.private_state_store,
+        ).create(replace(
+            request, job_id="job_" + "3" * 32, operation="edit", prompt="make blue",
+            native_context=first.context,
+        ))
+        assert second.artifacts[0].content == png_bytes
+        assert second.context != first.context
+        assert sent_contents == [
+            [{"role": "user", "parts": [{"text": "red kite"}]}],
+            [{"role": "user", "parts": [{"text": "red kite"}]}, native,
+             {"role": "user", "parts": [{"text": "make blue"}]}],
+        ]
+        assert "fixture-private-signature" not in repr(second)

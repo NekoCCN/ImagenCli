@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from imagen_cli.domain.models import endpoint_url, models_path
 from imagen_cli.storage.repositories import Repositories
 
 if TYPE_CHECKING:
@@ -39,15 +40,16 @@ def _headers(family: str, credential: str | None) -> dict[str, str]:
 
 
 def _identities(family: str, payload: Any) -> list[dict[str, str]]:
-    if family == "generate_content":
-        items = payload.get("models") if isinstance(payload, dict) else None
+    if family == "generate_content" and isinstance(payload, dict) and "models" in payload:
+        items = payload["models"]
         result = []
         for item in items if isinstance(items, list) else []:
             name = item.get("name") if isinstance(item, dict) else None
             if isinstance(name, str) and name:
                 model_id = name.removeprefix("models/")
                 display = str(item.get("displayName") or model_id)
-            result.append({"model_id": model_id, "display_name": display})
+                if model_id:
+                    result.append({"model_id": model_id, "display_name": display})
         return result
     items = payload.get("data") if isinstance(payload, dict) else None
     result = []
@@ -58,8 +60,7 @@ def _identities(family: str, payload: Any) -> list[dict[str, str]]:
     return result
 
 
-def refresh(
-    repositories: Repositories,
+def fetch(
     profile: dict[str, Any],
     *,
     resolve_credential: Any = None,
@@ -69,7 +70,13 @@ def refresh(
 ) -> dict[str, Any]:
     import httpx
 
-    base_url = str(profile["base_url"])
+    base_url = endpoint_url(str(profile["base_url"]))
+    path = profile.get("models_path")
+    parsed = urlsplit(base_url)
+    url = (
+        f"{parsed.scheme}://{parsed.netloc}{models_path(path)}"
+        if path is not None else base_url.rstrip("/") + "/models"
+    )
     if not _trusted(base_url):
         raise ValueError("model catalog requires https or a loopback http endpoint")
     credential = None
@@ -78,7 +85,6 @@ def refresh(
         if resolve_credential is None:
             raise ValueError("credential sender unavailable")
         credential = resolve_credential(reference)
-    url = base_url.rstrip("/") + "/models"
     owned = client is None
     http = client or httpx.Client(
         timeout=TIMEOUT, follow_redirects=False, trust_env=False,
@@ -106,10 +112,25 @@ def refresh(
         payload = response.json()
     except ValueError as error:
         raise ValueError("catalog response is not JSON") from error
+    return {"source_url": url, "models": _identities(str(profile["family"]), payload)}
+
+
+def refresh(
+    repositories: Repositories,
+    profile: dict[str, Any],
+    *,
+    resolve_credential: Any = None,
+    send_credential: bool = False,
+    client: httpx.Client | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    catalog = fetch(profile, resolve_credential=resolve_credential,
+                    send_credential=send_credential, client=client)
+    url = catalog["source_url"]
     stamp = (now or datetime.now(UTC)).astimezone(UTC).isoformat().replace("+00:00", "Z")
     stored = []
     with repositories.transaction():
-        for item in _identities(str(profile["family"]), payload):
+        for item in catalog["models"]:
             identity = f"{profile['id']}:{item['model_id']}"
             row = {
                 "id": identity,

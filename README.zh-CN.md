@@ -14,7 +14,7 @@ Imagen 为人和 coding agent 提供同一个图像工作区。人可以在 TUI 
 ## 功能
 
 - **同一工作区，两种界面**：TUI 与 CLI 读写相同的会话、计划、任务和产物。
-- **自己的端点与模型**：profile 支持 OpenAI-compatible Images 接口及其他适配器，可用模型和参数由端点决定。
+- **自己的端点与模型**：profile 支持 OpenAI-compatible Images、Gemini 原生 `generateContent` 及其他适配器，可用模型和参数由端点决定。
 - **显式执行**：计划冻结请求供审阅；批准与执行是两步，创建计划不会发送生成请求。
 - **本地后处理**：平滑、线条处理、明暗与颜色调整、周期频率抑制、缩放、图像比较和联系表。
 - **批量与后台任务**：本地队列、独立子任务和 async worker。
@@ -158,7 +158,7 @@ imagen profile set local \
 
 imagen profile list
 imagen profile show local
-imagen profile update local --model-default another-model
+imagen models use local --id another-model
 ```
 
 凭据引用：
@@ -170,7 +170,7 @@ imagen profile update local --model-default another-model
 把密钥文件导入私有存储且不回显：
 
 ```bash
-imagen profile secret --profile local --key-file ./key.txt
+imagen profile secret local --key-file ./key.txt
 ```
 
 不要把凭据写进命令参数、请求文件或会话导出。
@@ -184,7 +184,32 @@ imagen models list --profile local
 imagen models use local --id model-id   # 设为 profile 默认
 ```
 
-TUI 中按 `v` 可以新增或更新 profile、刷新模型、选择默认模型或手动输入模型 ID。
+TUI 中按 `v` 管理 profile。协议、官方端点、模型目录路径和模型均以选择为主，选择 **自定义 / 手动输入** 后才展开输入框；已有自定义值会保留。生成和编辑表单可以选择已保存的 profile 及其模型。
+
+### Gemini 原生接口
+
+Gemini 原生请求使用 `gemini` / `generate_content`，不是 OpenAI Images 协议：
+
+```bash
+export GEMINI_API_KEY='your-api-key'
+imagen profile set gemini \
+  --provider gemini \
+  --family generate_content \
+  --base-url https://generativelanguage.googleapis.com/v1beta \
+  --models-path /v1beta/models \
+  --model-default gemini-3.1-flash-image \
+  --credential-ref env:GEMINI_API_KEY
+
+imagen models refresh gemini --send-credential
+```
+
+支持以 `/v1beta` 结尾的自定义 HTTPS 网关；明文 HTTP 仅限受支持的 loopback 网关地址。适配器通过 `x-goog-api-key` 认证，使用 `models/{model}:generateContent` 生图和编辑图片。也接受 `nano-banana-2` 网关模型别名及带供应商前缀的 ID，但实际可用性由网关决定。原生续接上下文保存在私有存储，可供后续编辑恢复；当前 Gemini 适配器不支持 mask。
+
+`--models-path` 与生成协议独立。CLI/TUI 新建配置默认 `/v1/models`；Google 原生目录需显式指定上面的 `/v1beta/models`。网关即使使用 `/v1beta` 生成，也可能使用 `/v1/models` 查询目录。路径相对于同源根地址：`https://gateway.example/v1beta` 加 `/v1/models` 得到 `https://gateway.example/v1/models`，不是拼接到 `/v1beta` 后。禁止填写跨主机完整 URL、query 或 fragment。缺少此字段的旧配置保留原来的 `base_url + /models` 行为。
+
+Gemini 目录优先解析 `models[].name`，只有不存在 `models` 字段时才兼容 `data[].id`；原生空列表不会被覆盖。不会自动探测其他路径或重试生成请求。目录中存在模型 ID 不代表它一定能生图。
+
+在下方相同的生成/编辑 JSON 流程中使用 `"profile": "gemini"` 即可。CLI 查询目录只有加 `--send-credential` 才发送凭据；TUI 的获取列表按钮会明确向配置端点发送所选凭据。
 
 ## 生成与编辑
 

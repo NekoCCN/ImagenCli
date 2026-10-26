@@ -61,11 +61,15 @@ def build_set(parameters: dict[str, Any]) -> dict[str, Any]:
         provider=parameters["provider"],
         family=parameters["family"],
         base_url=parameters["base_url"],
+        models_path=parameters.get("models_path", "/v1/models"),
         model_default=parameters["model_default"],
         credential_ref=parameters["credential_ref"],
         revision=parameters.get("revision", 1),
     )
-    return profile.model_dump(mode="json")
+    data = profile.model_dump(mode="json")
+    if "models_path" not in parameters:
+        data.pop("models_path")
+    return data
 
 
 def execute(
@@ -104,6 +108,9 @@ def execute(
         elif command == "profile set":
             if data is None:
                 raise ValueError("profile configuration required")
+            data.setdefault(
+                "models_path", existing.get("models_path") if existing else "/v1/models"
+            )
             if existing is None:
                 if data["revision"] != 1:
                     raise ValueError("new profile revision must be one")
@@ -115,9 +122,9 @@ def execute(
             else:
                 if data["revision"] != existing["revision"]:
                     return "conflict", {}
-                endpoint_changed = (
-                    data.get("base_url") != existing.get("base_url")
-                    or data.get("family") != existing.get("family")
+                endpoint_changed = any(
+                    data.get(key) != existing.get(key)
+                    for key in ("base_url", "models_path", "family", "provider")
                 )
                 row = repositories.update("profiles", profile, {
                     **{key: value for key, value in data.items() if key != "id"},
@@ -130,6 +137,11 @@ def execute(
                 return "not_found", {}
             if data is None or data["revision"] != existing["revision"]:
                 return "conflict", {}
+            if any(
+                data.get(key) != existing.get(key)
+                for key in ("base_url", "models_path", "family", "provider")
+            ):
+                queries.invalidate_models(repositories, profile)
             row = repositories.update("profiles", profile, {
                 **{key: value for key, value in data.items() if key != "id"},
                 "revision": existing["revision"] + 1,

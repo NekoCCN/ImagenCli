@@ -1,64 +1,61 @@
 ---
 name: imagen-assets
-version: 1.0.0
-description: Use when working with existing imagen sessions and artifacts: listing or resuming history, forking, exporting or importing a session, applying deterministic transforms, comparing, building contact sheets, running super-resolution, or reclaiming disk space.
+version: 1.1.0
+description: Use when browsing or resuming Imagen sessions, opening or exporting artifacts, applying local transforms, comparing images, upscaling, or reclaiming workspace disk space.
 ---
 
-# Imagen 会话与产物
+# Imagen sessions and artifacts
 
-产物是受管文件；变换、对比、联系表都会生成新产物，不覆盖源文件。
+Explain choices, confirmations, and results in the user's language. Keep commands, flags, IDs, and JSON keys unchanged. Use CLI help from the installed version before unfamiliar operations.
 
-## 会话历史
+Artifacts are managed files. Transforms and contact sheets create new artifacts without overwriting inputs; comparison is read-only.
+
+## Session history
 
 ```bash
 imagen session list --agent
-imagen session show ses_... --agent        # 轮次、引用与产物 ID
+imagen session show ses_... --agent
 imagen session resume ses_... --agent
-imagen session fork ses_... --from-turn trn_... --name "分支" --agent
+imagen session fork ses_... --from-turn trn_... --name branch --agent
 imagen session export ses_... --to backup.zip --agent
 imagen session import backup.zip --agent
-imagen asset show art_... --agent          # 路径、所属会话、来源轮次
-imagen asset open art_... --agent          # 用系统默认程序打开
+imagen asset show art_... --agent
+imagen asset open art_... --agent
 ```
 
-- 导入会重映射全部 ID，同名会话自动加 `(imported)` 后缀。
-- `session delete` 是逻辑删除；名字立即释放，可再用同名新建。
-- 导出不包含密钥或私有存储。
+Choose the user's session and artifact, not a similar-looking one. Import remaps IDs and resolves duplicate session names. Session deletion is logical and frees its name. Exports omit credentials and private storage. Open the actual output for the user; a successful command alone does not display it.
 
-## 确定性后处理
+## Deterministic postprocessing
 
 ```bash
-imagen ops --agent                        # 可用算子
+imagen ops --agent
 imagen transform art_... --op pixelate:scale=4 --agent
 imagen transform art_... --pipeline pipeline.json --agent
-imagen compare art_a art_b --agent        # PSNR / SSIM，只读
+imagen compare art_a art_b --agent
 imagen sheet --artifacts art_a,art_b,art_c --columns 3 --agent
 ```
 
-- `transform` 必须给 `--op` 或 `--pipeline` 之一。
-- 联系表默认从源产物推断共同会话；源产物跨会话时用 `--session` 指定归属。
+`transform` requires `--op`, `--pipeline`, or `--preset`. `compare` reports PSNR/SSIM without creating an artifact. A contact sheet infers a common source session; use `--session` for inputs from different sessions. Postprocessing is experimental: metric changes do not establish better perceptual quality.
 
-## 超分
+## Upscaling
 
-先查看目录，请用户选择模型并查阅来源与权重许可。只有用户明确接受下载后，才执行带 `--accept` 的命令；不要按下面的示例默认选择模型。
+Inspect the catalog and let the user select a model and review its source/license. Only download after explicit approval; this example does not select a model for the user:
 
 ```bash
 imagen superres models --agent
-imagen superres fetch realesrgan-x4plus --accept --agent
+imagen superres fetch --model realesrgan-x4plus --accept --agent
 imagen transform art_... --op superres:backend=cpu,tile=256,overlap=16 --agent
 ```
 
-权限或依赖缺失是明确错误；不要用普通缩放假装超分结果。
+Do not download weights or install inference dependencies automatically. Report permission/dependency errors. Never substitute ordinary resizing and claim successful model-based upscaling.
 
-## 回收空间
+## Reclaim disk space
 
 ```bash
-imagen cache audit --agent                # 只读
-imagen cache purge --plan <digest> --yes --agent
-imagen asset gc --dry-run --agent       # 列出候选，不删除
-imagen asset gc --plan <digest> --yes --agent
+imagen cache audit --agent
+imagen cache purge --plan DIGEST --yes --agent
+imagen asset gc --dry-run --agent
+imagen asset gc --plan DIGEST --yes --agent
 ```
 
-- 没有 `--yes` 与匹配的摘要，永远不删除。
-- 删除前把清单给用户确认；已导出的 ZIP 不受影响。
-- 产物仍在被未删除会话引用时不会被回收。
+Present the candidate list and obtain approval before deleting. Use the digest returned by the current dry run; never invent it. Exported ZIPs are unaffected. Artifacts referenced by undeleted sessions are not garbage-collected. Never broaden cleanup to unrelated files.

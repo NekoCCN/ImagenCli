@@ -1,18 +1,20 @@
 ---
 name: imagen-batch
-version: 1.0.0
-description: Use when submitting several imagen image requests at once, controlling provider concurrency, or inspecting and waiting on a batch of child jobs. Covers batch submit/get/wait, per-child status, and safe handling of partial failures.
+version: 1.1.0
+description: Use when submitting multiple Imagen image requests, choosing provider concurrency, inspecting batch child jobs, or handling partial batch failures.
 ---
 
-# Imagen 批量任务
+# Imagen batch requests
 
-批量把多个独立的创建请求交给同一个并发上限执行。每个子项仍是独立 turn/job，失败互不覆盖。
+Explain scope, approvals, progress, and results in the user's language. Keep CLI syntax, JSON keys, status values, and model/profile IDs unchanged. Preserve each user-approved prompt's language.
 
-## 提交
+Each batch child is an independent turn/job. One child's failure does not overwrite another's results.
 
-`batch submit` 会批准并执行各子请求，不是只生成待审计划。先向用户确认整批提示词、端点、模型、数量和可能费用，取得明确发送授权后才提交。
+## Submit only after authorization
 
-准备一个 JSON 文件，`requests` 是 CreationInput 数组，`concurrency` 取 1–8：
+`batch submit` approves and executes child requests; it does not merely create reviewable plans. Confirm all prompts, endpoints, models, counts, and potential costs before submitting. Do not choose a different provider to make the batch work. OpenAI-compatible endpoints are the primary setup; Gemini native is optional and must be explicitly selected through the configured profile.
+
+Prepare a JSON file with a `requests` array and `concurrency` from 1 to 8:
 
 ```json
 {
@@ -21,18 +23,18 @@ description: Use when submitting several imagen image requests at once, controll
     {
       "schema_version": 1,
       "operation": "generate",
-      "session": "ses_...",
-      "profile": "local",
-      "prompt": "第一张的提示词",
-      "size": "1024x1024"
+      "session": "ses_REPLACE",
+      "profile": "USER_SELECTED_PROFILE",
+      "prompt": "USER_APPROVED_PROMPT_1",
+      "count": 1
     },
     {
       "schema_version": 1,
       "operation": "generate",
-      "session": "ses_...",
-      "profile": "local",
-      "prompt": "第二张的提示词",
-      "size": "1024x1024"
+      "session": "ses_REPLACE",
+      "profile": "USER_SELECTED_PROFILE",
+      "prompt": "USER_APPROVED_PROMPT_2",
+      "count": 1
     }
   ]
 }
@@ -40,22 +42,17 @@ description: Use when submitting several imagen image requests at once, controll
 
 ```bash
 imagen batch submit --input-json requests.json --agent
-# data.batch.id（bat_...）、子任务列表
 ```
 
-- `--input-json -` 从 stdin 读 JSON。
-- 提交前会离线校验全部子请求；任何一个不合法都整体拒绝。
-- 并发最终取 `min(请求值, 8, 供应商声明上限)`。
+Read `data.batch.id` and each child's result. `--input-json -` reads stdin. All children are validated offline before submission; invalid input rejects the batch. Effective concurrency is bounded by the requested value, 8, and declared provider limits. A `null` cost is unknown, not free.
 
-## 查看与等待
+For cost preview only, create individual unapproved `generate` / `edit` plans using the `imagen` workflow; do not call `batch submit`, approve, or execute them. Available costs may remain unknown.
+
+## Inspect and wait
 
 ```bash
 imagen batch get bat_... --agent
 imagen batch wait bat_... --timeout 600 --agent
 ```
 
-- 每个子项有自己的 job 状态与产物；按子项逐个判断成功/失败。
-- `batch wait` 只观察，不重试、不重发。
-- 部分失败是正常结果：不要自动重新提交整批；只对确定的失败子项重新规划。
-- 结果未知（`outcome_unknown` / `accepted_maybe=true`）时停止，先核对对应 job，
-  再让用户决定。
+Judge success per child, including saved artifacts. `batch wait` observes only; it does not retry. Never resubmit the entire batch automatically after partial failure. Replan only definitely failed children with fresh authorization. For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and inspect the corresponding job's local facts before asking the user what to do.

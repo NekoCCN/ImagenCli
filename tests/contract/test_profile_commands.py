@@ -11,7 +11,7 @@ from tests.integration.test_local_cli import invoke
 
 def config(path: Path, *, revision: int = 1) -> None:
     path.write_text(
-        f'''id = "local"
+        f"""id = "local"
 name = "Local"
 provider = "openai"
 family = "images"
@@ -21,7 +21,9 @@ credential_ref = "keyring:local"
 revision = {revision}
 [trust_policy]
 allow_redirects = false
-''', encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
 
 def test_profile_add_list_show_and_update_are_persistent(tmp_path):
@@ -50,6 +52,39 @@ def test_profile_add_list_show_and_update_are_persistent(tmp_path):
         assert stored["credential_ref"] == "keyring:local"
 
 
+def test_profile_set_cli_accepts_models_path_for_both_protocols(tmp_path):
+    for provider, family in (("openai", "images"), ("gemini", "generate_content")):
+        code, result = invoke(
+            tmp_path / provider, "profile", "set", "gateway",
+            "--provider", provider, "--family", family,
+            "--base-url", "https://gateway.example/v1beta",
+            "--models-path", "/v1/models", "--model-default", "image-model",
+            "--credential-ref", "env:KEY",
+        )
+        assert code == 0
+        assert result["data"]["profile"]["models_path"] == "/v1/models"
+        assert result["data"]["profile"]["family"] == family
+
+
+def test_profile_update_invalidates_catalog_when_models_path_changes(tmp_path):
+    path = tmp_path / "profile.toml"
+    config(path)
+    with Container(workspace=str(tmp_path / "work")) as container:
+        container.execute("profile add", {"profile": "local", "config_file": str(path)})
+        container.execute("models add", {"profile": "local", "id": "old-model"})
+        path.write_text(
+            path.read_text().replace(
+                "model_default =", 'models_path = "/v1beta/models"\nmodel_default ='
+            ),
+            encoding="utf-8",
+        )
+        status, _ = container.execute(
+            "profile update", {"profile": "local", "config_file": str(path)}
+        )
+        assert status == "succeeded"
+        assert container.repositories.list("provider_models") == []
+
+
 def test_profile_rejects_plaintext_credential_and_bad_config(tmp_path):
     workspace = tmp_path / "work"
     path = tmp_path / "bad.toml"
@@ -69,7 +104,8 @@ def test_config_is_explicit_and_never_reads_ambient_env_files(tmp_path):
     config(path)
     path.write_text(
         path.read_text(encoding="utf-8").replace(
-            'credential_ref = "keyring:local"', 'credential_ref = "local"',
+            'credential_ref = "keyring:local"',
+            'credential_ref = "local"',
         ),
         encoding="utf-8",
     )

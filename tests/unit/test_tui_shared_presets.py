@@ -49,7 +49,7 @@ def test_integer_choice_survives_parameter_editor():
             screen = ParamEditScreen("test", [{"op": "kuwahara_anisotropic", "params": {}}])
             for field, widget in zip(screen.fields_info, screen.inputs, strict=True):
                 if field[5] == "sectors":
-                    widget.value = "12"
+                    widget.value = 12
             assert screen._save_inputs_to_pipeline()[0]["params"]["sectors"] == 12
 
     asyncio.run(exercise())

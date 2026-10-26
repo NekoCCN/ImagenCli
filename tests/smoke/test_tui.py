@@ -594,7 +594,6 @@ def test_first_session_is_selected_on_mount(deps):
 
 def test_generate_defaults_to_the_only_profile(deps):
     deps_value, _ = deps
-    from textual.widgets import Input
 
     deps_value.repositories.insert("profiles", {
         "id": "p1", "name": "p1", "provider": "openai", "family": "images",
@@ -610,7 +609,7 @@ def test_generate_defaults_to_the_only_profile(deps):
             await pilot.pause()
             await pilot.press("g")
             await pilot.pause()
-            values.update({field.id: field.value for field in app.screen.query(Input)})
+            values.update(app.screen.values())
 
     asyncio.run(run())
     assert values["profile"] == "p1"
@@ -860,12 +859,16 @@ def test_provider_form_creates_a_profile(deps):
             await pilot.pause()
             await pilot.press("a")
             await pilot.pause()
-            await pilot.press(*"demo")
-            await pilot.press("tab", "tab", "tab")
-            await pilot.press(*"https://gateway.example/v1")
-            await pilot.press("tab")
-            await pilot.press(*"image-model")
-            await pilot.press("enter")
+            from textual.widgets import Input, Select
+
+            screen = pilot.app.screen
+            screen.query_one("#profile", Input).value = "demo"
+            screen.query_one("#base_url", Input).value = "https://gateway.example/v1"
+            screen.query_one("#model_default", Input).value = "image-model"
+            screen.query_one("#credential_mode", Select).value = "env"
+            await pilot.pause()
+            screen.query_one("#credential_ref", Input).value = "KEY"
+            screen.submit()
             await pilot.pause()
 
     asyncio.run(run())
@@ -955,7 +958,7 @@ def test_update_form_prefills_the_selected_profile(deps):
     assert saved == [{
         "profile": "p1", "provider": "openai", "family": "images",
         "base_url": "https://gateway.example/v1", "model_default": "m1",
-        "credential_ref": "env:KEY", "revision": 3,
+        "models_path": "/v1/models", "credential_ref": "env:KEY", "revision": 3,
     }]
 
 
@@ -981,14 +984,14 @@ def test_provider_form_accepts_a_direct_api_key(deps):
             await pilot.pause()
             await pilot.press("a")
             await pilot.pause()
-            await pilot.press(*"demo")
-            await pilot.press("tab", "tab", "tab")
-            await pilot.press(*"https://gateway.example/v1")
-            await pilot.press("tab")
-            await pilot.press(*"image-model")
-            await pilot.press("tab", "tab")
-            await pilot.press(*"sk-direct")
-            await pilot.press("enter")
+            from textual.widgets import Input
+
+            screen = pilot.app.screen
+            screen.query_one("#profile", Input).value = "demo"
+            screen.query_one("#base_url", Input).value = "https://gateway.example/v1"
+            screen.query_one("#model_default", Input).value = "image-model"
+            screen.query_one("#api_key", Input).value = "sk-direct"
+            screen.submit()
             await pilot.pause()
 
     asyncio.run(run())

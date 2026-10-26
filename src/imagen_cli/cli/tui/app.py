@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import math
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, Select, Static
 
 from imagen_cli.application import cache_service, media_ops
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
@@ -34,6 +35,7 @@ from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 from . import preview
+from .forms import ChoiceForm, CreationForm, ProviderForm
 
 
 @dataclass
@@ -473,7 +475,7 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
     """Adjust parameters for the current transform pipeline."""
 
     BINDINGS = [
-        Binding("tab", "toggle_mode", t("Switch mode", "切换模式")),
+        Binding("ctrl+enter", "confirm", t("Confirm", "确认"), priority=True),
         Binding("m", "toggle_mode", t("Switch mode", "切换模式")),
         Binding("escape", "cancel", "取消"),
     ]
@@ -481,6 +483,7 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
     def __init__(self, preset_name: str, pipeline: list[dict[str, Any]]) -> None:
         super().__init__()
         from imagen_cli.application.operator_catalog import (
+            Parameter,
             get_operator_item,
             localized_operator,
         )
@@ -489,7 +492,9 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
         self.pipeline = copy.deepcopy(pipeline)
         self.mode: str = "basic"
         self.fields_info: list[tuple[str, str, str, str, int, str, bool]] = []
-        self.inputs: list[Input] = []
+        self.inputs: list[Input | Select[Any]] = []
+        self.initial_values: list[Any] = []
+        self.parameters: dict[str, Parameter] = {}
 
         for step_idx, step in enumerate(self.pipeline):
             op = step.get("op", "")
@@ -504,12 +509,13 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 for p in catalog_item.parameters:
                     if p.name not in params:
                         all_param_names.append(p.name)
-                        params[p.name] = p.default
 
             for k in all_param_names:
-                v = params.get(k)
-                field_id = f"f_{step_idx}_{k}"
                 p_meta = catalog_params.get(k)
+                v = params.get(k, p_meta.default if p_meta else None)
+                field_id = f"f_{step_idx}_{k}"
+                if p_meta:
+                    self.parameters[field_id] = p_meta
                 is_adv = p_meta.is_advanced if p_meta else False
 
                 if p_meta:
@@ -530,13 +536,29 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 self.fields_info.append(
                     (field_id, label, placeholder, expected_type, step_idx, k, is_adv)
                 )
-                self.inputs.append(
-                    Input(
+                if expected_type in ("bool", "boolean"):
+                    options: list[Any] = [True, False]
+                else:
+                    options = list(p_meta.choices or []) if p_meta else []
+                if options:
+                    # Keep invalid existing values visible so confirmation can report them.
+                    if not any(type(v) is type(o) and v == o for o in options):
+                        options.append(v)
+                    widget: Input | Select[Any] = Select(
+                        [(str(option), option) for option in options],
+                        value=v,
+                        allow_blank=False,
+                        id=field_id,
+                    )
+                    widget.value = v
+                else:
+                    widget = Input(
                         value=str(v) if v is not None else "",
                         placeholder=placeholder,
                         id=field_id,
                     )
-                )
+                self.inputs.append(widget)
+                self.initial_values.append(widget.value)
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="param-form"):
@@ -551,10 +573,11 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                 with Horizontal(classes="field", id=f"c_{field_id}"):
                     yield Static(label, classes="field-label")
                     yield inp
+            yield Static("", id="param-error", markup=False)
             yield Static(
                 t(
-                    "enter confirm and preview · Tab/m switch basic/advanced · esc cancel",
-                    "enter 确认并预览 · Tab/m 切换基础/高级 · esc 取消",
+                    "ctrl+enter confirm · Tab next field · m basic/advanced · esc cancel",
+                    "ctrl+enter 确认 · Tab 下一项 · m 基础/高级 · esc 取消",
                 ),
                 classes="panel-hint",
             )
@@ -566,18 +589,18 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
         if self.mode == "basic":
             indicator_text = t(
                 "Mode: [bold cyan]● Basic parameters[/]   [dim]○ All advanced parameters[/]"
-                "  (Tab/m)",
-                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (Tab/m 切换)",
+                "  (m)",
+                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (m 切换)",
             )
         else:
             indicator_text = t(
                 "Mode: [dim]○ Basic parameters[/]   [bold cyan]● All advanced parameters[/]"
-                "  (Tab/m)",
-                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (Tab/m 切换)",
+                "  (m)",
+                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (m 切换)",
             )
         self.query_one("#param-mode-indicator", Static).update(indicator_text)
 
-        first_visible: Input | None = None
+        first_visible: Input | Select[Any] | None = None
         for (field_id, _, _, _, _, _, is_adv), inp in zip(
             self.fields_info, self.inputs, strict=True
         ):
@@ -596,29 +619,50 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
 
     def _save_inputs_to_pipeline(self) -> list[dict[str, Any]]:
         new_pipeline = copy.deepcopy(self.pipeline)
-        for (_, _, _, type_str, step_idx, k, _), inp in zip(
-            self.fields_info, self.inputs, strict=True
+        for (field_id, label, _, type_str, step_idx, k, _), inp, initial in zip(
+            self.fields_info, self.inputs, self.initial_values, strict=True
         ):
-            raw = inp.value.strip()
-            if not raw:
-                continue
             try:
-                if type_str in ("bool", "boolean"):
-                    val: Any = raw.lower() in ("true", "1", "yes", "on")
-                elif type_str in ("int", "integer"):
-                    val = int(raw)
-                elif type_str in ("float", "number"):
-                    val = float(raw)
+                if isinstance(inp, Select):
+                    val: Any = inp.value
+                    if type_str in ("bool", "boolean") and type(val) is not bool:
+                        raise ValueError(t("choose true or false", "请选择 true 或 false"))
                 else:
-                    val = raw
-                new_pipeline[step_idx]["params"][k] = val
-            except (ValueError, TypeError):
-                pass
+                    raw = inp.value
+                    if type_str in ("int", "integer"):
+                        val = int(raw)
+                    elif type_str in ("float", "number"):
+                        val = float(raw)
+                        if not math.isfinite(val):
+                            raise ValueError(t("must be finite", "必须是有限数值"))
+                    else:
+                        val = raw
+                meta = self.parameters.get(field_id)
+                if meta:
+                    if meta.choices and not any(
+                        type(val) is type(option) and val == option for option in meta.choices
+                    ):
+                        raise ValueError(t("choose a valid value", "请选择有效值"))
+                    if meta.min_value is not None and val < meta.min_value:
+                        raise ValueError(f">= {meta.min_value}")
+                    if meta.max_value is not None and val > meta.max_value:
+                        raise ValueError(f"<= {meta.max_value}")
+                if inp.value != initial:
+                    new_pipeline[step_idx].setdefault("params", {})[k] = val
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"{label}: {exc}") from exc
         return new_pipeline
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        new_pipeline = self._save_inputs_to_pipeline()
+    def action_confirm(self) -> None:
+        try:
+            new_pipeline = self._save_inputs_to_pipeline()
+        except ValueError as exc:
+            self.query_one("#param-error", Static).update(str(exc))
+            return
         self.dismiss(new_pipeline)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.action_confirm()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1024,6 +1068,7 @@ class ProvidersScreen(ModalScreen[bool]):
         ("provider", "openai / gemini", "openai"),
         ("family", "images / generate_content", "images"),
         ("base_url", "https://…", ""),
+        ("models_path", "/v1/models", "/v1/models"),
         ("model_default", "model id", ""),
         (
             "credential_ref",
@@ -1118,6 +1163,21 @@ class ProvidersScreen(ModalScreen[bool]):
             )
         return parameters
 
+    def _fetch_draft_models(self, values: dict[str, str]) -> list[str]:
+        from imagen_cli.application.model_catalog_service import fetch
+        from imagen_cli.execution.configured import resolve_credential
+
+        def credential(reference: str) -> str:
+            return values.get("api_key") or resolve_credential(
+                reference, private_store=self.deps.private_store,
+            )
+
+        catalog = fetch(
+            {**values, "credential_ref": values.get("credential_ref") or "private:draft"},
+            send_credential=True, resolve_credential=credential,
+        )
+        return [str(row["model_id"]) for row in catalog["models"]]
+
     def action_add(self) -> None:
         def done(values: dict[str, str] | None) -> None:
             if not values or self.deps.profile_set is None:
@@ -1134,11 +1194,11 @@ class ProvidersScreen(ModalScreen[bool]):
             self.refresh_rows()
 
         self.app.push_screen(
-            FormScreen(
+            ProviderForm(
                 t("Add profile", "新增 profile"),
-                list(self.FIELDS),
-                optional=self.OPTIONAL,
-                secrets=self.SECRETS,
+                [(name, hint, "" if name == "credential_ref" else value)
+                 for name, hint, value in self.FIELDS],
+                fetch_models=self._fetch_draft_models,
             ),
             done,
         )
@@ -1148,6 +1208,11 @@ class ProvidersScreen(ModalScreen[bool]):
         if profile is None:
             self.status.update(t("No profile selected", "没有选中 profile"))
             return
+        from urllib.parse import urlsplit
+
+        profile = dict(profile)
+        if profile.get("models_path") is None:
+            profile["models_path"] = urlsplit(str(profile["base_url"])).path.rstrip("/") + "/models"
         defaults = [
             (
                 name,
@@ -1172,11 +1237,10 @@ class ProvidersScreen(ModalScreen[bool]):
             self.refresh_rows()
 
         self.app.push_screen(
-            FormScreen(
+            ProviderForm(
                 t("Update profile", "更新 profile"),
                 defaults,
-                optional=self.OPTIONAL,
-                secrets=self.SECRETS,
+                fetch_models=self._fetch_draft_models,
             ),
             done,
         )
@@ -1430,6 +1494,15 @@ class PlanScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+def _boolean(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(t("Choose true or false", "请选择 true 或 false"))
+
+
 def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
     schema = discover(command)["input_schema"]
     properties = schema.get("properties") or {}
@@ -1447,7 +1520,7 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
         if kind == "integer":
             arguments[name] = int(raw)
         elif kind == "boolean":
-            arguments[name] = raw.lower() in {"1", "true", "yes", "on"}
+            arguments[name] = _boolean(raw)
         elif kind == "array":
             if raw.lstrip().startswith("["):
                 import json
@@ -1644,7 +1717,7 @@ def _convert_controls(values: dict[str, str]) -> dict[str, Any]:
         if name == "timeout":
             converted[attribute] = int(raw)
         else:
-            converted[attribute] = raw.lower() in {"1", "true", "yes", "on"}
+            converted[attribute] = _boolean(raw)
     return converted
 
 
@@ -2241,8 +2314,17 @@ class WorkbenchApp(App[None]):
                 return
             self._run_command(command, arguments, options)
 
+        choices: dict[str, list[tuple[str, str]]] = {}
+        for name, spec in discover(command)["input_schema"].get("properties", {}).items():
+            if "enum" in spec:
+                choices[name] = [(str(value), str(value)) for value in spec["enum"]]
+            elif spec.get("type") == "boolean" or isinstance(spec.get("const"), bool):
+                choices[name] = [("true", "true"), ("false", "false")]
+        for name in control_names - {"timeout"}:
+            choices[name] = [("true", "true"), ("false", "false")]
         self.push_screen(
-            FormScreen(t(f"Command {command}", f"命令 {command}"), fields, optional=optional), done
+            ChoiceForm(t(f"Command {command}", f"命令 {command}"), fields,
+                       optional=optional, choices=choices), done
         )
 
     def _run_command(
@@ -2293,6 +2375,34 @@ class WorkbenchApp(App[None]):
             self.refresh_rows()
             self.show_detail()
 
+    def _creation_form(
+        self, title: str, fields: list[tuple[str, str, str]], *, optional: set[str],
+    ) -> CreationForm:
+        profiles = queries.iter_all(self.deps.repositories, "profiles")
+        models = {
+            str(row["id"]): [str(model["model_id"]) for model in queries.iter_all(
+                self.deps.repositories, "provider_models", profile_id=str(row["id"]),
+            )]
+            for row in profiles
+        }
+        def fetch_models(identity: str) -> list[str]:
+            from functools import partial
+
+            from imagen_cli.application.model_catalog_service import fetch
+            from imagen_cli.execution.configured import resolve_credential
+
+            profile = next(row for row in profiles if row["id"] == identity)
+            catalog = fetch(profile, send_credential=True, resolve_credential=partial(
+                resolve_credential, private_store=self.deps.private_store,
+            ))
+            return [str(row["model_id"]) for row in catalog["models"]]
+
+        # Resolve private references on the UI thread; the worker only performs HTTP.
+        profiles = [self.deps.repositories.get("profiles", row["id"], include_private=True)
+                    or row for row in profiles]
+        return CreationForm(title, fields, profiles=profiles, models=models, optional=optional,
+                            fetch_models=fetch_models, add_profile=self.action_providers)
+
     def action_new_session(self) -> None:
         if self.deps.create_session is None:
             return
@@ -2324,7 +2434,7 @@ class WorkbenchApp(App[None]):
             self.show_detail()
 
         self.push_screen(
-            FormScreen(
+            self._creation_form(
                 t("New session", "新建会话"),
                 [
                     ("name", t("session name", "会话名"), ""),
@@ -2424,7 +2534,7 @@ class WorkbenchApp(App[None]):
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
-            FormScreen(
+            self._creation_form(
                 t("Generate image", "生成图片"),
                 [
                     ("prompt", t("prompt", "提示词"), ""),
@@ -2470,7 +2580,7 @@ class WorkbenchApp(App[None]):
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
-            FormScreen(
+            self._creation_form(
                 t(f"Edit {identity}", f"编辑 {identity}"),
                 [
                     ("prompt", t("prompt", "提示词"), ""),

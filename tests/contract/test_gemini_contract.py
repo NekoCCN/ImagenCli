@@ -261,11 +261,56 @@ def test_response_and_image_limits(setup: Any, png_bytes: bytes) -> None:
         assert caught.value.accepted_maybe
 
 
-def test_endpoint_trust_is_official_https_or_loopback_only():
+def test_endpoint_trust_allows_configured_https_or_loopback_only():
     from imagen_cli.providers.gemini import _trusted_endpoint
 
-    assert _trusted_endpoint("https://generativelanguage.googleapis.com/v1beta")
-    assert _trusted_endpoint("http://127.0.0.1:3000/v1beta")
-    for url in ("http://evil.example/v1beta", "https://evil.example/v1beta",
-                "https://generativelanguage.googleapis.com/v1"):
+    for url in (
+        "https://generativelanguage.googleapis.com/v1beta",
+        "https://gateway.example:8443/gemini/v1beta/",
+        "http://127.0.0.1:3000/v1beta", "http://localhost:3000/v1beta",
+    ):
+        assert _trusted_endpoint(url)
+    for url in (
+        "http://evil.example/v1beta", "https://gateway.example/v1",
+        "https:///v1beta", "https://gateway.example:bad/v1beta",
+        "https://user:password@gateway.example/v1beta",
+        "https://user@gateway.example/v1beta",
+        "https://gateway.example/v1beta?key=secret",
+        "https://gateway.example/v1beta#secret",
+    ):
         assert not _trusted_endpoint(url)
+
+
+@pytest.mark.parametrize("model", ["nano-banana-2", "gateway/nano-banana-2"])
+@pytest.mark.parametrize("operation", ["generate", "edit"])
+def test_nano_banana_alias_uses_configured_https_endpoint(
+    setup: Any, png_bytes: bytes, model: str, operation: str,
+) -> None:
+    module, profile, request, store, _ = setup
+    profile = profile.model_copy(update={
+        "base_url": "https://gateway.example/gemini/v1beta", "model_default": model,
+    })
+    request = replace(request, model=model, operation=operation,
+                      inputs=(png_bytes,) if operation == "edit" else ())
+    calls = []
+
+    def send(sent: httpx.Request) -> httpx.Response:
+        calls.append(sent)
+        assert str(sent.url) == (
+            f"https://gateway.example/gemini/v1beta/models/{model}:generateContent"
+        )
+        assert sent.headers["x-goog-api-key"] == "fixture-secret"
+        parts = json.loads(sent.content)["contents"][0]["parts"]
+        assert parts[0] == {"text": "画猫"}
+        assert len(parts) == (2 if operation == "edit" else 1)
+        if operation == "edit":
+            assert base64.b64decode(parts[1]["inlineData"]["data"]) == png_bytes
+        return httpx.Response(200, json=response(png_bytes))
+
+    result = module.GeminiAdapter(
+        profile, private_store=store, transport=httpx.MockTransport(send),
+        resolve_credential=lambda _: "fixture-secret",
+    ).create(request)
+    assert result.artifacts[0].content == png_bytes
+    assert result.context is not None
+    assert len(calls) == 1
