@@ -622,11 +622,10 @@ def main(
                 and not any(value == "--target" or value.startswith("--target=") for value in argv)
                 and not any(value in {"--help", "-h"} for value in argv)
             ):
-                from imagen_cli.application.skill_targets import targets
+                from imagen_cli.application.skill_targets import prompt_order
 
-                selected = choose(
-                    [row["name"] for row in targets()], stdin=sys.stdin, stderr=stderr
-                )
+                labels, preselected = prompt_order()
+                selected = choose(labels, stdin=sys.stdin, stderr=stderr, selected=preselected)
                 if not selected:
                     raise KeyboardInterrupt
                 for name in selected:

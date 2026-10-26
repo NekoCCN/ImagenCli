@@ -11,10 +11,16 @@ class Terminal(io.StringIO):
 
 def test_interactive_skills_and_model_cancel(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr("sys.stdin", Terminal("\n"))
     out, err = Terminal(), io.StringIO()
-    assert main(["skills", "install"], stdout=out, stderr=err) != 0
+    assert main(["skills", "install"], stdout=out, stderr=err) == 0
+    assert (tmp_path / ".agents/skills/imagen/SKILL.md").is_file()
     assert not (tmp_path / ".claude").exists()
+    monkeypatch.setattr("sys.stdin", Terminal(""))
+    out, err = Terminal(), io.StringIO()
+    assert main(["skills", "install", "--skill", "imagen-batch"], stdout=out, stderr=err) != 0
     monkeypatch.setattr("sys.stdin", Terminal("\n"))
     out, err = Terminal(), io.StringIO()
     assert main(["superres", "fetch"], stdout=out, stderr=err) != 0

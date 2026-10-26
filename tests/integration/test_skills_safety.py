@@ -7,7 +7,7 @@ from imagen_cli.application import skills_service
 def test_nested_manifest_is_user_content(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     skills_service.install_(['imagen'])
-    target = tmp_path / '.claude/skills/imagen'
+    target = tmp_path / '.agents/skills/imagen'
     (target / 'references/.imagen-install.json').write_text('user content')
     assert skills_service.uninstall_(['imagen'])[0] == 'conflict'
     assert (target / 'references/.imagen-install.json').exists()
@@ -15,7 +15,7 @@ def test_nested_manifest_is_user_content(tmp_path, monkeypatch):
 
 def test_invalid_manifest_cannot_claim_user_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    target = tmp_path / '.claude/skills/imagen'
+    target = tmp_path / '.agents/skills/imagen'
     target.mkdir(parents=True)
     (target / '.imagen-install.json').write_text(json.dumps({
         'schema_version': 1, 'skill': 'imagen', 'files': {'bad': 17},
@@ -27,7 +27,7 @@ def test_invalid_manifest_cannot_claim_user_directory(tmp_path, monkeypatch):
 
 def test_empty_or_invalid_digest_manifest_is_unmanaged(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    target = tmp_path / '.claude/skills/imagen'
+    target = tmp_path / '.agents/skills/imagen'
     target.mkdir(parents=True)
     for files in ({}, {'SKILL.md': 'z' * 64}):
         (target / '.imagen-install.json').write_text(json.dumps({
@@ -64,7 +64,7 @@ def test_partial_uninstall_returns_completed_targets(tmp_path, monkeypatch):
 def test_failed_rollback_preserves_backup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     skills_service.install_(['imagen'])
-    target = tmp_path / '.claude/skills/imagen'
+    target = tmp_path / '.agents/skills/imagen'
     (target / 'user.txt').write_text('preserve')
     original = Path.rename
     def fail_publish_and_restore(path, destination):
@@ -74,6 +74,6 @@ def test_failed_rollback_preserves_backup(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, 'rename', fail_publish_and_restore)
     status, data = skills_service.install_(['imagen'], force=True)
     assert status == 'internal_error'
-    backups = list((tmp_path / '.claude/skills').rglob('user.txt'))
+    backups = list((tmp_path / '.agents/skills').rglob('user.txt'))
     assert len(backups) == 1 and backups[0].read_text() == 'preserve'
     assert Path(data['failed'][0]['backup']).is_dir()

@@ -33,14 +33,14 @@ def test_install_chooses_scope_and_skills(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
-    status, data = skills_service.install_(["imagen"], scope="project")
+    status, data = skills_service.install_(["imagen"], scope="project", agents=["claude-code"])
     assert status == "succeeded"
     project = tmp_path / ".claude" / "skills" / "imagen" / "SKILL.md"
     assert project.is_file() and "name: imagen" in project.read_text(encoding="utf-8")
     assert not (tmp_path / ".claude" / "skills" / "imagen-batch").exists()
     assert data["destination"] == str(tmp_path / ".claude" / "skills")
 
-    status, data = skills_service.install_(["imagen-batch"], scope="global")
+    status, data = skills_service.install_(["imagen-batch"], scope="global", agents=["claude-code"])
     assert status == "succeeded"
     global_file = tmp_path / "home" / ".claude" / "skills" / "imagen-batch" / "SKILL.md"
     assert global_file.is_file()
@@ -50,15 +50,17 @@ def test_existing_skill_needs_force(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
-    skills_service.install_(["imagen"], scope="project")
+    skills_service.install_(["imagen"], scope="project", agents=["claude-code"])
     target = tmp_path / ".claude" / "skills" / "imagen" / "SKILL.md"
     target.write_text("stale", encoding="utf-8")
 
-    status, data = skills_service.install_(["imagen"], scope="project")
+    status, data = skills_service.install_(["imagen"], scope="project", agents=["claude-code"])
     assert status == "conflict" and data["existing"][0]["name"] == "imagen"
     assert target.read_text(encoding="utf-8") == "stale"
 
-    status, _ = skills_service.install_(["imagen"], scope="project", force=True)
+    status, _ = skills_service.install_(
+        ["imagen"], scope="project", force=True, agents=["claude-code"]
+    )
     assert status == "succeeded"
     assert "name: imagen" in target.read_text(encoding="utf-8")
 
@@ -85,13 +87,23 @@ def test_cli_install_and_list_are_wired(tmp_path, monkeypatch):
     code, response = _run("skills", "install", "--skill", "imagen")
     assert code == 0 and response["ok"] is True
     assert response["data"]["installed"][0]["name"] == "imagen"
-    assert (tmp_path / ".claude" / "skills" / "imagen" / "SKILL.md").is_file()
+    assert (tmp_path / ".agents" / "skills" / "imagen" / "SKILL.md").is_file()
 
     code, response = _run("skills", "install", "--skill", "imagen")
     assert code == 5 and response["status"] == "conflict"
 
     code, response = _run("skills", "install", "--skill", "imagen", "--force")
     assert code == 0 and response["status"] == "succeeded"
+
+
+def test_install_defaults_to_the_shared_agents_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    status, data = skills_service.install_(["imagen"], scope="project")
+    assert status == "succeeded"
+    assert data["targets"] == ["universal"]
+    assert (tmp_path / ".agents/skills/imagen/SKILL.md").is_file()
+    assert not (tmp_path / ".claude/skills/imagen").exists()
 
 
 def test_project_scope_is_the_current_folder(tmp_path, monkeypatch):
@@ -106,8 +118,8 @@ def test_project_scope_is_the_current_folder(tmp_path, monkeypatch):
     assert skills_service.install_(["imagen"])[0] == "succeeded"
     monkeypatch.chdir(second)
     assert skills_service.install_(["imagen"])[0] == "succeeded"
-    assert (first / ".claude/skills/imagen/SKILL.md").is_file()
-    assert (second / ".claude/skills/imagen/SKILL.md").is_file()
+    assert (first / ".agents/skills/imagen/SKILL.md").is_file()
+    assert (second / ".agents/skills/imagen/SKILL.md").is_file()
 
 
 def test_multi_target_managed_uninstall(tmp_path, monkeypatch):
@@ -133,8 +145,11 @@ def test_unmanaged_and_symlink_targets_are_preserved(tmp_path, monkeypatch):
     target = tmp_path / ".claude/skills/imagen"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("user-owned")
-    assert skills_service.install_(["imagen"], force=True)[0] == "conflict"
-    assert skills_service.uninstall_(["imagen"], force=True, yes=True)[0] == "conflict"
+    assert skills_service.install_(["imagen"], force=True, agents=["claude-code"])[0] == "conflict"
+    assert (
+        skills_service.uninstall_(["imagen"], force=True, yes=True, agents=["claude-code"])[0]
+        == "conflict"
+    )
     assert (target / "SKILL.md").read_text() == "user-owned"
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -146,12 +161,15 @@ def test_unmanaged_and_symlink_targets_are_preserved(tmp_path, monkeypatch):
 def test_uninstall_rejects_unknown_name_and_internal_symlink(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert skills_service.uninstall_(["../outside"])[0] == "not_found"
-    skills_service.install_(["imagen"])
+    skills_service.install_(["imagen"], agents=["claude-code"])
     target = tmp_path / ".claude/skills/imagen"
     outside = tmp_path / "private.txt"
     outside.write_text("private")
     (target / "link").symlink_to(outside)
-    assert skills_service.uninstall_(["imagen"], force=True, yes=True)[0] == "conflict"
+    assert (
+        skills_service.uninstall_(["imagen"], force=True, yes=True, agents=["claude-code"])[0]
+        == "conflict"
+    )
     assert outside.read_text() == "private"
 
 

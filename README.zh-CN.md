@@ -379,6 +379,8 @@ Imagen 不会静默安装超分运行依赖或权重。源码许可不等于模�
 
 ```bash
 imagen skills list
+imagen skills install                     # 在终端里询问装到哪些 agent
+imagen skills install --target universal  # 共享的 .agents/skills 目录
 imagen skills install --target claude-code --target codex
 imagen skills install --scope global --target claude-code
 imagen skills uninstall --target codex
@@ -387,10 +389,10 @@ imagen skills uninstall --target codex
 <img src="assets/imagen-cli-skills.png" alt="Agent skill 安装选项" width="760">
 
 - 默认安装到当前项目；`--scope global` 安装到用户目录。
-- `--target` 可重复；`--target all` 选择兼容表中的全部目标。
+- 未指定 `--target` 时安装到 `universal`，即多数 agent 都会读取的共享目录 `.agents/skills`。需要更多 agent 时重复传 `--target`；`--target all` 选择兼容表中的全部目标。
+- 在终端中未指定 `--target` 时打开勾选列表：方向键移动、空格选择、`a` 全选、回车确认。共享目录和项目里检测到的 agent 默认勾选；管道输入则退回序号输入。
 - 全局安装时会报告仅支持项目作用域的目标。
 - 安装会写入托管清单（`.imagen-install.json`）。卸载不会删除未托管目录或符号链接路径；已修改的受管 skill 需要 `--force --yes`。
-- 在终端中未指定 `--target` 时，会显示交互式目标选择器。
 
 随包 skills 为 `imagen`、`imagen-assets` 和 `imagen-batch`。
 

@@ -28,3 +28,30 @@ def test_config_and_tool_environment_paths(tmp_path, monkeypatch):
     assert skill_targets.root_for("opencode", "global") == tmp_path / "config/opencode/skills"
     assert skill_targets.root_for("codex", "global") == tmp_path / "codex/skills"
     assert isinstance(skill_targets.detected(), list)
+
+
+def test_the_default_target_is_the_shared_agents_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XSXDG", "1")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert skill_targets.DEFAULT_TARGET == "universal"
+    assert skill_targets.default_root("project") == tmp_path / ".agents/skills"
+
+
+def test_prompt_order_leads_with_the_shared_directory_and_preselection(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / ".claude").mkdir()
+    labels, preselected = skill_targets.prompt_order()
+    assert labels[0] == "universal"
+    assert "claude-code" in labels[:3]
+    assert "universal" in preselected
+    assert "claude-code" in preselected
+
+
+def test_a_bare_directory_name_is_not_a_detected_agent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "skills").mkdir()
+    assert "openclaw" not in skill_targets.detected()

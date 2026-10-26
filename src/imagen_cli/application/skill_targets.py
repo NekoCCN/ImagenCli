@@ -11,6 +11,22 @@ def targets() -> list[dict[str, str]]:
     return list(json.loads(Path(__file__).with_suffix(".json").read_text(encoding="utf-8")))
 
 
+DEFAULT_TARGET = "universal"
+
+
+def default_root(scope: str) -> Path:
+    return root_for(DEFAULT_TARGET, scope)
+
+
+def prompt_order() -> tuple[list[str], list[str]]:
+    """Picker labels (shared directory first, then detected agents) and what starts ticked."""
+    found = set(detected()) - {DEFAULT_TARGET}
+    names = [row["name"] for row in targets() if row["name"] != DEFAULT_TARGET]
+    first = [name for name in names if name in found]
+    rest = [name for name in names if name not in found]
+    return [DEFAULT_TARGET, *first, *rest], [DEFAULT_TARGET, *first]
+
+
 def root_for(target: str, scope: str) -> Path:
     if scope not in {"project", "global"}:
         raise ValueError("scope must be project or global")
@@ -35,7 +51,8 @@ def root_for(target: str, scope: str) -> Path:
 def detected() -> list[str]:
     found = []
     for row in targets():
-        if (Path.cwd() / row["project"]).parent.is_dir():
+        candidate = Path.cwd() / row["project"]
+        if candidate.parent != Path.cwd() and candidate.parent.is_dir():
             found.append(row["name"])
         elif row["global"] and root_for(row["name"], "global").parent.is_dir():
             found.append(row["name"])

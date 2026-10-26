@@ -18,7 +18,7 @@ def _workspace(tmp_path: Path, monkeypatch) -> None:
 
 def _install(tmp_path: Path, monkeypatch, name: str = "imagen") -> Path:
     _workspace(tmp_path, monkeypatch)
-    status, _ = skills_service.install_([name], scope="project")
+    status, _ = skills_service.install_([name], scope="project", agents=["claude-code"])
     assert status == "succeeded"
     return tmp_path / ".claude" / "skills" / name
 
@@ -57,7 +57,7 @@ def test_update_restores_an_outdated_install(tmp_path, monkeypatch):
     manifest["skill_version"] = "0.0.1"
     _write_manifest(target, manifest)
 
-    status, data = skills_service.update_(None, scope="project")
+    status, data = skills_service.update_(None, scope="project", agents=["claude-code"])
     assert status == "succeeded"
     assert "imagen" in data["updated"]
     assert _manifest(target)["skill_version"] == _bundled_version()
@@ -67,7 +67,7 @@ def test_update_refuses_a_locally_edited_skill(tmp_path, monkeypatch):
     target = _install(tmp_path, monkeypatch)
     (target / "SKILL.md").write_text("hand edited\n", encoding="utf-8")
 
-    status, data = skills_service.update_(None, scope="project")
+    status, data = skills_service.update_(None, scope="project", agents=["claude-code"])
     assert status == "conflict"
     assert data["conflicts"][0]["name"] == "imagen"
     assert (target / "SKILL.md").read_text(encoding="utf-8") == "hand edited\n"
@@ -77,7 +77,7 @@ def test_update_force_overwrites_local_edits(tmp_path, monkeypatch):
     target = _install(tmp_path, monkeypatch)
     (target / "SKILL.md").write_text("hand edited\n", encoding="utf-8")
 
-    status, data = skills_service.update_(None, scope="project", force=True)
+    status, data = skills_service.update_(None, scope="project", force=True, agents=["claude-code"])
     assert status == "succeeded"
     assert "hand edited" not in (target / "SKILL.md").read_text(encoding="utf-8")
 
@@ -100,7 +100,7 @@ def test_a_copy_without_a_manifest_is_current_when_the_content_matches(tmp_path,
     target = _install(tmp_path, monkeypatch)
     (target / ".imagen-install.json").unlink()
 
-    status, data = skills_service.update_(None, scope="project")
+    status, data = skills_service.update_(None, scope="project", agents=["claude-code"])
     assert status == "succeeded"
     assert "imagen" in data["current"]
     assert data["conflicts"] == []
@@ -111,7 +111,7 @@ def test_a_foreign_copy_is_reported_instead_of_replaced(tmp_path, monkeypatch):
     (target / ".imagen-install.json").unlink()
     (target / "SKILL.md").write_text("hand written\n", encoding="utf-8")
 
-    status, data = skills_service.update_(None, scope="project")
+    status, data = skills_service.update_(None, scope="project", agents=["claude-code"])
     assert status == "conflict"
     assert data["conflicts"][0]["reason"] == "unmanaged"
     assert (target / "SKILL.md").read_text(encoding="utf-8") == "hand written\n"

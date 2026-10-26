@@ -57,7 +57,7 @@ def root_for(scope: str) -> Path:
 def _roots(
     scope: str, agents: list[str] | None, *, deduplicate: bool = True
 ) -> list[tuple[str, Path]]:
-    names = agents or ["claude-code"]
+    names = agents or [skill_targets.DEFAULT_TARGET]
     if "all" in names:
         names = [row["name"] for row in skill_targets.targets() if row.get(scope)]
     roots = []
@@ -160,7 +160,7 @@ def list_(
         states = {
             current: {
                 agent: _state(root, entry["name"], bundled)
-                for agent, root in _roots(current, agents, deduplicate=False)
+                for agent, root in _roots(current, agents or ["all"], deduplicate=False)
             }
             for current in scopes
         }
@@ -271,7 +271,7 @@ def install_(
     expanded = (
         [row["name"] for row in skill_targets.targets() if row.get(scope)]
         if agents and "all" in agents
-        else agents or ["claude-code"]
+        else agents or [skill_targets.DEFAULT_TARGET]
     )
     return ("internal_error" if failed else "succeeded"), {
         "scope": scope,

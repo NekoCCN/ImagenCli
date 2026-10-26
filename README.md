@@ -407,6 +407,8 @@ Imagen ships skills that teach coding agents when to use it, how to discover com
 
 ```bash
 imagen skills list
+imagen skills install                     # asks which agents, in a terminal
+imagen skills install --target universal  # the shared .agents/skills directory
 imagen skills install --target claude-code --target codex
 imagen skills install --scope global --target claude-code
 imagen skills uninstall --target codex
@@ -415,10 +417,10 @@ imagen skills uninstall --target codex
 <img src="assets/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
 
 - Default scope is the current project; `--scope global` installs into user directories.
-- `--target` may be repeated. `--target all` selects every target in the bundled compatibility table.
+- Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
+- In a terminal without `--target`, Imagen opens a checklist: arrows move, space selects, `a` selects all, enter confirms. The shared directory and any agent detected in the project start ticked. Piped input gets a numbered prompt instead.
 - Project-only agents are reported when global installation is requested.
 - Installation writes a managed manifest (`.imagen-install.json`). Uninstall refuses unmanaged directories and symlinked paths. A locally modified managed skill needs `--force --yes`.
-- When run in a terminal without `--target`, Imagen shows an interactive target selector.
 
 The bundled skills are `imagen`, `imagen-assets`, and `imagen-batch`.
 
