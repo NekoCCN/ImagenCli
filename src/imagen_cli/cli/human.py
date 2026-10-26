@@ -34,6 +34,24 @@ def _rows(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
+def _turn_artifacts(data: dict[str, Any]) -> dict[str, list[str]]:
+    """Artifact ids each turn produced, keyed by turn id."""
+    produced: dict[str, list[str]] = {}
+    for reference in _rows(data, "references"):
+        artifact = reference.get("artifact_id")
+        if reference.get("role") == "output" and isinstance(artifact, str):
+            produced.setdefault(str(reference.get("turn_id")), []).append(artifact)
+    return produced
+
+
+def _unknown_line(turn: dict[str, Any]) -> str:
+    job = turn.get("job_id")
+    return t(
+        f"    outcome unknown — run: imagen job get {job}",
+        f"    结果未知 — 运行：imagen job get {job}",
+    )
+
+
 def _schema_rows(data: dict[str, Any]) -> list[tuple[str, str, str]]:
     schema = data.get("input_schema") or {}
     properties = schema.get("properties") or {}
@@ -285,11 +303,16 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         lines.append(manual)
     turns = _rows(data, "turns")
     if turns:
+        produced = _turn_artifacts(data)
         lines.append(t(f"Turns: {len(turns)}", f"轮次 {len(turns)}"))
         for turn in turns[:_MAX_ROWS]:
-            lines.append(
-                f"  {turn.get('id')} · {turn.get('operation')} · {turn.get('creation_state')}"
-            )
+            line = f"  {turn.get('id')} · {turn.get('operation')} · {turn.get('creation_state')}"
+            produced_ids = produced.get(str(turn.get("id")))
+            if produced_ids:
+                line += f" · {', '.join(produced_ids)}"
+            lines.append(line)
+            if turn.get("creation_state") == "unknown":
+                lines.append(_unknown_line(turn))
     artifacts = _rows(data, "artifacts")
     for artifact in artifacts[:_MAX_ROWS]:
         if artifact.get("path"):
@@ -523,6 +546,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
         console.print(Panel(manual, title=t("Calling rules", "调用规则")))
     turns = _rows(data, "turns")
     if turns:
+        produced = _turn_artifacts(data)
         table = Table(title=t("Turns", "轮次"), header_style="bold")
         for column in ("ID", t("Operation", "操作"), t("State", "状态")):
             table.add_column(column, overflow="fold")
@@ -533,6 +557,12 @@ def _rich(value: dict[str, Any], width: int) -> str:
                 str(turn.get("creation_state")),
             )
         console.print(table)
+        for turn in turns[:_MAX_ROWS]:
+            produced_ids = produced.get(str(turn.get("id")))
+            if produced_ids:
+                console.print(f"{turn.get('id')} → {', '.join(produced_ids)}")
+            if turn.get("creation_state") == "unknown":
+                console.print(_unknown_line(turn).strip(), style="yellow")
     artifacts = [item for item in _rows(data, "artifacts") if item.get("path")]
     if artifacts:
         table = Table(title=t("Artifacts", "产物"), header_style="bold")
@@ -567,6 +597,8 @@ def _rich(value: dict[str, Any], width: int) -> str:
 def render(value: dict[str, Any], *, columns: int | None = None, color: bool = False) -> str:
     width = _columns(columns)
     data = value.get("data") or {}
+    if value.get("ok") and len(data) == 1 and isinstance(data.get("version"), str):
+        return f"imagen {data['version']}"
     if value.get("ok") and data.get("presets") and not data.get("details"):
         from imagen_cli.application.operator_catalog import browse_entries
 

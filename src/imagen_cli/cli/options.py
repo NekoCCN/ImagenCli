@@ -26,6 +26,7 @@ class SharedOptions(BaseModel):
 
 
 OPTION_METADATA: dict[str, dict[str, Any]] = {
+    "version": {"type": "boolean", "default": False},
     "workspace": {"type": "string", "default": None},
     "output": {"enum": ["human", "json", "jsonl"], "default": "human"},
     "agent": {"type": "boolean", "default": False},

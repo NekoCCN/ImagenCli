@@ -73,6 +73,16 @@ def _command_hint(argv: list[str]) -> str:
     return "imagen help"
 
 
+def installed_version() -> str:
+    """The installed distribution's version; "unknown" when run from a source tree."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("imagen-cli")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOptions]:
     controls: dict[str, Any] = {}
     parameters: dict[str, Any] = {}
@@ -83,6 +93,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     index = 0
     while index < len(argv):
         token = argv[index]
+        if token in {"--version", "-V"}:
+            return "version", {}, SharedOptions()
         if token in {"--help", "-h"}:
             help_flag = True
         elif token == "--agent":
@@ -676,8 +688,11 @@ def main(
         command, args, options = _parse(argv)
         if renderer.mode == "jsonl":
             renderer.start(command)
-        with Container(workspace=options.workspace, options=options) as container:
-            status, data = container.execute(command, args)
+        if command == "version":
+            status, data = "succeeded", {"version": installed_version()}
+        else:
+            with Container(workspace=options.workspace, options=options) as container:
+                status, data = container.execute(command, args)
         value = result(status, data)
     except UsageError as error:
         error.next_command = error.next_command or _command_hint(argv)
