@@ -267,6 +267,8 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             else t("up to date", "已是最新")
         )
         lines.append(f"imagen {data['installed']} · latest {data['latest']} · {state}")
+        if data.get("upgraded"):
+            lines.append(t("upgraded with ", "已通过 ") + str(data.get("method", "")) + " ✓")
     entries = _rows(data, "entries")
     if entries:
         total = data.get("planned_bytes", sum(item.get("bytes", 0) for item in entries))
@@ -557,6 +559,8 @@ def _rich(value: dict[str, Any], width: int) -> str:
             f"imagen {data['installed']} · latest {data['latest']} · {state}",
             style="yellow" if data.get("update_available") else "green",
         )
+        if data.get("upgraded"):
+            console.print(t("upgraded with ", "已通过 ") + str(data.get("method", "")) + " ✓")
     entries = _rows(data, "entries")
     if entries:
         console.print(

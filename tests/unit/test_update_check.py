@@ -77,3 +77,70 @@ def test_network_failure_is_an_error():
 
     with pytest.raises(ValueError, match="release feed"):
         update_service.check(boom)
+
+
+def test_upgrade_runs_the_standard_installer(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "uv")
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        return 0, ""
+
+    status, data = update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=run)
+    assert status == "succeeded"
+    assert data["upgraded"] is True
+    assert calls and calls[0] == ["uv", "tool", "upgrade", "imagen-cli"]
+
+
+def test_upgrade_does_nothing_when_current(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "uv")
+    called = []
+    status, data = update_service.upgrade(
+        fetch=lambda url: release(f"v{update_service.installed_version()}"),
+        run=lambda command: (called.append(command), (0, ""))[1],
+    )
+    assert data["upgraded"] is False
+    assert called == []
+
+
+def test_upgrade_refuses_an_unknown_installer(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "unknown")
+    with pytest.raises(ValueError, match="uv tool or pipx"):
+        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (0, ""))
+
+
+def test_upgrade_reports_a_failed_command(monkeypatch):
+    monkeypatch.setattr(update_service, "install_method", lambda: "uv")
+    with pytest.raises(ValueError, match="upgrade command failed"):
+        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (1, "boom"))
+
+
+def test_install_method_detection(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "executable", "/home/u/.local/share/uv/tools/imagen-cli/bin/python")
+    assert update_service.install_method() == "uv"
+    windows = "C:\\Users\\u\\pipx\\venvs\\imagen-cli\\Scripts\\python.exe"
+    monkeypatch.setattr(sys, "executable", windows)
+    assert update_service.install_method() == "pipx"
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    assert update_service.install_method() == "unknown"
+
+
+def test_the_cli_parses_install(monkeypatch):
+    import io
+
+    from imagen_cli.cli.entrypoint import main
+
+    monkeypatch.setattr(
+        update_service,
+        "upgrade",
+        lambda: ("succeeded", {"installed": "0.1.0", "latest": "9.9.9",
+                               "update_available": True, "upgraded": True, "method": "uv"}),
+    )
+    out = io.StringIO()
+    code = main(["update", "--install", "--agent", "--no-interactive"],
+                stdout=out, stderr=io.StringIO())
+    assert code == 0
+    assert json.loads(out.getvalue())["data"]["upgraded"] is True

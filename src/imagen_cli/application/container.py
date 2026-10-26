@@ -209,6 +209,8 @@ class Container:
         if command == "update":
             from imagen_cli.application import update_service
 
+            if isinstance(args, dict) and args.get("install") is True:
+                return update_service.upgrade()
             return update_service.check()
         if command == "language":
             if "language" in args:

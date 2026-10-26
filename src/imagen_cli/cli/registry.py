@@ -255,7 +255,7 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "language":
         properties = {"language": {"enum": ["en", "zh", "zh-CN"]}}
     elif name == "update":
-        properties = {}
+        properties = {"install": {"type": "boolean", "default": False}}
     elif name.startswith("models "):
         properties = {"profile": text}
         required = ("profile",)
@@ -432,6 +432,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "installed": {"type": "string"},
                 "latest": {"type": "string"},
                 "update_available": {"type": "boolean"},
+                "upgraded": {"type": "boolean"},
+                "method": {"type": "string"},
                 "published_at": {"type": "string"},
             },
             ("installed", "latest", "update_available"),

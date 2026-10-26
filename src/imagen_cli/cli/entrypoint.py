@@ -147,6 +147,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             local_option = name in {
                 "intent-file",
                 "intent",
+                "install",
                 "profile",
                 "model",
                 "operation",
@@ -219,6 +220,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "verbose",
                 "purge",
                 "global",
+                "install",
             }
             if name == "prompt-stdin" or boolean:
                 if separator:
@@ -347,6 +349,11 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             f"imagen help {command}",
         )
     schema = discover(command)["input_schema"]
+    if command == "update":
+        if words:
+            raise _no_positional(command, words)
+        validate(parameters, schema)
+        return command, parameters, options
     if command == "language":
         if parameters:
             raise UsageError(

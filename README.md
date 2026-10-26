@@ -76,7 +76,31 @@ Command help for `generate`.
 
 Imagen requires Python 3.12 or later.
 
-With [uv](https://docs.astral.sh/uv/), from a checkout:
+### Standard install (uv)
+
+```bash
+uv tool install "imagen-cli[tui,postprocess]"
+imagen --version
+```
+
+This is the supported install: `uv tool` puts `imagen` on your `PATH` and owns
+the copy, so Imagen can update itself. Drop `[tui,postprocess]` if you only
+need the CLI.
+
+```bash
+imagen update            # is a newer release out?
+imagen update --install  # install it with the installer that owns this copy
+```
+
+### Standard install (pipx)
+
+```bash
+pipx install "imagen-cli[tui,postprocess]"
+```
+
+`imagen update --install` detects pipx and runs `pipx upgrade imagen-cli`.
+
+### From a checkout (development)
 
 ```bash
 uv sync --extra tui --extra postprocess
@@ -89,6 +113,10 @@ Install into an existing virtual environment instead:
 python -m pip install '.[tui,postprocess]'
 imagen tui
 ```
+
+A checkout or a plain `pip install` has no standard owner: `imagen update`
+still reports the newest release, but `--install` refuses and prints the
+command to run instead of guessing.
 
 `tui` installs Textual. `postprocess` installs the local image-processing dependencies. The base CLI, profiles, sessions, and provider access work without either extra.
 

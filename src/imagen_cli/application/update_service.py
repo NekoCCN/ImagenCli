@@ -3,15 +3,33 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any
 
 RELEASES_URL = "https://api.github.com/repos/NekoCCN/ImagenCli/releases/latest"
 REDIRECT_URL = "https://github.com/NekoCCN/ImagenCli/releases/latest"
 USER_AGENT = "imagen-cli"
+STANDARD_REQUIREMENT = "imagen-cli[tui,postprocess]"
+UPGRADE_COMMANDS = {
+    "uv": ["uv", "tool", "upgrade", "imagen-cli"],
+    "pipx": ["pipx", "upgrade", "imagen-cli"],
+}
+
+
+def install_method() -> str:
+    """Which standard installer owns this interpreter."""
+    executable = str(Path(sys.executable)).replace("\\", "/")
+    if "/uv/tools/" in executable:
+        return "uv"
+    if "/pipx/venvs/" in executable:
+        return "pipx"
+    return "unknown"
 
 
 def installed_version() -> str:
@@ -69,4 +87,37 @@ def check(fetch: Callable[[str], bytes] | None = None) -> tuple[str, dict[str, A
         "latest": latest_version,
         "update_available": _parts(latest_version) > _parts(installed),
         "published_at": str(payload.get("published_at") or ""),
+    }
+
+
+def _run(command: list[str]) -> tuple[int, str]:
+    result = subprocess.run(command, capture_output=True, text=True, timeout=900, check=False)
+    tail = (result.stderr or result.stdout or "").strip().splitlines()[-1:] or [""]
+    return result.returncode, tail[0]
+
+
+def upgrade(
+    *,
+    fetch: Callable[[str], bytes] | None = None,
+    run: Callable[[list[str]], tuple[int, str]] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Install the newer release with the standard installer that owns this copy."""
+    status, data = check(fetch)
+    method = install_method()
+    if not data["update_available"]:
+        return "succeeded", {**data, "upgraded": False, "method": method}
+    command = UPGRADE_COMMANDS.get(method)
+    if command is None:
+        raise ValueError(
+            "not installed with uv tool or pipx; upgrade with your installer, "
+            f"or reinstall: uv tool install \"{STANDARD_REQUIREMENT}\""
+        )
+    code, detail = (run or _run)(command)
+    if code != 0:
+        raise ValueError(f"upgrade command failed ({code}): {detail}")
+    return "succeeded", {
+        **data,
+        "upgraded": True,
+        "method": method,
+        "command": " ".join(command),
     }
