@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import TextIO
 
 from rich.console import Console
@@ -48,30 +49,31 @@ def _tty(stream: TextIO) -> bool:
 
 
 def _read_key(stream: TextIO) -> str:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
-        getwch = msvcrt.getwch  # type: ignore[attr-defined]  # typeshed omits it off Windows
+        getwch = msvcrt.getwch
         char: str = getwch()
         return char + (getwch() if char in "\x00\xe0" else "")
-    import select
-    import termios
-    import tty
+    else:
+        import select
+        import termios
+        import tty
 
-    descriptor = stream.fileno()
-    settings = termios.tcgetattr(descriptor)
-    try:
-        tty.setcbreak(descriptor, termios.TCSADRAIN)  # TCSAFLUSH drops queued keys
-        # Read the fd, not the text wrapper: its buffer would hide the escape tail.
-        char = os.read(descriptor, 1).decode("utf-8", "replace")
-        if char == "\x1b":
-            for _ in range(2):
-                if not select.select([descriptor], [], [], 0.05)[0]:
-                    break
-                char += os.read(descriptor, 1).decode("utf-8", "replace")
-    finally:
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, settings)
-    return char
+        descriptor = stream.fileno()
+        settings = termios.tcgetattr(descriptor)
+        try:
+            tty.setcbreak(descriptor, termios.TCSADRAIN)  # TCSAFLUSH drops queued keys
+            # Read the fd, not the text wrapper: its buffer would hide the escape tail.
+            char = os.read(descriptor, 1).decode("utf-8", "replace")
+            if char == "\x1b":
+                for _ in range(2):
+                    if not select.select([descriptor], [], [], 0.05)[0]:
+                        break
+                    char += os.read(descriptor, 1).decode("utf-8", "replace")
+        finally:
+            termios.tcsetattr(descriptor, termios.TCSADRAIN, settings)
+        return char
 
 
 def _render(labels: list[str], picked: list[str], cursor: int, height: int) -> Text:
