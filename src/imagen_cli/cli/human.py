@@ -52,6 +52,99 @@ def _unknown_line(turn: dict[str, Any]) -> str:
     )
 
 
+def _detail_result_lines(data: dict[str, Any]) -> list[str]:
+    """Single-resource results: artifacts, providers, models, GC, workers, exports."""
+    lines: list[str] = []
+    artifact = data.get("artifact")
+    if isinstance(artifact, dict) and artifact.get("id"):
+        size = ""
+        if artifact.get("width") and artifact.get("height"):
+            size = f" · {artifact['width']}×{artifact['height']}"
+        lines.append(t(f"Artifact {artifact['id']}", f"产物 {artifact['id']}") + size)
+        if artifact.get("byte_size"):
+            lines.append(f"{artifact['byte_size']} bytes")
+        if data.get("path"):
+            lines.append(t("File: ", "文件：") + str(data["path"]))
+        if data.get("available") is False:
+            lines.append(t("Not available on disk", "磁盘上不可用"))
+        for row in _rows(data, "owners")[:_MAX_ROWS]:
+            lines.append(
+                f"  {row.get('role') or ''} · {row.get('session_id') or ''}"
+                f" · {row.get('source') or ''}"
+            )
+    model = data.get("model")
+    if isinstance(model, dict) and model.get("id"):
+        evidence = model.get("evidence") or "manual"
+        lines.append(t(f"Model {model['id']} ({evidence})", f"模型 {model['id']}（{evidence}）"))
+    for row in _rows(data, "items")[:_MAX_ROWS]:
+        lines.append(f"{row.get('profile')} · {row.get('provider')}/{row.get('family')}")
+    if isinstance(data.get("plan"), str) and "candidates" in data:
+        plan = data["plan"]
+        lines.append(t(f"GC plan {plan}", f"GC 清单 {plan}"))
+        for row in _rows(data, "candidates")[:_MAX_ROWS]:
+            lines.append(f"  {row.get('id')} · {row.get('path')}")
+        if data.get("dry_run"):
+            lines.append(
+                t(
+                    f"To delete: imagen asset gc --plan {plan} --yes",
+                    f"确认删除：imagen asset gc --plan {plan} --yes",
+                )
+            )
+        else:
+            deleted = data.get("deleted") or []
+            lines.append(t(f"Deleted {len(deleted)} artifacts", f"已删除 {len(deleted)} 个产物"))
+    if "workers" in data:
+        workers = _rows(data, "workers")
+        if not workers:
+            lines.append(t("No worker is running", "没有正在运行的 worker"))
+        for row in workers[:_MAX_ROWS]:
+            lines.append(f"{row.get('id')} · {row.get('state')} · {row.get('pid') or ''}")
+    if "recovered" in data:
+        recovered = data.get("recovered") or []
+        lines.append(
+            t(f"Recovered {len(recovered)} leases", f"接管 {len(recovered)} 个租约")
+            if recovered
+            else t("No expired lease", "没有过期租约")
+        )
+    worker = data.get("worker")
+    if isinstance(worker, dict) and worker.get("id"):
+        lines.append(f"worker {worker.get('id')} · {worker.get('state') or ''}")
+    if isinstance(data.get("archive"), str):
+        lines.append(t(f"Exported to {data['archive']}", f"已导出到 {data['archive']}"))
+        if data.get("turns") is not None:
+            lines.append(
+                f"{data.get('turns')} turns · {data.get('artifacts')} artifacts"
+            )
+    batch = data.get("batch")
+    if isinstance(batch, dict) and batch.get("id"):
+        summary = data.get("summary") or {}
+        state = summary.get("state") or batch.get("state") or ""
+        lines.append(t(f"Batch {batch['id']} · {state}", f"批次 {batch['id']} · {state}"))
+        if summary.get("child_count") is not None:
+            lines.append(
+                t(
+                    f"  {summary.get('complete_success_count')}/{summary.get('child_count')}"
+                    f" complete · {summary.get('saved_artifact_count')} saved",
+                    f"  {summary.get('complete_success_count')}/{summary.get('child_count')}"
+                    f" 完成 · 已保存 {summary.get('saved_artifact_count')}",
+                )
+            )
+        for row in _rows(data, "children")[:_MAX_ROWS]:
+            child = row.get("job_id") or row.get("id") or ""
+            lines.append(f"  {child} · {row.get('state') or row.get('remote_state') or ''}")
+    approval = data.get("approval")
+    if isinstance(approval, dict) and approval.get("plan_id"):
+        lines.append(f"plan {approval.get('plan_id')} · {approval.get('state') or ''}")
+    if isinstance(data.get("model"), str) and data.get("sha256"):
+        lines.append(
+            t(
+                f"Downloaded {data['model']} → {data.get('path')} ({data.get('bytes')} bytes)",
+                f"已下载 {data['model']} → {data.get('path')}（{data.get('bytes')} 字节）",
+            )
+        )
+    return lines
+
+
 def _skill_result_lines(data: dict[str, Any]) -> list[str]:
     """What `skills install`, `update` and `uninstall` did, one line each."""
     lines: list[str] = []
@@ -305,6 +398,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         note = t(" · update available", " · 可更新") if stale_any else ""
         lines.append(f"{row.get('name')} · {row.get('version')} · {where}{note}")
     lines.extend(_skill_result_lines(data))
+    lines.extend(_detail_result_lines(data))
     if data.get("installed") and data.get("latest"):
         state = (
             t("update available", "有可用更新")
@@ -601,6 +695,9 @@ def _rich(value: dict[str, Any], width: int) -> str:
     skill_results = _skill_result_lines(data)
     for line in skill_results:
         console.print(line)
+    detail_results = _detail_result_lines(data)
+    for line in detail_results:
+        console.print(line)
     if data.get("installed") and data.get("latest"):
         state = (
             t("update available", "有可用更新")
@@ -718,6 +815,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
             details,
             skills,
             skill_results,
+            detail_results,
         )
     ):
         console.print(json.dumps(data, ensure_ascii=False))
