@@ -52,6 +52,50 @@ def _unknown_line(turn: dict[str, Any]) -> str:
     )
 
 
+def _skill_result_lines(data: dict[str, Any]) -> list[str]:
+    """What `skills install`, `update` and `uninstall` did, one line each."""
+    lines: list[str] = []
+    for row in _rows(data, "installed")[:_MAX_ROWS]:
+        lines.append(
+            t(f"Installed {row.get('name')} → {row.get('path')}",
+              f"已安装 {row.get('name')} → {row.get('path')}")
+        )
+    for row in _rows(data, "removed")[:_MAX_ROWS]:
+        lines.append(
+            t(f"Removed {row.get('name')} ({row.get('path')})",
+              f"已卸载 {row.get('name')}（{row.get('path')}）")
+        )
+    updated = data.get("updated")
+    if isinstance(updated, list) and updated:
+        names = ", ".join(str(name) for name in updated)
+        lines.append(t(f"Updated: {names}", f"已更新：{names}"))
+    current = data.get("current")
+    if isinstance(current, list) and current:
+        names = ", ".join(str(name) for name in current)
+        lines.append(t(f"Already current: {names}", f"已是最新：{names}"))
+    for row in _rows(data, "existing")[:_MAX_ROWS]:
+        lines.append(
+            t(
+                f"Skipped {row.get('name')}: {row.get('path')} exists (add --force to replace)",
+                f"跳过 {row.get('name')}：{row.get('path')} 已存在（加 --force 覆盖）",
+            )
+        )
+    for row in _rows(data, "conflicts")[:_MAX_ROWS]:
+        reason = row.get("reason") or t("not managed by Imagen", "不是 Imagen 安装的")
+        lines.append(
+            t(
+                f"Conflict {row.get('name')}: {reason} ({row.get('path')})",
+                f"冲突 {row.get('name')}：{reason}（{row.get('path')}）",
+            )
+        )
+    for row in _rows(data, "failed")[:_MAX_ROWS]:
+        lines.append(
+            t(f"Failed {row.get('name')} ({row.get('path')})",
+              f"失败 {row.get('name')}（{row.get('path')}）")
+        )
+    return lines
+
+
 def _schema_rows(data: dict[str, Any]) -> list[tuple[str, str, str]]:
     schema = data.get("input_schema") or {}
     properties = schema.get("properties") or {}
@@ -260,6 +304,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         )
         note = t(" · update available", " · 可更新") if stale_any else ""
         lines.append(f"{row.get('name')} · {row.get('version')} · {where}{note}")
+    lines.extend(_skill_result_lines(data))
     if data.get("installed") and data.get("latest"):
         state = (
             t("update available", "有可用更新")
@@ -365,6 +410,10 @@ def _error_lines(value: dict[str, Any]) -> list[str]:
         if command:
             lines.append(t(f"Next: {command}", f"下一步：{command}"))
     status = value.get("status", "unknown")
+    data = value.get("data")
+    if isinstance(data, dict):
+        # A conflict still carries what was skipped or refused.
+        lines.extend(_skill_result_lines(data))
     return lines + [t(f"status: {status}", f"状态：{status}")]
 
 
@@ -549,6 +598,9 @@ def _rich(value: dict[str, Any], width: int) -> str:
                 t("yes", "是") if stale_any else t("no", "否"),
             )
         console.print(table)
+    skill_results = _skill_result_lines(data)
+    for line in skill_results:
+        console.print(line)
     if data.get("installed") and data.get("latest"):
         state = (
             t("update available", "有可用更新")
@@ -664,6 +716,8 @@ def _rich(value: dict[str, Any], width: int) -> str:
             artifacts,
             parameters,
             details,
+            skills,
+            skill_results,
         )
     ):
         console.print(json.dumps(data, ensure_ascii=False))

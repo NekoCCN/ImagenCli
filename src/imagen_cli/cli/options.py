@@ -57,6 +57,7 @@ COMMAND_CONTROLS: dict[str, set[str]] = {
     "session remove-image": {"purge"},
     "asset gc": {"dry_run", "yes"},
     "cache purge": {"plan", "yes"},
+    "skills uninstall": {"yes"},
     "transform": {"pipeline", "op", "preset", "session", "timeout"},
     "ops": {"op", "preset", "verbose"},
     "models refresh": {"profile", "send_credential"},
