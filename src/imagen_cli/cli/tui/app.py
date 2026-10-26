@@ -1402,6 +1402,9 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
         kind = spec.get("type")
         if kind is None and "anyOf" in spec:
             kind = next((item.get("type") for item in spec["anyOf"] if item.get("type")), None)
+        if kind is None and isinstance(spec.get("const"), bool):
+            # `--yes` is declared as const true; without this it stays a string.
+            kind = "boolean"
         if not raw:
             continue
         if kind == "integer":
