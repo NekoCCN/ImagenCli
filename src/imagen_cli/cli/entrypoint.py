@@ -328,6 +328,17 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "imagen help",
             )
         if target_command is not None and target_command not in COMMANDS:
+            group = sorted(
+                name for name in COMMANDS if name.startswith(f"{target_command} ")
+            )
+            if group:
+                raise UsageError(
+                    i18n.t(
+                        f"'{target_command}' is a command group: {', '.join(group)}.",
+                        f"'{target_command}' 是一组命令：{', '.join(group)}。",
+                    ),
+                    f"imagen help {group[0]}",
+                )
             raise UsageError(
                 i18n.t(
                     f"Unknown help target '{target_command}'.",

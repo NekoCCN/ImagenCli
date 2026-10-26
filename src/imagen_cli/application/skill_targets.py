@@ -43,17 +43,19 @@ def root_for(target: str, scope: str) -> Path:
     if target == "claude-code" and os.environ.get("CLAUDE_CONFIG_DIR"):
         return Path(os.environ["CLAUDE_CONFIG_DIR"]).expanduser() / "skills"
     if value.startswith("~/.config/"):
-        config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+        config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
         return config / value.removeprefix("~/.config/")
     return Path(value).expanduser()
 
 
 def detected() -> list[str]:
+    """Agents whose directory already exists in this project; the shared one is implicit."""
+    shared = root_for(DEFAULT_TARGET, "project")
     found = []
     for row in targets():
         candidate = Path.cwd() / row["project"]
-        if candidate.parent != Path.cwd() and candidate.parent.is_dir():
-            found.append(row["name"])
-        elif row["global"] and root_for(row["name"], "global").parent.is_dir():
+        if candidate == shared or candidate.parent == Path.cwd():
+            continue
+        if candidate.parent.is_dir():
             found.append(row["name"])
     return found

@@ -390,7 +390,7 @@ imagen skills uninstall --target codex
 
 - 默认安装到当前项目；`--scope global` 安装到用户目录。
 - 未指定 `--target` 时安装到 `universal`，即多数 agent 都会读取的共享目录 `.agents/skills`。需要更多 agent 时重复传 `--target`；`--target all` 选择兼容表中的全部目标。
-- 在终端中未指定 `--target` 时打开勾选列表：方向键移动、空格选择、`a` 全选、回车确认。共享目录和项目里检测到的 agent 默认勾选；管道输入则退回序号输入。
+- 在终端中未指定 `--target` 时打开勾选列表：方向键移动、空格选择、`a` 全选、回车确认、`q` 取消。共享目录和项目里已存在的 agent 目录默认勾选。没有终端（或加 `--no-interactive`）时直接装到默认目标，不提问。
 - 全局安装时会报告仅支持项目作用域的目标。
 - 安装会写入托管清单（`.imagen-install.json`）。卸载不会删除未托管目录或符号链接路径；已修改的受管 skill 需要 `--force --yes`。
 

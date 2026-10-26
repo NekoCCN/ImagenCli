@@ -55,3 +55,25 @@ def test_a_bare_directory_name_is_not_a_detected_agent(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "skills").mkdir()
     assert "openclaw" not in skill_targets.detected()
+
+
+def test_the_shared_directory_does_not_preselect_every_agent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / ".agents").mkdir()
+    assert skill_targets.detected() == []
+
+
+def test_agents_installed_elsewhere_are_not_detected_in_this_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home/.claude").mkdir(parents=True)
+    assert "claude-code" not in skill_targets.detected()
+
+
+def test_an_empty_config_home_still_resolves_to_the_user_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", "")
+    assert skill_targets.root_for("opencode", "global") == (
+        tmp_path / "home/.config/opencode/skills"
+    )

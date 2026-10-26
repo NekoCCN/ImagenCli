@@ -4,6 +4,7 @@ import hashlib
 import json
 from typing import Any, cast
 
+from imagen_cli import i18n
 from imagen_cli.application.cleanup_service import collect, delete_session, remove_session_artifact
 from imagen_cli.application.export_service import _rows, export_session
 from imagen_cli.application.fork_service import fork
@@ -118,7 +119,12 @@ def gc_(
             "deleted": [],
         }
     if yes is not True or plan is None:
-        raise ValueError("--plan and --yes are required for destructive GC")
+        raise ValueError(
+            i18n.t(
+                "--plan and --yes are required for destructive GC",
+                "删除资产需要 --plan 与 --yes",
+            )
+        )
     if plan != digest:
         return "conflict", {
             "dry_run": False,
