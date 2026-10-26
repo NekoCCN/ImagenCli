@@ -314,10 +314,20 @@ def update_(
             if not (target / "SKILL.md").is_file():
                 continue
             record = _managed(target, name)
+            source = Path(bundled[name]["path"])
             if record is None:
-                conflicts.append(
-                    {"name": name, "path": str(target), "agent": agent, "reason": "not managed"}
-                )
+                # A copy Imagen did not write: identical is fine, anything else is not ours.
+                if _manifest(target, name)["files"] == _manifest(source, name)["files"]:
+                    current.append({"name": name, "path": str(target), "agent": agent})
+                else:
+                    conflicts.append(
+                        {
+                            "name": name,
+                            "path": str(target),
+                            "agent": agent,
+                            "reason": "unmanaged",
+                        }
+                    )
                 continue
             recorded = record.get("files")
             dirty = _manifest(target, name)["files"] != recorded
@@ -327,11 +337,10 @@ def update_(
                         "name": name,
                         "path": str(target),
                         "agent": agent,
-                        "reason": "modified locally",
+                        "reason": "modified",
                     }
                 )
                 continue
-            source = Path(bundled[name]["path"])
             if (
                 not dirty
                 and record.get("skill_version") == bundled[name]["version"]

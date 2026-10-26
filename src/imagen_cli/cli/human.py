@@ -52,6 +52,17 @@ def _unknown_line(turn: dict[str, Any]) -> str:
     )
 
 
+def _conflict_reason(code: object) -> str:
+    if code == "unmanaged":
+        return t(
+            "not installed by Imagen and the content differs; delete that folder and reinstall",
+            "不是 Imagen 安装的，内容也不同；删掉该目录后重新安装",
+        )
+    if code == "modified":
+        return t("edited after install", "安装后被修改过")
+    return str(code or t("not managed by Imagen", "不是 Imagen 安装的"))
+
+
 def _detail_result_lines(data: dict[str, Any]) -> list[str]:
     """Single-resource results: artifacts, providers, models, GC, workers, exports."""
     lines: list[str] = []
@@ -174,7 +185,7 @@ def _skill_result_lines(data: dict[str, Any]) -> list[str]:
             )
         )
     for row in _rows(data, "conflicts")[:_MAX_ROWS]:
-        reason = row.get("reason") or t("not managed by Imagen", "不是 Imagen 安装的")
+        reason = _conflict_reason(row.get("reason"))
         lines.append(
             t(
                 f"Conflict {row.get('name')}: {reason} ({row.get('path')})",

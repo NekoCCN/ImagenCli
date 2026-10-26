@@ -94,3 +94,24 @@ def test_the_cli_exposes_skills_update(tmp_path, monkeypatch):
     value = json.loads(out.getvalue())
     assert value["ok"] is True
     assert value["data"]["scope"] == "project"
+
+
+def test_a_copy_without_a_manifest_is_current_when_the_content_matches(tmp_path, monkeypatch):
+    target = _install(tmp_path, monkeypatch)
+    (target / ".imagen-install.json").unlink()
+
+    status, data = skills_service.update_(None, scope="project")
+    assert status == "succeeded"
+    assert "imagen" in data["current"]
+    assert data["conflicts"] == []
+
+
+def test_a_foreign_copy_is_reported_instead_of_replaced(tmp_path, monkeypatch):
+    target = _install(tmp_path, monkeypatch)
+    (target / ".imagen-install.json").unlink()
+    (target / "SKILL.md").write_text("hand written\n", encoding="utf-8")
+
+    status, data = skills_service.update_(None, scope="project")
+    assert status == "conflict"
+    assert data["conflicts"][0]["reason"] == "unmanaged"
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "hand written\n"
