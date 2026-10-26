@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import urllib.error
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 RELEASES_URL = "https://api.github.com/repos/NekoCCN/ImagenCli/releases/latest"
-REDIRECT_URL = "https://github.com/NekoCCN/ImagenCli/releases/latest"
+ATOM_URL = "https://github.com/NekoCCN/ImagenCli/releases.atom"
 USER_AGENT = "imagen-cli"
 STANDARD_REQUIREMENT = "imagen-cli[tui,postprocess]"
 UPGRADE_COMMANDS = {
@@ -44,12 +45,10 @@ def _parts(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in raw.split(".") if part.isdigit())
 
 
-def _tag_from_release_url(url: str) -> str | None:
-    """`.../releases/tag/v0.1.0` -> `v0.1.0`; anything else is not a release page."""
-    if "/releases/tag/" not in url:
-        return None
-    tag = url.rstrip("/").rsplit("/", 1)[-1]
-    return tag or None
+def _tag_from_atom(text: str) -> str | None:
+    """The newest release tag in the public Atom feed, newest first."""
+    match = re.search(r"/releases/tag/([^\"<>\s]+)", text)
+    return match.group(1) if match else None
 
 
 def _default_fetch(url: str) -> bytes:
@@ -60,14 +59,13 @@ def _default_fetch(url: str) -> bytes:
         with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - fixed URL
             return bytes(response.read())
     except urllib.error.HTTPError:
-        # Anonymous API calls are rate limited; the release page redirect names the tag.
-        page = urllib.request.Request(REDIRECT_URL, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(page, timeout=10) as response:  # noqa: S310 - fixed URL
-            final = response.geturl()
-        tag = _tag_from_release_url(final)
+        # Anonymous API calls are rate limited; the release feed is not.
+        feed = urllib.request.Request(ATOM_URL, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(feed, timeout=10) as response:  # noqa: S310 - fixed URL
+            tag = _tag_from_atom(response.read().decode("utf-8", "replace"))
         if tag is None:
             raise
-        return json.dumps({"tag_name": tag, "html_url": final}).encode()
+        return json.dumps({"tag_name": tag}).encode()
 
 
 def check(fetch: Callable[[str], bytes] | None = None) -> tuple[str, dict[str, Any]]:

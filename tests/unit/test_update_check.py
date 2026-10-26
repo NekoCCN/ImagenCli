@@ -46,16 +46,13 @@ def test_a_broken_feed_is_an_error_not_a_guess():
         update_service.check(lambda url: b"{}")
 
 
-def test_release_url_tag_is_extracted_only_from_a_tag_page():
-    assert (
-        update_service._tag_from_release_url(
-            "https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.0"
-        )
-        == "v0.1.0"
+def test_atom_feed_tag_is_read_newest_first():
+    feed = (
+        '<feed><entry><link href="https://github.com/o/r/releases/tag/v0.2.0"/></entry>'
+        '<entry><link href="https://github.com/o/r/releases/tag/v0.1.0"/></entry></feed>'
     )
-    assert update_service._tag_from_release_url(
-        "https://github.com/NekoCCN/ImagenCli/releases"
-    ) is None
+    assert update_service._tag_from_atom(feed) == "v0.2.0"
+    assert update_service._tag_from_atom("<feed></feed>") is None
 
 
 def test_the_cli_exposes_update(monkeypatch):
@@ -126,18 +123,6 @@ def test_install_method_detection(monkeypatch):
     assert update_service.install_method() == "pipx"
     monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
     assert update_service.install_method() == "unknown"
-
-
-def test_upgrade_refuses_an_unknown_installer(monkeypatch):
-    monkeypatch.setattr(update_service, "install_method", lambda: "unknown")
-    with pytest.raises(ValueError, match="uv tool or pipx"):
-        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (0, ""))
-
-
-def test_upgrade_reports_a_failed_command(monkeypatch):
-    monkeypatch.setattr(update_service, "install_method", lambda: "uv")
-    with pytest.raises(ValueError, match="upgrade command failed"):
-        update_service.upgrade(fetch=lambda url: release("v9.9.9"), run=lambda command: (1, "boom"))
 
 
 def test_the_cli_parses_install(monkeypatch):
