@@ -474,7 +474,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             parameters["profile"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
-    if command in {"skills list", "skills install", "skills uninstall"}:
+    if command in {"skills list", "skills install", "skills update", "skills uninstall"}:
         if words:
             raise _no_positional(command, words)
         if parameters.pop("global", False):

@@ -21,6 +21,16 @@ def install_(
     return skills_service.install_(names, scope=scope, force=force, agents=agents)
 
 
+def update_(
+    names: list[str] | None,
+    *,
+    scope: str = "project",
+    force: bool = False,
+    agents: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    return skills_service.update_(names, scope=scope, force=force, agents=agents)
+
+
 def uninstall_(
     names: list[str] | None,
     *,

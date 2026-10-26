@@ -245,6 +245,30 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
                 f"…还有 {len(models) - _MAX_ROWS} 个模型；--output json 查看全部",
             )
         )
+    skills = _rows(data, "skills")
+    for row in skills[:_MAX_ROWS]:
+        installed = row.get("installed") or {}
+        where = ", ".join(
+            scope
+            for scope, value in installed.items()
+            if value is True or (isinstance(value, dict) and any(value.values()))
+        ) or t("not installed", "未安装")
+        stale = row.get("update_available") or {}
+        stale_any = any(
+            value is True or (isinstance(value, dict) and any(value.values()))
+            for value in stale.values()
+        )
+        note = t(" · update available", " · 可更新") if stale_any else ""
+        lines.append(f"{row.get('name')} · {row.get('version')} · {where}{note}")
+    if data.get("installed") and data.get("latest"):
+        state = (
+            t("update available", "有可用更新")
+            if data.get("update_available")
+            else t("up to date", "已是最新")
+        )
+        lines.append(f"imagen {data['installed']} · latest {data['latest']} · {state}")
+        if data.get("url"):
+            lines.append(str(data["url"]))
     entries = _rows(data, "entries")
     if entries:
         total = data.get("planned_bytes", sum(item.get("bytes", 0) for item in entries))
@@ -496,6 +520,47 @@ def _rich(value: dict[str, Any], width: int) -> str:
                 str(row.get("evidence") or row.get("license") or ""),
             )
         console.print(table)
+    skills = _rows(data, "skills")
+    if skills:
+        table = Table(title=t("Agent skills", "Agent skill"), header_style="bold")
+        for column in (
+            t("Skill", "名称"),
+            t("Version", "版本"),
+            t("Installed", "已安装"),
+            t("Update", "更新"),
+        ):
+            table.add_column(column, overflow="fold")
+        for row in skills[:_MAX_ROWS]:
+            installed = row.get("installed") or {}
+            where = ", ".join(
+                scope
+                for scope, value in installed.items()
+                if value is True or (isinstance(value, dict) and any(value.values()))
+            ) or t("no", "否")
+            stale = row.get("update_available") or {}
+            stale_any = any(
+                value is True or (isinstance(value, dict) and any(value.values()))
+                for value in stale.values()
+            )
+            table.add_row(
+                str(row.get("name")),
+                str(row.get("version")),
+                where,
+                t("yes", "是") if stale_any else t("no", "否"),
+            )
+        console.print(table)
+    if data.get("installed") and data.get("latest"):
+        state = (
+            t("update available", "有可用更新")
+            if data.get("update_available")
+            else t("up to date", "已是最新")
+        )
+        console.print(
+            f"imagen {data['installed']} · latest {data['latest']} · {state}",
+            style="yellow" if data.get("update_available") else "green",
+        )
+        if data.get("url"):
+            console.print(str(data["url"]))
     entries = _rows(data, "entries")
     if entries:
         console.print(

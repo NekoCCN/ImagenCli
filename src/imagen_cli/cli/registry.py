@@ -81,7 +81,9 @@ COMMANDS = {
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
                 ("skills list", "列出可安装的 agent skill"),
                 ("skills install", "把 agent skill 安装到当前项目或全局"),
+                ("skills update", "把已安装的 agent skill 更新到当前版本"),
                 ("skills uninstall", "卸载 Imagen 管理的 agent skill"),
+                ("update", "检查是否有新版本；只读网络请求，不安装"),
                 ("models refresh", "从 profile 端点拉取模型列表；只写 provider_models"),
                 ("models add", "手工声明一个模型，evidence=manual"),
                 ("models use", "把一个模型设为 profile 默认；未声明时按 manual 登记"),
@@ -159,6 +161,8 @@ _SUMMARY_EN = {
     "cache purge": "Reclaim after confirming the inventory digest; dry-run by default",
     "skills list": "List installable agent skills",
     "skills install": "Install agent skills into the current project or globally",
+    "skills update": "Update installed agent skills to the bundled version",
+    "update": "Check whether a newer release exists; installs nothing",
     "skills uninstall": "Uninstall agent skills managed by Imagen",
     "models refresh": "Fetch the model list from the profile endpoint; writes provider_models only",
     "models add": "Declare a model manually with evidence=manual",
@@ -250,6 +254,8 @@ def _input_schema(name: str) -> dict[str, Any]:
             properties["agent"] = {"type": "boolean", "default": False}
     elif name == "language":
         properties = {"language": {"enum": ["en", "zh", "zh-CN"]}}
+    elif name == "update":
+        properties = {}
     elif name.startswith("models "):
         properties = {"profile": text}
         required = ("profile",)
@@ -420,6 +426,17 @@ def _data_schema(command: Command) -> dict[str, Any]:
             {"language": {"type": "string"}, "saved": {"type": "boolean"}},
             ("language", "saved"),
         )
+    if command.name == "update":
+        return _object(
+            {
+                "installed": {"type": "string"},
+                "latest": {"type": "string"},
+                "update_available": {"type": "boolean"},
+                "url": {"type": "string"},
+                "published_at": {"type": "string"},
+            },
+            ("installed", "latest", "update_available"),
+        )
     if command.name == "profile secret":
         return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name == "transform":
@@ -501,6 +518,18 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "failed": {"type": "array", "items": {"type": "object"}},
             },
             ("scope", "removed", "conflicts"),
+        )
+    if command.name == "skills update":
+        return _object(
+            {
+                "scope": {"type": "string"},
+                "updated": {"type": "array", "items": {"type": "string"}},
+                "current": {"type": "array", "items": {"type": "string"}},
+                "conflicts": {"type": "array", "items": {"type": "object"}},
+                "installed": {"type": "array", "items": {"type": "object"}},
+                "failed": {"type": "array", "items": {"type": "object"}},
+            },
+            ("scope", "updated", "current", "conflicts"),
         )
     if command.name == "skills install":
         return _object(

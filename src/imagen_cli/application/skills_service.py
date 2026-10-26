@@ -38,6 +38,7 @@ def available() -> list[dict[str, str]]:
         skills.append(
             {
                 "name": meta.get("name", folder.name),
+                "version": meta.get("version", "0.0.0"),
                 "description": meta.get("description", ""),
                 "path": str(folder),
             }
@@ -110,9 +111,16 @@ def _manifest(folder: Path, name: str) -> dict[str, Any]:
     for file in sorted(folder.rglob("*")):
         if file.is_file() and file != folder / ".imagen-install.json":
             files[str(file.relative_to(folder))] = hashlib.sha256(file.read_bytes()).hexdigest()
+    version_file = folder / "SKILL.md"
+    skill_version = (
+        _metadata(version_file.read_text(encoding="utf-8")).get("version", "0.0.0")
+        if version_file.is_file()
+        else "0.0.0"
+    )
     return {
         "schema_version": 1,
         "skill": name,
+        "skill_version": skill_version,
         "package_version": version("imagen-cli"),
         "files": files,
     }
@@ -122,27 +130,68 @@ def _installed(scope: str, name: str, agents: list[str] | None = None) -> bool:
     return any((root / name / "SKILL.md").is_file() for _, root in _roots(scope, agents))
 
 
+def _state(root: Path, name: str, bundled: dict[str, Any]) -> dict[str, Any]:
+    """What one installed copy is: present, which version, and whether it drifted."""
+    target = root / name
+    if not (target / "SKILL.md").is_file():
+        return {"installed": False, "version": None, "update_available": False}
+    record = _managed(target, name)
+    if record is None:
+        return {"installed": True, "version": None, "update_available": False}
+    installed_version = str(record.get("skill_version") or "0.0.0")
+    differs = record.get("files") != bundled["files"]
+    return {
+        "installed": True,
+        "version": installed_version,
+        "update_available": installed_version != bundled["version"] or differs,
+    }
+
+
 def list_(
     *, agents: list[str] | None = None, scope: str | None = None
 ) -> tuple[str, dict[str, Any]]:
     rows = []
     scopes = (scope,) if scope else SCOPES
     for entry in available():
-        installed: dict[str, Any]
-        if agents is None and scope is None:
-            installed = {
-                current: _installed(current, entry["name"], ["claude-code"]) for current in scopes
+        bundled = {
+            **entry,
+            "files": _manifest(Path(entry["path"]), entry["name"])["files"],
+        }
+        states = {
+            current: {
+                agent: _state(root, entry["name"], bundled)
+                for agent, root in _roots(current, agents, deduplicate=False)
             }
+            for current in scopes
+        }
+        installed: dict[str, Any]
+        versions: dict[str, Any]
+        updates: dict[str, Any]
+        if agents is None:
+            installed = {c: any(v["installed"] for v in states[c].values()) for c in scopes}
+            versions = {
+                c: next((v["version"] for v in states[c].values() if v["installed"]), None)
+                for c in scopes
+            }
+            updates = {c: any(v["update_available"] for v in states[c].values()) for c in scopes}
         else:
             installed = {
-                current: {
-                    agent: (root / entry["name"] / "SKILL.md").is_file()
-                    for agent, root in _roots(current, agents, deduplicate=False)
-                }
-                for current in scopes
+                c: {a: value["installed"] for a, value in states[c].items()} for c in scopes
+            }
+            versions = {c: {a: value["version"] for a, value in states[c].items()} for c in scopes}
+            updates = {
+                c: {a: value["update_available"] for a, value in states[c].items()}
+                for c in scopes
             }
         rows.append(
-            {"name": entry["name"], "description": entry["description"], "installed": installed}
+            {
+                "name": entry["name"],
+                "version": entry["version"],
+                "description": entry["description"],
+                "installed": installed,
+                "installed_version": versions,
+                "update_available": updates,
+            }
         )
     return "succeeded", {"skills": rows}
 
@@ -234,6 +283,85 @@ def install_(
         "unsupported": [row["name"] for row in skill_targets.targets() if not row.get(scope)]
         if agents and "all" in agents
         else [],
+    }
+
+
+def update_(
+    names: list[str] | None,
+    *,
+    scope: str = "project",
+    force: bool = False,
+    agents: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Reinstall installed skills whose bundled copy changed; never clobber local edits."""
+    bundled = {entry["name"]: entry for entry in available()}
+    selected = sorted(set(names or bundled))
+    unknown = [name for name in selected if name not in bundled]
+    if unknown:
+        return "not_found", {
+            "scope": scope,
+            "updated": [],
+            "current": [],
+            "conflicts": [],
+            "available": sorted(bundled),
+        }
+    changed: dict[str, list[str]] = {}
+    current: list[dict[str, str]] = []
+    conflicts: list[dict[str, str]] = []
+    for agent, root in _roots(scope, agents):
+        for name in selected:
+            target = root / name
+            if not (target / "SKILL.md").is_file():
+                continue
+            record = _managed(target, name)
+            if record is None:
+                conflicts.append(
+                    {"name": name, "path": str(target), "agent": agent, "reason": "not managed"}
+                )
+                continue
+            recorded = record.get("files")
+            dirty = _manifest(target, name)["files"] != recorded
+            if dirty and not force:
+                conflicts.append(
+                    {
+                        "name": name,
+                        "path": str(target),
+                        "agent": agent,
+                        "reason": "modified locally",
+                    }
+                )
+                continue
+            source = Path(bundled[name]["path"])
+            if (
+                not dirty
+                and record.get("skill_version") == bundled[name]["version"]
+                and recorded == _manifest(source, name)["files"]
+            ):
+                current.append({"name": name, "path": str(target), "agent": agent})
+                continue
+            changed.setdefault(agent, []).append(name)
+    if conflicts:
+        return "conflict", {
+            "scope": scope,
+            "updated": [],
+            "current": [row["name"] for row in current],
+            "conflicts": conflicts,
+        }
+    installed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for agent, agent_names in changed.items():
+        status, data = install_(agent_names, scope=scope, force=True, agents=[agent])
+        installed.extend(data.get("installed", []))
+        failed.extend(data.get("failed", []))
+        if status == "internal_error" and not failed:
+            failed.append({"agent": agent, "names": agent_names})
+    return ("internal_error" if failed else "succeeded"), {
+        "scope": scope,
+        "updated": sorted({str(row["name"]) for row in installed}),
+        "current": sorted({row["name"] for row in current}),
+        "conflicts": [],
+        "installed": installed,
+        "failed": failed,
     }
 
 

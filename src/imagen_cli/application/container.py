@@ -206,6 +206,10 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command == "update":
+            from imagen_cli.application import update_service
+
+            return update_service.check()
         if command == "language":
             if "language" in args:
                 saved = i18n.save_language(str(args["language"]))
@@ -700,6 +704,13 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command == "skills list":
                 return skills.list_(agents=args.get("target"), scope=args.get("scope"))
+            if command == "skills update":
+                return skills.update_(
+                    args.get("skill"),
+                    scope=args.get("scope", "project"),
+                    force=args.get("force") is True,
+                    agents=args.get("target"),
+                )
             if command == "skills uninstall":
                 return skills.uninstall_(
                     args.get("skill"),

@@ -1,5 +1,6 @@
 ---
 name: imagen-batch
+version: 1.0.0
 description: Use when submitting several imagen image requests at once, controlling provider concurrency, or inspecting and waiting on a batch of child jobs. Covers batch submit/get/wait, per-child status, and safe handling of partial failures.
 ---
 

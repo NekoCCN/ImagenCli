@@ -1,5 +1,6 @@
 ---
 name: imagen
+version: 1.0.0
 description: Use when the user wants to generate or edit images, manage image sessions, or process local images using the Imagen CLI. Includes command discovery, structured output, user approval before provider requests, and safe handling of unknown outcomes.
 ---
 

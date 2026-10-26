@@ -1,5 +1,6 @@
 ---
 name: imagen-assets
+version: 1.0.0
 description: Use when working with existing imagen sessions and artifacts: listing or resuming history, forking, exporting or importing a session, applying deterministic transforms, comparing, building contact sheets, running super-resolution, or reclaiming disk space.
 ---
 
