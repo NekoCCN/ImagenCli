@@ -47,7 +47,8 @@ def _identities(family: str, payload: Any) -> list[dict[str, str]]:
             if isinstance(name, str) and name:
                 model_id = name.removeprefix("models/")
                 display = str(item.get("displayName") or model_id)
-            result.append({"model_id": model_id, "display_name": display})
+                if model_id:
+                    result.append({"model_id": model_id, "display_name": display})
         return result
     items = payload.get("data") if isinstance(payload, dict) else None
     result = []
@@ -58,8 +59,7 @@ def _identities(family: str, payload: Any) -> list[dict[str, str]]:
     return result
 
 
-def refresh(
-    repositories: Repositories,
+def fetch(
     profile: dict[str, Any],
     *,
     resolve_credential: Any = None,
@@ -106,10 +106,25 @@ def refresh(
         payload = response.json()
     except ValueError as error:
         raise ValueError("catalog response is not JSON") from error
+    return {"source_url": url, "models": _identities(str(profile["family"]), payload)}
+
+
+def refresh(
+    repositories: Repositories,
+    profile: dict[str, Any],
+    *,
+    resolve_credential: Any = None,
+    send_credential: bool = False,
+    client: httpx.Client | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    catalog = fetch(profile, resolve_credential=resolve_credential,
+                    send_credential=send_credential, client=client)
+    url = catalog["source_url"]
     stamp = (now or datetime.now(UTC)).astimezone(UTC).isoformat().replace("+00:00", "Z")
     stored = []
     with repositories.transaction():
-        for item in _identities(str(profile["family"]), payload):
+        for item in catalog["models"]:
             identity = f"{profile['id']}:{item['model_id']}"
             row = {
                 "id": identity,

@@ -800,8 +800,8 @@ OPERATORS: list[OperatorItem] = [
                 "tile",
                 "瓦片分块",
                 "choice",
-                "256",
-                choices=["128", "256", "512"],
+                256,
+                choices=[128, 256, 512],
                 description="分块推理空间尺寸",
             ),
             Parameter(
