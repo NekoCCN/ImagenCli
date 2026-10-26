@@ -148,6 +148,25 @@ def describe_validation(error: ValidationError) -> UsageError:
                 f"{shown} 的类型必须是 {rules}。",
             )
         )
+    if value == "anyOf":
+        branches = (
+            [item for item in rules if isinstance(item, dict)]
+            if isinstance(rules, list)
+            else []
+        )
+        alternatives = [
+            " / ".join(flag(key) for key in branch.get("required", []))
+            for branch in branches
+            if branch.get("required")
+        ]
+        if alternatives:
+            joined = ", ".join(alternatives)
+            return UsageError(
+                i18n.t(
+                    f"Provide one of: {joined}.",
+                    f"请提供以下之一：{joined}。",
+                )
+            )
     if value == "additionalProperties":
         return UsageError(
             i18n.t(

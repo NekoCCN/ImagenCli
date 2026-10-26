@@ -146,6 +146,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             name, separator, raw_value = token[2:].partition("=")
             local_option = name in {
                 "intent-file",
+                "intent",
                 "profile",
                 "model",
                 "operation",

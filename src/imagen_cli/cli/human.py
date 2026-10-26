@@ -215,6 +215,8 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
                 f"· version {session.get('version')}",
             )
         )
+        if session.get("intent"):
+            lines.append(t(f"Intent: {session.get('intent')}", f"意图：{session.get('intent')}"))
     for row in _rows(data, "sessions")[:_MAX_ROWS]:
         lines.append(
             t(
@@ -449,10 +451,13 @@ def _rich(value: dict[str, Any], width: int) -> str:
         )
     session = data.get("session") or {}
     if session and session.get("name"):
+        intent = ""
+        if session.get("intent"):
+            intent = f"\n{t('Intent', '意图')}: {session.get('intent')}"
         console.print(
             Panel(
                 f"[bold]{session.get('name')}[/bold] · version {session.get('version')}\n"
-                f"{session.get('id')}",
+                f"{session.get('id')}{intent}",
                 title=t("Session", "会话"),
                 border_style="green",
             )

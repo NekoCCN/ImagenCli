@@ -1619,7 +1619,18 @@ def _control_options(
 ) -> SharedOptions | None:
     if not overrides:
         return base
-    return (base or SharedOptions()).model_copy(update=overrides)
+    values = (base or SharedOptions()).model_dump()
+    values.update(overrides)
+    # Rebuild rather than model_copy: the CLI's shared-option rules must apply.
+    return SharedOptions(**values)
+
+
+def _needs_form(command: str) -> bool:
+    """Any field at all means the user may want to fill it, even if none is required.
+
+    Paging-only commands keep running straight away; their fields are noise."""
+    fields = [field for field in command_fields(command)[0] if field[0] not in {"limit", "cursor"}]
+    return bool(fields or _control_fields(command))
 
 
 # Runtime lookup so the help panel follows IMAGEN_LANG even when the module was
@@ -2159,8 +2170,7 @@ class WorkbenchApp(App[None]):
         control_names = {name for name, _, _ in controls}
         fields = [field for field in fields if field[0] not in control_names] + controls
         optional |= control_names
-        required = [f for f in fields if f[0] not in optional]
-        if not required:
+        if not _needs_form(command):
             self._run_command(command, {})
             return
 

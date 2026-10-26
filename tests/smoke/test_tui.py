@@ -876,7 +876,7 @@ def test_provider_form_creates_a_profile(deps):
     assert saved[0]["base_url"] == "https://gateway.example/v1"
 
 
-def test_command_palette_runs_commands_without_fields(deps):
+def test_command_palette_shows_a_form_even_when_nothing_is_required(deps):
     deps_value, _ = deps
     calls = []
 
@@ -891,6 +891,8 @@ def test_command_palette_runs_commands_without_fields(deps):
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
             app._open_command("ops")
+            await pilot.pause()
+            await pilot.press("enter")  # submit the all-optional form
             await app.workers.wait_for_complete()
             await pilot.pause()
 
@@ -1032,6 +1034,8 @@ def test_command_palette_filters_by_name(deps):
             assert 0 < len(screen.matches) <= total
             assert any(name == "ops" for name in screen.matches)
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")  # the palette now opens a form; submit it
             await app.workers.wait_for_complete()
             await pilot.pause()
 
