@@ -4,6 +4,35 @@ from imagen_cli.application.operator_catalog import PRESET_PIPELINES
 from imagen_cli.cli.tui.app import PRESETS
 
 
+def test_transform_mouse_selects_category_and_preset(tmp_path):
+    import asyncio
+
+    from textual.app import App
+    from textual.widgets import Button
+
+    from imagen_cli.cli.tui.app import TransformScreen, WorkbenchApp
+
+    class Harness(App):
+        CSS = WorkbenchApp.CSS
+
+    async def exercise():
+        app = Harness()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = TransformScreen(None, "art_test", "ses_test", tmp_path / "missing.png")
+            await app.push_screen(screen)
+            await pilot.pause()
+            await pilot.click(screen.category_table, offset=(2, 2))
+            await pilot.pause()
+            assert screen.current_category_idx == 1
+            assert screen.filtered_names != screen.all_names
+            assert screen.query_one("#transform-apply", Button)
+            await pilot.click("#transform-cancel")
+            await pilot.pause()
+            assert app.screen is not screen
+
+    asyncio.run(exercise())
+
+
 def test_tui_uses_shared_recipe_catalog():
     assert PRESETS is PRESET_PIPELINES
 

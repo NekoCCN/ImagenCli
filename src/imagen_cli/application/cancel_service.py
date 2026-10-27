@@ -35,16 +35,25 @@ def _windows_start(pid: int) -> str | None:
     import ctypes
     from ctypes import wintypes
 
+    # A terminated process keeps its creation time while any handle holds the
+    # process object, so the exit state must be checked too.
     process_query_limited_information = 0x1000
-    handle = ctypes.windll.kernel32.OpenProcess(
-        process_query_limited_information, False, pid
-    ) if hasattr(ctypes, "windll") else None
+    synchronize = 0x00100000
+    wait_timeout = 0x102
+    if not hasattr(ctypes, "windll"):
+        return None
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined, unused-ignore]
+    handle = kernel32.OpenProcess(
+        process_query_limited_information | synchronize, False, pid
+    )
     if not handle:
         return None
     creation, exit_time = wintypes.FILETIME(), wintypes.FILETIME()
     kernel, user = wintypes.FILETIME(), wintypes.FILETIME()
     try:
-        ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined, unused-ignore]
+        if kernel32.WaitForSingleObject(handle, 0) != wait_timeout:
+            return None
+        ok = kernel32.GetProcessTimes(
             handle, ctypes.byref(creation), ctypes.byref(exit_time),
             ctypes.byref(kernel), ctypes.byref(user),
         )
@@ -52,7 +61,7 @@ def _windows_start(pid: int) -> str | None:
             return None
         return f"{creation.dwHighDateTime:08x}{creation.dwLowDateTime:08x}"
     finally:
-        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined, unused-ignore]
+        kernel32.CloseHandle(handle)
 
 
 def process_start(pid: int) -> str | None:

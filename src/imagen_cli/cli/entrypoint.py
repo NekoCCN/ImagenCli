@@ -9,10 +9,48 @@ from jsonschema import ValidationError, validate
 from imagen_cli import i18n
 from imagen_cli.application.container import Container
 
+from . import elevation
 from .options import COMMAND_CONTROLS, OPTION_METADATA, SharedOptions
 from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
 from .usage import UsageError, describe_pydantic, describe_validation, plain_detail
+
+
+def _interactive(renderer: Renderer, stdout: TextIO, argv: list[str]) -> bool:
+    return (
+        renderer.mode == "human"
+        and stdout.isatty()
+        and sys.stdin.isatty()
+        and "--no-interactive" not in argv
+    )
+
+
+def _permission_detail(error: OSError, argv: list[str]) -> dict[str, Any]:
+    return {
+        "type": "permission_denied",
+        "message": elevation.message(error),
+        "retryable": False,
+        "accepted_maybe": False,
+        "next_actions": [
+            {
+                "command": elevation.command_line(argv),
+                "requires_elevation": True,
+                "creates_paid_request": False,
+            }
+        ],
+    }
+
+
+def _confirm_elevation(error: OSError, stderr: TextIO) -> bool:
+    stderr.write(elevation.message(error) + "\n")
+    stderr.write(
+        i18n.t(
+            "Retry with administrator rights? [y/N] ",
+            "是否以管理员身份重试？[y/N] ",
+        )
+    )
+    stderr.flush()
+    return sys.stdin.readline().strip().lower() == "y"
 
 
 def _utf8_stdio() -> None:
@@ -539,7 +577,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise _need(command, words, 1, "one model name", "一个模型名")
         parameters["model"] = words[0]
         words = []
-    if command in {"compare", "sheet", "superres fetch", "superres benchmark"}:
+    if command == "superres install" and words:
+        if len(words) != 1 or "model" in parameters:
+            raise _need(command, words, 1, "one model name", "一个模型名")
+        parameters["model"] = words[0]
+        words = []
+    if command in {"compare", "sheet", "superres fetch", "superres install",
+                   "superres benchmark"}:
         if words:
             raise _no_positional(command, words)
         validate(parameters, discover(command)["input_schema"])
@@ -613,6 +657,7 @@ def main(
     if stdout is None and stderr is None:
         _utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
+    raw_argv = list(argv)
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
     renderer = Renderer(select_output(argv, is_tty=stdout.isatty()), stdout, stderr)
@@ -621,12 +666,7 @@ def main(
         argv, chosen_language = i18n.take_argument(argv)
         if chosen_language is not None:
             language_token = i18n.set_language(chosen_language)
-        if (
-            renderer.mode == "human"
-            and stdout.isatty()
-            and sys.stdin.isatty()
-            and "--no-interactive" not in argv
-        ):
+        if _interactive(renderer, stdout, argv):
             from imagen_cli.cli.selection import choose
 
             if (
@@ -643,7 +683,7 @@ def main(
                 for name in selected:
                     argv.extend(["--target", name])
             if (
-                argv[:2] == ["superres", "fetch"]
+                argv[:2] in (["superres", "fetch"], ["superres", "install"])
                 and not any(
                     value in {"--help", "-h", "--model"} or value.startswith("--model=")
                     for value in argv
@@ -668,6 +708,14 @@ def main(
                         "Download size is unknown; review the source and license first. "
                         "Download now? [y/N] ",
                         "下载大小未知；请先查阅来源许可。确认下载？[y/N] ",
+                    )
+                    if argv[:2] == ["superres", "fetch"]
+                    else i18n.t(
+                        "This installs the inference runtime into this environment and "
+                        "downloads the selected weights; review the source and license first. "
+                        "Continue? [y/N] ",
+                        "将把推理运行时安装到当前环境并下载所选权重；请先查阅来源与许可。"
+                        "继续？[y/N] ",
                     )
                 )
                 stderr.flush()
@@ -699,6 +747,19 @@ def main(
             value = result("validation_error", error=described.detail())
         else:
             value = result("validation_error", error=plain_detail(error))
+    except OSError as error:
+        if not elevation.is_permission_denied(error):
+            value = result("internal_error")
+        else:
+            value = result("permission_denied", error=_permission_detail(error, raw_argv))
+            if (
+                _interactive(renderer, stdout, argv)
+                and elevation.supported()
+                and _confirm_elevation(error, stderr)
+            ):
+                code = elevation.relaunch(raw_argv)
+                if code is not None:
+                    return code
     except KeyboardInterrupt:
         value = result("canceled")
     except Exception:

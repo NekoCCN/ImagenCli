@@ -61,6 +61,7 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
                     )
             yield from self.extra_fields()
             yield Button(t("Save", "保存"), id="submit", variant="primary")
+            yield Button(t("Cancel", "取消"), id="cancel")
 
     def field_choices(self, name: str, default: str) -> ComposeResult:
         yield from ()
@@ -85,8 +86,11 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
         return result
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
         if event.button.id == "submit":
             self.submit()
+        elif event.button.id == "cancel":
+            self.action_cancel()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.submit()

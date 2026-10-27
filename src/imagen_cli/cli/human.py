@@ -153,6 +153,22 @@ def _detail_result_lines(data: dict[str, Any]) -> list[str]:
                 f"已下载 {data['model']} → {data.get('path')}（{data.get('bytes')} 字节）",
             )
         )
+    if "runtime_installed" in data and isinstance(data.get("models"), list):
+        runtime_state = t("available", "可用") if data["runtime_installed"] else t(
+            "missing", "缺失"
+        )
+        lines.append(t(f"ONNX runtime: {runtime_state}", f"ONNX 运行时：{runtime_state}"))
+        for row in data["models"][:_MAX_ROWS]:
+            state = t("downloaded", "已下载") if row.get("downloaded") else t(
+                "not downloaded", "未下载"
+            )
+            scale = f" · x{row['scale']}" if row.get("scale") else ""
+            lines.append(
+                f"{row.get('model')}{scale} · {row.get('task', 'upscale')}"
+                f" · {row.get('license', '')} · {state}"
+            )
+        if data.get("hint"):
+            lines.append(str(data["hint"]))
     return lines
 
 

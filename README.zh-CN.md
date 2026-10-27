@@ -54,7 +54,7 @@ Imagen 为人和 coding agent 提供同一个图像工作区。人可以在 TUI 
 | 批量请求 | 不支持 | `batch submit`、`batch get`、`batch wait` |
 | 后台 worker | 不支持 | `worker start`、`worker status`、`worker recover` |
 | Agent skills | 不支持 | `skills list`、`skills install`、`skills uninstall` |
-| 超分模型 | 不支持 | `superres models`、`superres fetch`、`superres benchmark` |
+| 超分模型 | 不支持 | `superres models`、`superres install`、`superres fetch`、`superres benchmark` |
 | 命令参考 | `:` 命令面板、`?` 帮助 | `imagen help`、`imagen schema` |
 | 切换界面语言 | `l`（会记住） | `--zh` / `--en`、`language` |
 
@@ -394,7 +394,14 @@ imagen superres fetch --model realesrgan-x4plus --accept
 imagen superres benchmark --artifact ARTIFACT_ID --model realesrgan-x4plus
 ```
 
-显式安装可选推理依赖（第一条仅预览）：
+显式安装可选推理依赖并下载所选权重（未加 `--accept` 仅预览）：
+
+```bash
+imagen superres install --model realesr-animevideov3
+imagen superres install --model realesr-animevideov3 --accept
+```
+
+也可以只安装运行时（第一条仅预览）：
 
 ```bash
 imagen runtime install --backend cpu
@@ -419,6 +426,23 @@ imagen transform ARTIFACT_ID --op superres:model=dejpg-srformer-light
 Film-Degrainer（tika）标记为 CC0-1.0；DeJPG_SRFormer_light（Helaman）为 CC BY 4.0，
 要求保留署名并说明变更。两者均为 notaneimu 的社区 ONNX 转换，不是官方导出。
 `imagen superres models` 显示来源与许可说明；这两种模型不放大图片，也不保证提升画质。
+
+动漫与赛璐璐内容有两种放大模型可选：
+
+```bash
+imagen superres install --model realesrgan-x4plus-anime --accept
+imagen superres install --model realesr-animevideov3 --accept
+```
+
+两者均为 BSD-3-Clause。`realesr-animevideov3` 面向赛璐璐动画帧与平涂色块，
+其固定 ONNX 导出记录了上游摘要与参考张量。确定性的 ACG 清理不需要下载模型：
+
+```bash
+imagen transform ARTIFACT_ID --preset "ACG 赛璐璐轻修复 (ACG Cel Cleanup)"
+imagen transform ARTIFACT_ID --op 'chroma_denoise:radius=2,strength=0.8'
+imagen transform ARTIFACT_ID --op 'edge_antialias:radius=1,strength=0.6'
+imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
+```
 
 下载会先进入临时目录，按固定 SHA-256 摘要校验，再发布到权重目录。失败或摘要不符不会留下可用权重。
 
@@ -495,6 +519,7 @@ imagen skills uninstall --target codex
 - 结果未知的创建不会自动重试。
 - 后处理不会覆盖源产物。
 - 未经显式接受，不会下载模型权重。
+- 未经交互确认，Imagen 不会请求提权。
 
 ## 语言
 
@@ -528,6 +553,8 @@ imagen tui
 **skill 无法卸载。** 目录未托管、是符号链接，或安装后被本地修改。先检查报出的路径；已修改的受管 skill 需要 `--force --yes`，未托管目录不会被接管。
 
 **超分在推理前失败。** 缺少运行依赖或权重。运行 `superres models`，审阅许可后执行 `superres fetch --model NAME --accept`。
+
+**命令返回 `permission_denied`。** 该操作需要管理员权限；创建符号链接还需要 Windows 开发者模式。交互式终端会询问是否以管理员身份重跑同一条命令（默认否；Windows 会弹出 UAC，提升后的命令在新控制台窗口执行）。`--agent`、`--output json`/`jsonl`、`--no-interactive` 和 TUI 不会发起 UAC：它们返回 `permission_denied` 与 `next_actions[].requires_elevation`，由 agent 先询问人类。
 
 ## 后续发展
 

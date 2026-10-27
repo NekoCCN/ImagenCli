@@ -94,6 +94,7 @@ COMMANDS = {
                 ("ops", "列出可用的确定性变换操作"),
                 ("runtime install", "预览或确认安装本地推理依赖；需 --accept 才安装"),
                 ("superres models", "列出超分模型、许可、下载与安装状态"),
+                ("superres install", "显式安装推理运行时并下载所选模型；需 --accept"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
                 ("language", "查看或设置默认界面语言"),
@@ -177,6 +178,8 @@ _SUMMARY_EN = {
     "runtime install": "Preview inference dependency installation; "
     "--accept installs into this venv",
     "superres models": "List upscaling models, licenses, download and install state",
+    "superres install": "Install the inference runtime and download selected models; "
+    "requires --accept",
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
@@ -390,6 +393,13 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "superres models":
         properties = {}
         required = ()
+    elif name == "superres install":
+        properties = {
+            "model": {"type": "string", "minLength": 1},
+            "backend": {"enum": ["cpu", "cuda", "openvino"], "default": "cpu"},
+            "accept": {"type": "boolean", "default": False},
+        }
+        required = ("model",)
     elif name == "superres fetch":
         properties = {"model": text, "accept": {"const": True}}
         required = ("model", "accept")
@@ -479,6 +489,18 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "model_dir": {"type": "string"},
             },
             ("models", "providers", "model_dir"),
+        )
+    if command.name == "superres install":
+        return _object(
+            {
+                "backend": {"type": "string"},
+                "runtime_installed": {"type": "boolean"},
+                "runtime": {"type": "object"},
+                "installed": {"type": "boolean"},
+                "hint": {"type": "string"},
+                "models": {"type": "array", "items": {"type": "object"}},
+            },
+            ("backend", "runtime_installed", "installed", "models"),
         )
     if command.name == "superres fetch":
         return _object(

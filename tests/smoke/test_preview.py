@@ -1,8 +1,10 @@
 """Preview detection is optional and failure-isolated."""
 
 import pytest
+from PIL import Image
 
 from imagen_cli.cli.preview import preview, supports_preview
+from imagen_cli.cli.tui.preview import ansi_image
 
 
 class _Stream:
@@ -19,6 +21,29 @@ class _Stream:
 
     def flush(self):
         pass
+
+
+@pytest.mark.parametrize(
+    ("size", "cols", "rows", "width", "height"),
+    [((16, 8), 16, 16, 16, 4), ((8, 16), 16, 8, 8, 8), ((8, 1), 8, 1, 8, 1)],
+)
+def test_ansi_preview_preserves_aspect_ratio(size, cols, rows, width, height):
+    from rich.text import Text
+
+    rendered = Text.from_ansi(ansi_image(Image.new("RGB", size, "red"), cols=cols, rows=rows))
+    lines = rendered.plain.splitlines()
+    assert len(lines) == height
+    assert all(len(line) == width for line in lines)
+
+
+def test_ansi_preview_composites_alpha_without_tinting_opaque_colors():
+    from rich.text import Text
+
+    image = Image.new("RGBA", (2, 2), (255, 0, 0, 255))
+    image.putpixel((1, 0), (0, 255, 0, 0))
+    rendered = Text.from_ansi(ansi_image(image, cols=2, rows=1))
+    colors = [span.style.color.triplet for span in rendered.spans]
+    assert colors == [(255, 0, 0), (9, 11, 16)]
 
 
 def test_preview_requires_a_capable_terminal(tmp_path, monkeypatch):

@@ -23,7 +23,7 @@ Releases = "https://github.com/NekoCCN/ImagenCli/releases"
 [project.optional-dependencies]
 vertex = ["google-auth>=2"]
 tui = [
-    "textual>=0.80",
+    "textual>=8.2.8",
 ]
 postprocess = ["numpy>=2"]
 keyring = ["keyring>=25"]
@@ -35,7 +35,7 @@ ai-torch = ["torch>=2.4", "numpy>=2"]
 [dependency-groups]
 dev = [
     "pytest>=8", "ruff>=0.11", "mypy>=1.15", "jsonschema>=4.23", "types-jsonschema>=4",
-    "numpy>=2", "textual>=0.80",
+    "numpy>=2", "textual>=8.2.8",
 ]
 
 [tool.hatch.build.targets.wheel]

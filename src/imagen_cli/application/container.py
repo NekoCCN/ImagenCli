@@ -434,6 +434,12 @@ class Container:
             validate(args, discover(command)["input_schema"])
             if command == "superres models":
                 return "succeeded", superres.catalog()
+            if command == "superres install":
+                return "succeeded", superres.install(
+                    args["model"],
+                    backend=args.get("backend", "cpu"),
+                    accept=args.get("accept") is True,
+                )
             if command == "superres fetch":
                 return "succeeded", superres.fetch(
                     args["model"],

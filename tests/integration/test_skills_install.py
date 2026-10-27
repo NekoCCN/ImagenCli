@@ -140,7 +140,7 @@ def test_multi_target_managed_uninstall(tmp_path, monkeypatch):
     assert skills_service.uninstall_(["imagen"], agents=["codex"])[0] == "succeeded"
 
 
-def test_unmanaged_and_symlink_targets_are_preserved(tmp_path, monkeypatch):
+def test_unmanaged_and_symlink_targets_are_preserved(tmp_path, monkeypatch, symlink_or_skip):
     monkeypatch.chdir(tmp_path)
     target = tmp_path / ".claude/skills/imagen"
     target.mkdir(parents=True)
@@ -153,19 +153,21 @@ def test_unmanaged_and_symlink_targets_are_preserved(tmp_path, monkeypatch):
     assert (target / "SKILL.md").read_text() == "user-owned"
     outside = tmp_path / "outside"
     outside.mkdir()
-    (tmp_path / ".agents").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(tmp_path / ".agents", outside, target_is_directory=True)
     assert skills_service.install_(["imagen"], agents=["codex"])[0] == "conflict"
     assert list(outside.iterdir()) == []
 
 
-def test_uninstall_rejects_unknown_name_and_internal_symlink(tmp_path, monkeypatch):
+def test_uninstall_rejects_unknown_name_and_internal_symlink(
+    tmp_path, monkeypatch, symlink_or_skip
+):
     monkeypatch.chdir(tmp_path)
     assert skills_service.uninstall_(["../outside"])[0] == "not_found"
     skills_service.install_(["imagen"], agents=["claude-code"])
     target = tmp_path / ".claude/skills/imagen"
     outside = tmp_path / "private.txt"
     outside.write_text("private")
-    (target / "link").symlink_to(outside)
+    symlink_or_skip(target / "link", outside)
     assert (
         skills_service.uninstall_(["imagen"], force=True, yes=True, agents=["claude-code"])[0]
         == "conflict"

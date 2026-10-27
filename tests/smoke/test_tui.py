@@ -53,6 +53,140 @@ def deps(tmp_path: Path):
     repositories.connection.close()
 
 
+def test_workbench_exposes_primary_actions_as_focusable_buttons(deps):
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            ids = {str(button.id) for button in app.query("#action-bar Button")}
+            assert {"action-generate", "action-edit", "action-transform", "action-open"} <= ids
+            await pilot.press("q")
+
+    asyncio.run(run())
+
+
+def test_mouse_actions_keep_confirmation_and_compact_layout(deps):
+    from textual.widgets import Button
+
+    deps_value, recorder = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert app.screen.has_class("compact")
+            assert app.query_one("#action-edit", Button).disabled
+            await pilot.click("#action-providers")
+            await pilot.pause()
+            await pilot.click("#providers-add")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ProviderForm"
+            await pilot.press("escape", "escape")
+            await pilot.click("#action-delete")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            assert not recorder.deleted
+            await pilot.click("#confirm-no")
+            await pilot.pause()
+            assert not recorder.deleted
+            await pilot.resize_terminal(140, 40)
+            await pilot.pause()
+            assert not app.screen.has_class("compact")
+
+    asyncio.run(run())
+
+
+def test_plan_mouse_actions_preserve_approval_boundary(deps):
+    from imagen_cli.cli.tui.app import PlanScreen
+
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append(command)
+        return "approved", {}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.push_screen(PlanScreen(deps_value, {"id": "plan-test", "plan_digest": "abc"}))
+            await pilot.pause()
+            from textual.widgets import Button
+
+            assert app.screen.query_one("#plan-execute", Button).disabled
+            await pilot.click("#plan-approve")
+            await pilot.pause()
+            assert calls == ["plan approve"]
+            assert not app.screen.query_one("#plan-execute", Button).disabled
+            await pilot.click("#plan-cancel")
+            await pilot.pause()
+            assert calls == ["plan approve"]
+
+    asyncio.run(run())
+
+
+def test_form_mouse_submit_validates_before_dismissal(deps):
+    from textual.widgets import Input
+
+    from imagen_cli.cli.tui.app import FormScreen
+
+    deps_value, _ = deps
+    results = []
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.push_screen(FormScreen("Test", [("name", "name", "")]), results.append)
+            await pilot.click("#form-submit")
+            await pilot.pause()
+            assert isinstance(app.screen, FormScreen)
+            assert not results
+            app.screen.query_one(Input).value = "session"
+            await pilot.pause(0.4)
+            await pilot.click("#form-submit")
+            await pilot.pause()
+            assert results == [{"name": "session"}]
+
+    asyncio.run(run())
+
+
+def test_cached_or_empty_preview_rejects_stale_worker_result(deps):
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            old_request = app._preview_request_id
+            app._render_preview()
+            before = str(app.preview.render())
+            app._on_preview_loaded(old_request, "stale", Path("old.png"), 10, 10, 0.0)
+            assert str(app.preview.render()) == before
+
+    asyncio.run(run())
+
+
+def test_preview_failure_displays_fallback_without_accepting_stale_errors(deps):
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            request = app._preview_request_id
+            app._on_preview_failed(request, "broken.png")
+            message = str(app.preview.render())
+            assert "broken.png" in message
+            app._on_preview_failed(request - 1, "stale.png")
+            assert str(app.preview.render()) == message
+
+    asyncio.run(run())
+
+
 def test_lists_one_hundred_sessions_at_80x24(deps):
     deps_value, _ = deps
 
