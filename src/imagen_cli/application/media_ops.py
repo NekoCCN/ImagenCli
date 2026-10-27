@@ -1983,6 +1983,99 @@ def anime_line_enhance(
     return result
 
 
+def chroma_denoise(image: Image.Image, *, radius: int = 2, strength: float = 0.8) -> Image.Image:
+    """Median-filter chroma only, keeping luma lines and flat cel color areas.
+
+    Color noise on compressed anime stills lives mostly in Cb/Cr; filtering
+    luma would soften the ink. Alpha is carried through untouched.
+    """
+    if radius not in {1, 2, 3}:
+        raise ValueError("radius must be 1, 2 or 3")
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0 and 1")
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    luma, blue, red = image.convert("YCbCr").split()
+    size = radius * 2 + 1
+    filtered_blue = blue.filter(ImageFilter.MedianFilter(size))
+    filtered_red = red.filter(ImageFilter.MedianFilter(size))
+    if strength < 1.0:
+        filtered_blue = Image.blend(blue, filtered_blue, strength)
+        filtered_red = Image.blend(red, filtered_red, strength)
+    result = Image.merge("YCbCr", (luma, filtered_blue, filtered_red)).convert("RGB")
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def edge_antialias(
+    image: Image.Image, *, radius: float = 1.0, strength: float = 0.6, threshold: int = 16
+) -> Image.Image:
+    """Soften staircase edges while leaving flat color areas untouched.
+
+    A FIND_EDGES mask is dilated and blurred, then blended with a small
+    Gaussian so hard pixel steps become gentler without flattening the artwork.
+    """
+    if not 0.3 <= radius <= 3.0:
+        raise ValueError("radius must be between 0.3 and 3.0")
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0 and 1")
+    if not 1 <= threshold <= 128:
+        raise ValueError("threshold must be between 1 and 128")
+    if strength == 0.0:
+        return image.copy()
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    mask = rgb.convert("L").filter(ImageFilter.FIND_EDGES)
+    mask = mask.point(lambda value: 255 if value >= threshold else 0)
+    mask = mask.filter(ImageFilter.MaxFilter(3)).filter(
+        ImageFilter.GaussianBlur(max(0.5, radius))
+    )
+    mask = mask.point(lambda value: round(value * strength))
+    result = Image.composite(rgb.filter(ImageFilter.GaussianBlur(radius)), rgb, mask)
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
+def cel_banding_reduce(
+    image: Image.Image, *, strength: float = 0.4, threshold: int = 12
+) -> Image.Image:
+    """Add a deterministic ordered dither only where gradients would band."""
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0 and 1")
+    if not 4 <= threshold <= 64:
+        raise ValueError("threshold must be between 4 and 64")
+    if strength == 0.0:
+        return image.copy()
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    gray = rgb.convert("L")
+    local_range = ImageChops.subtract(
+        gray.filter(ImageFilter.MaxFilter(5)), gray.filter(ImageFilter.MinFilter(5))
+    )
+    flat = local_range.point(lambda value: 255 if value <= threshold else 0)
+    flat = flat.filter(ImageFilter.GaussianBlur(1))
+    amplitude = max(1, round(strength * 6))
+    tile = Image.new("L", (4, 4))
+    for y in range(4):
+        for x in range(4):
+            tile.putpixel((x, y), round((BAYER[y][x] / 15) * 2 * amplitude))
+    offsets = Image.new("L", rgb.size)
+    for y in range(0, rgb.height, 4):
+        for x in range(0, rgb.width, 4):
+            offsets.paste(tile, (x, y))
+    shaken = ImageChops.add(
+        rgb, Image.merge("RGB", (offsets, offsets, offsets)), scale=1.0, offset=-amplitude
+    )
+    result = Image.composite(shaken, rgb, flat)
+    if alpha is not None:
+        result = result.convert("RGBA")
+        result.putalpha(alpha)
+    return result
+
+
 def _missing_kuwahara(image: Image.Image, *, size: int = 5) -> Image.Image:
     raise ValueError("kuwahara requires NumPy; install the postprocess extra")
 
@@ -2068,6 +2161,9 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "surface_blur": surface_blur,
     "color_purity": color_purity,
     "anime_line_enhance": anime_line_enhance,
+    "chroma_denoise": chroma_denoise,
+    "edge_antialias": edge_antialias,
+    "cel_banding_reduce": cel_banding_reduce,
 }
 
 

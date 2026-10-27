@@ -12,13 +12,15 @@ from typing import Any, Protocol
 
 from PIL import Image
 
-# The x2/x4 entries are pinned exports of the canonical Real-ESRGAN weights; the
-# anime entry has no maintained ONNX release, so users place it themselves.
+# Every downloadable entry is pinned to a SHA-256. Community ONNX conversions
+# are labelled as such; entries without a URL require the user to place weights.
 MANIFEST: dict[str, dict[str, Any]] = {
     "film-degrainer": {
         "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1x-Film-Degrainer-1-000.onnx",
         "sha256": "8dae380741328caf5bf3abe29636732dc2db9b7e7a9a812d7314279cc7e682fa",
         "scale": 1, "task": "denoise", "license": "CC0-1.0",
+        "category": "restoration",
+        "usage": "Film and cel stills with visible grain or sensor noise",
         "source": "https://openmodeldb.info/models/1x-Film-Degrainer-1-000",
         "note": "Film-Degrainer by tika; community ONNX conversion by notaneimu",
     },
@@ -27,6 +29,8 @@ MANIFEST: dict[str, dict[str, Any]] = {
         "sha256": "63e85f102025f024aa92eb2d9a73851b5c3a342e6aedebd02f2bff985ef3bd3b",
         "scale": 1, "task": "dejpeg", "multiple": 8, "fixed_input": 64,
         "license": "CC-BY-4.0",
+        "category": "restoration",
+        "usage": "Compressed anime stills and screenshots with JPEG blocking",
         "source": "https://openmodeldb.info/models/1x-DeJPG-SRFormer-light",
         "note": "DeJPG_SRFormer_light by Helaman; ONNX conversion by notaneimu; "
                 "attribution and indication of changes required",
@@ -35,20 +39,36 @@ MANIFEST: dict[str, dict[str, Any]] = {
         "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x4.onnx",
         "sha256": "5c586662929cbc686c1a5c38d9c060dbdb4ea5863a1f7672b8c0761e6b89c033",
         "scale": 4, "license": "BSD-3-Clause",
+        "category": "general",
+        "usage": "Photos and mixed content",
         "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
     },
     "realesrgan-x2plus": {
         "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x2.onnx",
         "sha256": "7115ba92e8a1bfa63d68558ef006ef3d91273a068d321b1439f8bb1c9179002c",
         "scale": 2, "license": "BSD-3-Clause", "multiple": 2,
+        "category": "general",
+        "usage": "Photos and mixed content at 2x",
         "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
     },
     "realesrgan-x4plus-anime": {
         "url": "https://huggingface.co/xiongjie/lightweight-real-ESRGAN-anime/resolve/main/RealESRGAN_x4plus_anime_4B32F.onnx",
         "sha256": "2208c7ae8db793330abf1248fbce15585ad317e921c456265572836b92926c9a",
         "scale": 4, "license": "BSD-3-Clause (upstream weights)",
+        "category": "acg",
+        "usage": "Anime illustrations and cel-shaded art at 4x",
         "source": "https://huggingface.co/xiongjie/lightweight-real-ESRGAN-anime",
         "note": "community ONNX export of RealESRGAN_x4plus_anime_6B",
+    },
+    "realesr-animevideov3": {
+        "url": "https://huggingface.co/skillsafe-ai/realesr-animevideov3/resolve/main/model.onnx",
+        "sha256": "78baa685a1a92cac6e14ab2af2a8ad0ef56fa48629563b1414e3a7acc54d86e2",
+        "scale": 4, "license": "BSD-3-Clause",
+        "category": "acg",
+        "usage": "Cel animation frames and anime stills with flat color areas",
+        "source": "https://huggingface.co/skillsafe-ai/realesr-animevideov3",
+        "note": "AnimeVideo-v3 by Xintao Wang; reproducible ONNX conversion with pinned "
+                "upstream digest and reference tensors",
     },
     "swinir-s-x2": {
         "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/002_lightweightSR_DIV2K_s64w8_SwinIR-S_x2.onnx",
@@ -424,6 +444,8 @@ def catalog() -> dict[str, Any]:
         models.append({
             "model": name,
             "task": entry.get("task", "upscale"),
+            "category": entry.get("category", "general"),
+            "usage": entry.get("usage"),
             "scale": entry["scale"],
             "license": entry["license"],
             "source": entry["source"],
@@ -445,6 +467,76 @@ def fetch(model: str, *, accept: bool = False) -> dict[str, Any]:
         "bytes": path.stat().st_size,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
+
+
+def install(
+    models: str | list[str],
+    *,
+    backend: str = "cpu",
+    accept: bool = False,
+    runtime_install: Callable[..., tuple[str, dict[str, Any]]] | None = None,
+    download: Callable[[str, Path], None] | None = None,
+) -> dict[str, Any]:
+    """Preview or install the inference runtime and requested model weights.
+
+    Nothing is installed or downloaded unless ``accept`` is true. Runtime
+    installation and weight download are separate steps so a missing backend
+    never silently falls back and weights never arrive by accident.
+    """
+    names = [models] if isinstance(models, str) else list(models)
+    if not names or len(set(names)) != len(names):
+        raise ValueError("install needs one or more distinct model names")
+    for name in names:
+        if name not in MANIFEST:
+            raise ValueError("unknown super-resolution model")
+    runtime_ready = bool(available_providers())
+    runtime_data: dict[str, Any] | None = None
+    if accept and not runtime_ready:
+        if runtime_install is None:
+            from imagen_cli.application import runtime_service
+
+            runtime_install = runtime_service.install
+        _, runtime_data = runtime_install(backend=backend, accept=True)
+        runtime_ready = bool(runtime_data.get("installed")) or bool(available_providers())
+    rows = []
+    for name in names:
+        entry = MANIFEST[name]
+        path = weights_path(name)
+        row: dict[str, Any] = {
+            "model": name,
+            "task": entry.get("task", "upscale"),
+            "category": entry.get("category", "general"),
+            "scale": entry["scale"],
+            "license": entry["license"],
+            "source": entry["source"],
+            "target": str(path),
+            "downloadable": entry.get("url") is not None,
+            "downloaded": path.exists(),
+        }
+        if accept:
+            path = ensure_weights(name, accept=True, download=download)
+            row.update(
+                downloaded=True,
+                path=str(path),
+                bytes=path.stat().st_size,
+                sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+        rows.append(row)
+    installed = runtime_ready and all(row["downloaded"] for row in rows)
+    data: dict[str, Any] = {
+        "backend": backend,
+        "runtime_installed": runtime_ready,
+        "models": rows,
+        "installed": installed,
+    }
+    if runtime_data is not None:
+        data["runtime"] = runtime_data
+    if not accept:
+        data["hint"] = (
+            "Review each license and source, then rerun with --accept to install "
+            "the runtime and download the selected weights."
+        )
+    return data
 
 
 def benchmark(

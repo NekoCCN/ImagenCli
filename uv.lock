@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -521,7 +521,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "rich", specifier = ">=13" },
-    { name = "textual", marker = "extra == 'tui'", specifier = ">=0.80" },
+    { name = "textual", marker = "extra == 'tui'", specifier = ">=8.2.8" },
     { name = "torch", marker = "extra == 'ai-torch'", specifier = ">=2.4" },
     { name = "typer", specifier = ">=0.15" },
 ]
@@ -534,7 +534,7 @@ dev = [
     { name = "numpy", specifier = ">=2" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.11" },
-    { name = "textual", specifier = ">=0.80" },
+    { name = "textual", specifier = ">=8.2.8" },
     { name = "types-jsonschema", specifier = ">=4" },
 ]
 

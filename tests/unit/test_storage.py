@@ -234,14 +234,14 @@ def test_reject_unsafe_paths(tmp_path, name):
         safe_path(tmp_path, name)
 
 
-def test_safe_path_rejects_symlink_and_hardlink(tmp_path):
+def test_safe_path_rejects_symlink_and_hardlink(tmp_path, symlink_or_skip):
     from imagen_cli.storage.safety import safe_path
 
     outside = tmp_path / "outside"
     outside.mkdir()
     root = tmp_path / "root"
     root.mkdir()
-    (root / "link").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(root / "link", outside, target_is_directory=True)
     with pytest.raises(ValueError):
         safe_path(root, "link/x")
     (root / "a").write_bytes(b"a")

@@ -15,12 +15,13 @@ from typing import Any, cast
 
 from PIL import Image
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Select, Static
+from textual.theme import Theme
+from textual.widgets import Button, DataTable, Input, Select, Static
 
 from imagen_cli.application import cache_service, media_ops
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
@@ -219,10 +220,10 @@ def _executor(
 
 
 _TONES = {
-    "muted": "#98a0ad",
-    "info": "#8fd3e8",
-    "ok": "#8fc7a8",
-    "error": "#e98f95",
+    "muted": "#b0b7c2",
+    "info": "#f2c879",
+    "ok": "#81c995",
+    "error": "#ed8b8b",
 }
 
 # Schema field names stay the machine contract; only the visible label is translated.
@@ -278,7 +279,7 @@ def _keybar(entries: list[tuple[str, str]]) -> Text:
     for index, (key, label) in enumerate(entries):
         if index:
             text.append(" ")
-        text.append(f" {key} ", style="bold #1a1014 on #f2a6c0")
+        text.append(f" {key} ", style="bold #24131b on #e98cab")
         text.append(f" {label}", style="#9aa2af")
     return text
 
@@ -307,6 +308,11 @@ class ConfirmScreen(ModalScreen[bool]):
         yield Vertical(
             Static(self.prompt, classes="panel-title"),
             self.choice,
+            Horizontal(
+                Button(t("No", "否"), id="confirm-no"),
+                Button(t("Yes", "是"), id="confirm-yes", variant="error"),
+                classes="dialog-actions",
+            ),
             Static(
                 t(
                     "←/→ choose · enter confirm · esc cancels",
@@ -325,6 +331,11 @@ class ConfirmScreen(ModalScreen[bool]):
         no = Text(t("No", "否"), style="reverse" if not self.yes else "")
         yes = Text(t("Yes", "是"), style="reverse" if self.yes else "")
         self.choice.update(Text.assemble(no, "    ", yes))
+        self.query_one("#confirm-yes" if self.yes else "#confirm-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "confirm-yes")
 
     def action_select_no(self) -> None:
         self.yes = False
@@ -377,6 +388,11 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
                 for (name, _, _), field in zip(self.fields, self.inputs, strict=True)
             ),
             Static(t("enter submit · esc cancel", "enter 提交 · esc 取消"), classes="panel-hint"),
+            Horizontal(
+                Button(t("Submit", "提交"), id="form-submit", variant="primary"),
+                Button(t("Cancel", "取消"), id="form-cancel"),
+                classes="dialog-actions",
+            ),
             classes="panel",
             id="form",
         )
@@ -386,6 +402,16 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             self.inputs[0].focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "form-submit":
+            self._submit()
+        elif event.button.id == "form-cancel":
+            self.action_cancel()
+
+    def _submit(self) -> None:
         values = {str(field.id): field.value.strip() for field in self.inputs}
         missing = [
             name for name, value in values.items() if not value and name not in self.optional
@@ -424,6 +450,12 @@ class CacheScreen(ModalScreen[bool]):
             self.table,
             self.status,
             self.field,
+            Horizontal(
+                Button(t("Build digest", "生成摘要"), id="cache-plan"),
+                Button(t("Purge", "清理"), id="cache-purge", variant="error"),
+                Button(t("Close", "关闭"), id="cache-close"),
+                classes="dialog-actions",
+            ),
             classes="panel",
             id="cache",
         )
@@ -454,8 +486,20 @@ class CacheScreen(ModalScreen[bool]):
         )
         self.field.focus()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "cache-plan":
+            self.action_plan()
+        elif event.button.id == "cache-purge":
+            self._purge()
+        elif event.button.id == "cache-close":
+            self.action_dismiss_screen()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.value != "purge" or not self.digest:
+        self._purge()
+
+    def _purge(self) -> None:
+        if self.field.value != "purge" or not self.digest:
             self.status.update(t("Not confirmed", "未确认"))
             return
         extra = (
@@ -574,6 +618,12 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
                     yield Static(label, classes="field-label")
                     yield inp
             yield Static("", id="param-error", markup=False)
+            yield Horizontal(
+                Button(t("Save", "保存"), id="param-save", variant="primary"),
+                Button(t("Basic / advanced", "基础 / 高级"), id="param-mode"),
+                Button(t("Cancel", "取消"), id="param-cancel"),
+                classes="dialog-actions",
+            )
             yield Static(
                 t(
                     "ctrl+enter confirm · Tab next field · m basic/advanced · esc cancel",
@@ -585,18 +635,27 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
     def on_mount(self) -> None:
         self._update_mode_view()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "param-save":
+            self.action_confirm()
+        elif event.button.id == "param-mode":
+            self.action_toggle_mode()
+        elif event.button.id == "param-cancel":
+            self.action_cancel()
+
     def _update_mode_view(self) -> None:
         if self.mode == "basic":
             indicator_text = t(
-                "Mode: [bold cyan]● Basic parameters[/]   [dim]○ All advanced parameters[/]"
+                "Mode: [bold #e98cab]● Basic parameters[/]   [dim]○ All advanced parameters[/]"
                 "  (m)",
-                "模式: [bold cyan]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (m 切换)",
+                "模式: [bold #e98cab]● 基础浓缩参数[/]   [dim]○ 全部高级参数[/]  (m 切换)",
             )
         else:
             indicator_text = t(
-                "Mode: [dim]○ Basic parameters[/]   [bold cyan]● All advanced parameters[/]"
+                "Mode: [dim]○ Basic parameters[/]   [bold #e98cab]● All advanced parameters[/]"
                 "  (m)",
-                "模式: [dim]○ 基础浓缩参数[/]   [bold cyan]● 全部高级参数[/]  (m 切换)",
+                "模式: [dim]○ 基础浓缩参数[/]   [bold #e98cab]● 全部高级参数[/]  (m 切换)",
             )
         self.query_one("#param-mode-indicator", Static).update(indicator_text)
 
@@ -669,6 +728,7 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
 
 
 class TransformScreen(ModalScreen[bool]):
+    AUTO_FOCUS = ""
     BINDINGS = [
         Binding("up", "cursor_up", t("Previous", "上一个"), show=False),
         Binding("down", "cursor_down", t("Next", "下一个"), show=False),
@@ -738,7 +798,7 @@ class TransformScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="transform"):
             yield self.header_title
-            with Horizontal():
+            with Horizontal(id="transform-content"):
                 with Vertical(id="transform-cat-col"):
                     yield self.category_table
                 with Vertical(id="transform-preset-col"):
@@ -748,6 +808,12 @@ class TransformScreen(ModalScreen[bool]):
                     yield self.intro_view
                     yield self.params_view
                     yield self.status
+            yield Horizontal(
+                Button(t("Parameters", "参数"), id="transform-params"),
+                Button(t("Apply", "应用"), id="transform-apply", variant="primary"),
+                Button(t("Cancel", "取消"), id="transform-cancel"),
+                classes="dialog-actions",
+            )
             yield Static(
                 t(
                     "↑↓ presets · c/Tab category · p parameters · enter apply · esc cancel",
@@ -770,15 +836,54 @@ class TransformScreen(ModalScreen[bool]):
         self.table.can_focus = False
         self.table.move_cursor(row=0)
         self.set_focus(None)
-        self.render_preview()
+        self.call_after_refresh(self.render_preview)
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 110, "compact")
+        if not self.running:
+            self.call_after_refresh(self.render_preview)
 
     def _populate_table(self) -> None:
         self.table.clear()
         for name in self.filtered_names:
             self.table.add_row(self.entries[name]["name"])
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "transform-params":
+            self.action_edit_params()
+        elif event.button.id == "transform-apply":
+            self.action_apply()
+        elif event.button.id == "transform-cancel":
+            self.action_cancel()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        event.stop()
+        if self.running:
+            return
+        if event.data_table is self.category_table:
+            index = self.category_table.cursor_row
+            if index != self.current_category_idx:
+                self._select_category(index)
+        elif event.data_table is self.table:
+            self.render_preview()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        if self.running:
+            return
+        if event.data_table is self.category_table:
+            self._select_category(event.cursor_row)
+        elif event.data_table is self.table:
+            self.render_preview()
+
     def action_toggle_category(self) -> None:
-        self.current_category_idx = (self.current_category_idx + 1) % len(self.categories)
+        self._select_category((self.current_category_idx + 1) % len(self.categories))
+
+    def _select_category(self, index: int) -> None:
+        if self.running:
+            return
+        self.current_category_idx = index
         self.category_table.move_cursor(row=self.current_category_idx)
         cat_filter = self.categories[self.current_category_idx]
         if cat_filter in {"全部", "All"}:
@@ -796,8 +901,9 @@ class TransformScreen(ModalScreen[bool]):
             self.header_title.update(
                 t(
                     f"Transform presets and postprocessing studio (experimental)"
-                    f"  [dim cyan]({cat_filter})[/]",
-                    f"变换预设与后处理工作室（实验性 experimental）  [dim cyan]({cat_filter})[/]",
+                    f"  [dim #b0b7c2]({cat_filter})[/]",
+                    f"变换预设与后处理工作室（实验性 experimental）"
+                    f"  [dim #b0b7c2]({cat_filter})[/]",
                 )
             )
         self.names = self.filtered_names
@@ -819,7 +925,7 @@ class TransformScreen(ModalScreen[bool]):
         self._move(1)
 
     def _move(self, delta: int) -> None:
-        if not self.names:
+        if self.running or not self.names:
             return
         row = min(len(self.names) - 1, max(0, self.table.cursor_row + delta))
         self.table.move_cursor(row=row)
@@ -878,11 +984,10 @@ class TransformScreen(ModalScreen[bool]):
                         continue
                     if op_name in media_ops.OPS:
                         thumbnail = media_ops.OPS[op_name](thumbnail, **step.get("params", {}))
-            image = thumbnail.convert("RGB")
-            preview_cols = max(40, min(96, self.view.size.width))
-            preview_rows = max(10, min(28, self.view.size.height))
+            preview_cols = max(1, min(96, self.view.content_size.width))
+            preview_rows = max(1, min(28, self.view.content_size.height))
             self.view.update(
-                Text.from_ansi(preview.ansi_image(image, cols=preview_cols, rows=preview_rows))
+                Text.from_ansi(preview.ansi_image(thumbnail, cols=preview_cols, rows=preview_rows))
             )
             self.params_view.update(self._describe_pipeline(pipeline))
             self.status.update(
@@ -894,6 +999,8 @@ class TransformScreen(ModalScreen[bool]):
             self.status.update(_sanitize(error))
 
     def action_edit_params(self) -> None:
+        if self.running:
+            return
         row = self.table.cursor_row
         if not 0 <= row < len(self.names):
             return
@@ -1113,6 +1220,14 @@ class ProvidersScreen(ModalScreen[bool]):
             ),
             self.table,
             self.status,
+            Horizontal(
+                Button(t("Add", "新增"), id="providers-add", variant="primary"),
+                Button(t("Update", "更新"), id="providers-update"),
+                Button(t("Models", "刷新模型"), id="providers-models"),
+                Button(t("Enter model", "手输模型"), id="providers-manual"),
+                Button(t("Close", "关闭"), id="providers-close"),
+                classes="dialog-actions",
+            ),
             classes="panel",
             id="providers",
         )
@@ -1177,6 +1292,19 @@ class ProvidersScreen(ModalScreen[bool]):
             send_credential=True, resolve_credential=credential,
         )
         return [str(row["model_id"]) for row in catalog["models"]]
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        actions = {
+            "providers-add": self.action_add,
+            "providers-update": self.action_update,
+            "providers-models": self.action_refresh_models,
+            "providers-manual": self.action_add_model,
+            "providers-close": self.action_dismiss_screen,
+        }
+        action = actions.get(str(event.button.id))
+        if action is not None:
+            action()
 
     def action_add(self) -> None:
         def done(values: dict[str, str] | None) -> None:
@@ -1322,6 +1450,8 @@ class ProvidersScreen(ModalScreen[bool]):
 class PlanScreen(ModalScreen[bool]):
     """Show a frozen plan; approval and execution are separate keys."""
 
+    AUTO_FOCUS = ""
+
     BINDINGS = [
         Binding("a", "approve", t("Approve", "批准")),
         Binding("enter", "execute", t("Execute", "执行")),
@@ -1353,6 +1483,13 @@ class PlanScreen(ModalScreen[bool]):
                 classes="panel-hint",
             ),
             self.status,
+            Horizontal(
+                Button(t("Approve", "批准"), id="plan-approve"),
+                Button(t("Execute", "执行"), id="plan-execute", variant="primary", disabled=True),
+                Button(t("Retry", "重试"), id="plan-retry"),
+                Button(t("Cancel", "取消"), id="plan-cancel"),
+                classes="dialog-actions",
+            ),
             Static(
                 t(
                     "a approve · enter execute · r retry · esc cancel",
@@ -1367,8 +1504,23 @@ class PlanScreen(ModalScreen[bool]):
     def on_mount(self) -> None:
         self._say(t("Not approved yet", "尚未批准"), "muted")
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        actions = {
+            "plan-approve": self.action_approve,
+            "plan-execute": self.action_execute,
+            "plan-retry": self.action_retry,
+            "plan-cancel": self.action_cancel,
+        }
+        action = actions.get(str(event.button.id))
+        if action is not None:
+            action()
+
     def _say(self, message: str, tone: str = "muted") -> None:
         self.status.update(Text(message, style=_TONES[tone]))
+        self.query_one("#plan-execute", Button).disabled = not self.approved or self.running
+        for identity in ("approve", "retry", "cancel"):
+            self.query_one(f"#plan-{identity}", Button).disabled = self.running
 
     def _approval_state(self) -> str | None:
         rows = self.deps.repositories.list("approvals", plan_id=self.plan["id"])
@@ -1551,7 +1703,7 @@ class ResultScreen(ModalScreen[None]):
         yield Vertical(
             Static(f"{self.command} · {self.status}", classes="panel-title"),
             self.body,
-            Static(t("esc closes", "esc 关闭"), classes="panel-hint"),
+            Button(t("Close", "关闭"), classes="dialog-close"),
             classes="panel",
             id="result",
         )
@@ -1568,6 +1720,10 @@ class ResultScreen(ModalScreen[None]):
             "error": None if ok else {"message": message},
         }
         self.body.update(human_render(value, color=False))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.action_close()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -1782,9 +1938,14 @@ class HelpScreen(ModalScreen[None]):
                 t(": opens all commands · esc closes", ": 打开全部命令 · esc 关闭"),
                 classes="panel-hint",
             ),
+            Button(t("Close", "关闭"), classes="dialog-close"),
             classes="panel",
             id="help",
         )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.action_close()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -1792,80 +1953,133 @@ class HelpScreen(ModalScreen[None]):
 
 class WorkbenchApp(App[None]):
     CSS = """
-    Screen {
-        background: #0c0e13; color: #ece7e4;
-        scrollbar-color: #333a47; scrollbar-background: #10131a;
-        scrollbar-color-hover: #f2a6c0; scrollbar-color-active: #f2a6c0;
-        scrollbar-background-hover: #10131a; scrollbar-background-active: #10131a;
+    $canvas: #090b10;
+    $surface: #11151d;
+    $surface-raised: #181e28;
+    $surface-active: #222a36;
+    $line: #303948;
+    $ink: #f4f1ef;
+    $ink-soft: #b0b7c2;
+    $ink-muted: #7f8998;
+    $accent: #e98cab;
+    $accent-ink: #24131b;
+    $success: #81c995;
+    $warning: #f2c879;
+    $danger: #ed8b8b;
+
+    Screen { background: $canvas; color: $ink; }
+    * {
+        scrollbar-color: $line; scrollbar-background: $surface;
+        scrollbar-color-hover: $accent; scrollbar-color-active: $accent;
     }
-
-    #topbar { height: 1; background: #11141b; padding: 0 1; }
-    #brand { width: auto; color: #f2a6c0; text-style: bold; padding: 0 1 0 0; }
-    #workspace { width: 1fr; color: #8e97a4; content-align: right middle; }
-
+    #topbar { height: 2; background: $surface; padding: 0 2; border-bottom: solid $line; }
+    #brand { width: auto; color: $accent; text-style: bold; content-align: left middle; }
+    #workspace { width: 1fr; color: $ink-muted; content-align: right middle; }
     #body { height: 1fr; }
-
     #sidebar {
-        width: 36; background: #10131a; border-right: solid #252b36;
-        padding: 1 1 0 1;
+        width: 32; min-width: 24; background: $surface;
+        border-right: solid $line; padding: 1 1 0 1;
     }
-    #sessions { height: 1fr; background: #10131a; }
-
+    #sessions { height: 1fr; background: $surface; }
     DataTable {
-        background: transparent; color: #ddd8d4;
-        scrollbar-color: #333a47; scrollbar-background: #141821;
-        scrollbar-color-hover: #f2a6c0; scrollbar-color-active: #f2a6c0;
-        scrollbar-size-vertical: 1; scrollbar-size-horizontal: 0;
+        background: transparent; color: $ink-soft;
+        scrollbar-size-vertical: 1; scrollbar-size-horizontal: 1;
     }
-    DataTable > .datatable--header { background: transparent; color: #8e97a4; text-style: bold; }
-    DataTable > .datatable--cursor { background: #f2a6c0; color: #1a1014; text-style: bold; }
-    DataTable > .datatable--hover { background: #1b202a; }
-
+    DataTable > .datatable--header {
+        background: $surface-raised; color: $ink-muted; text-style: bold;
+    }
+    DataTable > .datatable--cursor { background: $accent; color: $accent-ink; text-style: bold; }
+    DataTable > .datatable--hover { background: $surface-active; }
     #detail-pane { width: 1fr; padding: 1 2 0 2; }
-    #detail { color: #f4efec; text-style: bold; height: 1; overflow: hidden; }
-    #meta { color: #8e97a4; height: 1; overflow: hidden; }
+    #detail { color: $ink; text-style: bold; height: 1; overflow: hidden; }
+    #meta { color: $ink-muted; height: 1; overflow: hidden; }
     #preview-frame {
-        height: 1fr; margin-top: 1; background: #090b10;
-        border: solid #252b36; align: center middle; padding: 1;
+        height: 1fr; margin-top: 1; background: $canvas;
+        border: solid $line; align: center middle; padding: 1;
     }
-    #preview { width: auto; height: auto; color: #a3abb7; text-align: center; }
-    #film { height: 1; overflow: hidden; }
-    #status { height: 1; overflow: hidden; }
-
-    #keybar { height: 1; background: #11141b; padding: 0 1; }
-
-    ModalScreen { align: center middle; background: #0c0e13; }
+    #preview { width: auto; height: auto; color: $ink-soft; text-align: center; }
+    #film { height: 1; overflow: hidden; color: $ink-soft; }
+    #action-bar { height: 4; padding: 1 0 0 0; }
+    #action-bar Button {
+        height: 3; min-width: 8; width: 1fr; margin-right: 1;
+        background: $surface-raised; color: $ink-soft; border: solid $line;
+    }
+    #action-bar Button:hover { background: $surface-active; color: $ink; border: solid $accent; }
+    #action-bar Button:focus { border: solid $accent; text-style: bold; }
+    #action-bar Button.-primary { background: $accent; color: $accent-ink; border: none; }
+    #action-bar Button:disabled { background: $surface; color: $ink-muted; border: solid $line; }
+    #status { height: 1; overflow: hidden; color: $ink-muted; }
+    #keybar { height: 2; background: $surface; padding: 0 1; border-top: solid $line; }
+    ModalScreen { align: center middle; background: $canvas 85%; }
     .panel {
-        background: #141821; border: solid #2c3442; padding: 1 2;
+        background: $surface; border: solid $line; padding: 1 2;
         width: 80%; max-width: 96; height: auto; max-height: 94%; overflow-y: auto;
-        scrollbar-color: #333a47; scrollbar-background: #141821;
-        scrollbar-color-hover: #f2a6c0; scrollbar-color-active: #f2a6c0;
     }
+    .panel-title { color: $ink; text-style: bold; padding-bottom: 1; }
+    .panel-hint { color: $ink-muted; }
+    .field { height: auto; }
+    .field-label { width: 16; color: $ink-soft; content-align: left middle; padding-top: 1; }
+    Input, Select { background: $canvas; border: solid $line; color: $ink; }
+    Input:focus, Select:focus { border: solid $accent; }
+    Input.-invalid { border: solid $danger; }
     #providers, #palette, #model-picker { height: 90%; overflow: hidden; }
-    #providers DataTable, #palette DataTable, #model-picker DataTable {
-        height: 1fr; width: 1fr;
-    }
+    #providers DataTable, #palette DataTable, #model-picker DataTable { height: 1fr; width: 1fr; }
     #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
-    #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid #252b36; }
+    #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid $line; }
     #transform-preset-col { width: 33%; min-width: 26; height: 1fr; margin-left: 1; }
     #transform-categories, #transform-presets { height: 1fr; width: 1fr; }
     #transform-preview-col { width: 1fr; margin-left: 2; height: 1fr; }
     #transform-intro-view {
-        height: auto; max-height: 5; overflow-y: auto; color: #ddd8d4;
-        margin: 1 0; padding: 0 1; background: #0f131a; border-left: solid #f2a6c0;
+        height: auto; max-height: 5; overflow-y: auto; color: $ink-soft;
+        margin: 1 0; padding: 0 1; background: $canvas; border-left: solid $accent;
     }
-    #transform-params-view { height: 4; overflow-y: auto; color: #8e97a4; margin-top: 1; }
+    #transform-params-view { height: 4; overflow-y: auto; color: $ink-muted; margin-top: 1; }
     #param-form { max-width: 82; max-height: 88%; overflow-y: auto; }
     #param-form .field-label { width: 24; }
     #param-form .panel-hint { margin-top: 1; }
     #palette-filter { margin-bottom: 1; width: 1fr; }
-    .panel-title { color: #f4efec; text-style: bold; padding-bottom: 1; }
-    .panel-hint { color: #8e97a4; }
-    .field { height: auto; }
-    .field-label { width: 14; color: #98a0ad; content-align: left middle; padding-top: 1; }
-    .field Input { width: 1fr; }
-    Input { background: #0e1117; border: solid #252b36; color: #ece7e4; padding: 0 1; }
-    Input:focus { border: solid #f2a6c0; }
+    ChoiceForm #choice-form { background: $surface; border: solid $line; }
+    #form-status { color: $ink; text-style: bold; }
+    SelectCurrent, Select > SelectCurrent { background: $canvas; color: $ink; }
+    SelectOverlay { background: $surface-raised; border: solid $line; color: $ink-soft; }
+    SelectOverlay > .option-list--option-highlighted {
+        background: $accent; color: $accent-ink; text-style: bold;
+    }
+    Button { background: $surface-raised; color: $ink-soft; border: solid $line; min-width: 10; }
+    Button:hover { background: $surface-active; color: $ink; border: solid $accent; }
+    Button:focus { border: solid $accent; text-style: bold; }
+    Button.-primary { background: $accent; color: $accent-ink; }
+    Button.-error { background: $surface-raised; color: $danger; border: solid $danger; }
+    Button:disabled { color: $ink-muted; background: $surface; text-style: none; }
+    .field Input, .field Select { width: 1fr; }
+    Input { padding: 0 1; }
+    .dialog-actions { height: auto; margin-top: 1; }
+    .dialog-actions Button { margin-right: 1; }
+    .sidebar-actions { height: 3; }
+    .sidebar-actions Button { min-width: 8; width: 1fr; }
+    #action-delete { width: 1fr; }
+    .compact #sidebar { width: 26; min-width: 20; }
+    .compact #detail-pane { padding: 1 1 0 1; }
+    .compact #action-bar Button { min-width: 7; margin-right: 0; width: 1fr; }
+    .compact .panel { width: 96%; padding: 1; }
+    #transform-content { height: 1fr; }
+    #transform-preview-col > Static:first-child { height: 1fr; }
+    .compact #transform-content { layout: grid; grid-size: 2; grid-rows: 1fr 2fr; }
+    .compact #transform-preview-col { column-span: 2; width: 1fr; margin-left: 0; }
+    .compact #transform-intro-view { height: 2; max-height: 2; margin: 0; }
+    .compact #transform-params-view { height: 1; margin: 0; }
+    .compact #transform-preview-col > Static:last-child { height: 1; overflow: hidden; }
+    .compact #transform-cat-col { width: 1fr; min-width: 12; }
+    .compact #transform-preset-col { width: 1fr; min-width: 18; }
+    #action-prev, #action-next { width: 4; min-width: 4; }
+    .compact #action-bar Button { min-width: 5; width: 8; padding: 0; }
+    .compact #action-bar #action-generate { width: 10; }
+    .compact #action-bar #action-transform { width: 13; }
+    .compact .sidebar-actions Button { padding: 0; }
+    .compact .sidebar-actions #action-providers { width: 13; }
+    .compact #action-bar #action-prev, .compact #action-bar #action-next {
+        width: 3; min-width: 3; padding: 0;
+    }
     """
     BINDINGS = [
         Binding("q", "quit", t("Quit", "退出")),
@@ -1895,6 +2109,14 @@ class WorkbenchApp(App[None]):
         super().__init__()
         self.deps = deps
         self.workspace_label = workspace_label
+        self.register_theme(Theme(
+            name="imagen-darkroom", primary="#e98cab", secondary="#b0b7c2",
+            accent="#e98cab", foreground="#f4f1ef", background="#090b10",
+            surface="#11151d", panel="#181e28", success="#81c995",
+            warning="#f2c879", error="#ed8b8b", dark=True,
+            variables={"footer-key-foreground": "#e98cab", "input-cursor-background": "#e98cab"},
+        ))
+        self.theme = "imagen-darkroom"
         self.sessions: DataTable[Any] = DataTable(id="sessions")
         self.detail = Static(id="detail")
         self.meta = Static(id="meta")
@@ -1917,15 +2139,46 @@ class WorkbenchApp(App[None]):
         )
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
+                yield Horizontal(
+                    Button(t("New", "新建"), id="action-new"),
+                    Button(t("Providers", "端点"), id="action-providers"),
+                    classes="sidebar-actions",
+                )
                 yield self.sessions
+                yield Button(t("Delete session", "删除会话"), id="action-delete", variant="error")
             with Vertical(id="detail-pane"):
                 yield self.detail
                 yield self.meta
                 with Vertical(id="preview-frame"):
                     yield self.preview
+                yield Horizontal(
+                    Button(t("Generate", "生成"), id="action-generate", classes="-primary"),
+                    Button(t("Edit", "编辑"), id="action-edit"),
+                    Button(t("Transform", "变换"), id="action-transform"),
+                    Button(t("Open", "打开"), id="action-open"),
+                    Button(t("‹", "‹"), id="action-prev", tooltip=t("Previous image", "上一张")),
+                    Button(t("›", "›"), id="action-next", tooltip=t("Next image", "下一张")),
+                    id="action-bar",
+                )
                 yield self.film
                 yield self.status
         yield Static(_keybar(self._keybar_entries()), id="keybar")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        actions = {
+            "action-new": self.action_new_session,
+            "action-providers": self.action_providers,
+            "action-delete": self.action_delete,
+            "action-generate": self.action_generate,
+            "action-edit": self.action_edit,
+            "action-transform": self.action_transform,
+            "action-open": self.action_open_image,
+            "action-prev": self.action_previous_artifact,
+            "action-next": self.action_next_artifact,
+        }
+        action = actions.get(str(event.button.id))
+        if action is not None:
+            action()
 
     def _keybar_entries(self) -> list[tuple[str, str]]:
         return [
@@ -1953,10 +2206,19 @@ class WorkbenchApp(App[None]):
         self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
         self.refresh_rows()
         self.query_one("#keybar", Static).update(_keybar(self._keybar_entries()))
+        labels = {
+            "new": t("New", "新建"), "providers": t("Providers", "端点"),
+            "delete": t("Delete session", "删除会话"),
+            "generate": t("Generate", "生成"), "edit": t("Edit", "编辑"),
+            "transform": t("Transform", "变换"), "open": t("Open", "打开"),
+        }
+        for identity, label in labels.items():
+            self.query_one(f"#action-{identity}", Button).label = label
         self._say(t("Language: English", "语言：中文"), "info")
 
     def on_mount(self) -> None:
         self.title = "Imagen"
+        self.sessions.focus()
         self.sessions.cursor_type = "row"
         self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
         self.refresh_rows()
@@ -1983,6 +2245,8 @@ class WorkbenchApp(App[None]):
         if self.current not in identities:
             self.current = identities[0] if identities else None
         if not identities:
+            self._preview_request_id += 1
+            self._sync_actions()
             self.detail.update(t("No sessions yet", "尚无会话"))
             self.meta.update("")
             self.film_items = []
@@ -2019,8 +2283,20 @@ class WorkbenchApp(App[None]):
             self._say("")
         self.show_detail()
 
-    def on_resize(self) -> None:
+    def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 110, "compact")
+        for screen in self.screen_stack:
+            screen.set_class(event.size.width < 110, "compact")
         self.show_detail()
+
+    def _sync_actions(self) -> None:
+        for identity in ("edit", "transform", "open"):
+            self.query_one(f"#action-{identity}", Button).disabled = not self.film_items
+        self.query_one("#action-prev", Button).disabled = self.film_index <= 0
+        self.query_one("#action-next", Button).disabled = (
+            self.film_index < 0 or self.film_index >= len(self.film_items) - 1
+        )
+        self.query_one("#action-delete", Button).disabled = self.current is None
 
     def _artifact_item(
         self,
@@ -2101,6 +2377,7 @@ class WorkbenchApp(App[None]):
         )
 
     def _render_film(self) -> None:
+        self._sync_actions()
         if not self.film_items:
             self.film.update("")
             return
@@ -2110,28 +2387,29 @@ class WorkbenchApp(App[None]):
         start = max(0, min(len(self.film_items) - limit, self.film_index - limit // 2))
         window = self.film_items[start : start + limit]
         text = Text()
-        text.append(t("Artifacts ", "产物 "), style="#8e97a4")
-        text.append(f"{self.film_index + 1}/{len(self.film_items)}  ", style="#8e97a4")
+        text.append(t("Artifacts ", "产物 "), style="#b0b7c2")
+        text.append(f"{self.film_index + 1}/{len(self.film_items)}  ", style="#b0b7c2")
         if start:
-            text.append("… ", style="#5f6875")
+            text.append("… ", style="#7f8998")
         for offset, item in enumerate(window):
             index = start + offset
             if index == self.film_index:
-                style = "bold #1a1014 on #f2a6c0"
+                style = "bold #24131b on #e98cab"
             elif item["state"] == "failed":
-                style = "#e98f95"
+                style = "#ed8b8b"
             elif item["state"] in {"queued", "dispatching", "running"}:
-                style = "#8fd3e8"
+                style = "#f2c879"
             else:
-                style = "#98a0ad"
+                style = "#b0b7c2"
             if offset:
                 text.append(" ")
             text.append(f" {index + 1:02d} ", style=style)
         if start + limit < len(self.film_items):
-            text.append(" …", style="#5f6875")
+            text.append(" …", style="#7f8998")
         self.film.update(text)
 
     def _render_preview(self) -> None:
+        self._preview_request_id += 1
         if not self.film_items or not 0 <= self.film_index < len(self.film_items):
             self.preview.update(
                 Text(
@@ -2157,8 +2435,8 @@ class WorkbenchApp(App[None]):
             return
 
         frame = self.query_one("#preview-frame")
-        cols = max(20, frame.size.width - 2)
-        rows = max(5, frame.size.height - 2)
+        cols = max(1, frame.content_size.width)
+        rows = max(1, frame.content_size.height)
         try:
             mtime = path.stat().st_mtime
         except OSError:
@@ -2169,7 +2447,6 @@ class WorkbenchApp(App[None]):
             self.preview.update(Text.from_ansi(self._preview_cache[cache_key]))
             return
 
-        self._preview_request_id += 1
         req_id = self._preview_request_id
         # 轻量占位符，UI 立即响应
         self.preview.update(
@@ -2187,8 +2464,13 @@ class WorkbenchApp(App[None]):
         try:
             ansi_str = preview.ansi_blocks(path, cols=cols, rows=rows)
         except Exception:
+            self.call_from_thread(self._on_preview_failed, req_id, str(path))
             return
         self.call_from_thread(self._on_preview_loaded, req_id, ansi_str, path, cols, rows, mtime)
+
+    def _on_preview_failed(self, req_id: int, path: str) -> None:
+        if req_id == self._preview_request_id:
+            self.preview.update(Text(t("Preview unavailable", "预览不可用") + "\n" + path))
 
     def _on_preview_loaded(
         self, req_id: int, ansi_str: str, path: Path, cols: int, rows: int, mtime: float

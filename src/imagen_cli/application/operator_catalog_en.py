@@ -159,6 +159,21 @@ OPERATORS: dict[str, dict[str, str]] = {
         "description": "Extracts dark lines with isotropic DoG and a square morphological "
         "closing, then multiplies them into the image.",
     },
+    "chroma_denoise": {
+        "name": "Chroma Denoise",
+        "description": "Median-filters only Cb/Cr chroma to reduce compression color noise "
+        "while keeping luma line work.",
+    },
+    "edge_antialias": {
+        "name": "Edge Antialias",
+        "description": "Blends a small Gaussian only near detected edges to soften staircase "
+        "aliasing; flat color areas stay untouched.",
+    },
+    "cel_banding_reduce": {
+        "name": "Cel Banding Reduce",
+        "description": "Adds a deterministic ordered dither only in low-contrast gradients to "
+        "break up banding in cel-style shading.",
+    },
     "guided_smooth": {
         "name": "Guided edge-preserving smoothing",
         "description": "Smooths encoded sRGB colors with a local linear guided model, then "
@@ -569,6 +584,28 @@ PARAMETERS: dict[str, dict[str, dict[str, str]]] = {
             "description": "Square closing radius; may join nearby lines",
         },
     },
+    "chroma_denoise": {
+        "radius": {
+            "label": "Chroma radius",
+            "description": "Median window radius; larger is smoother and slower",
+        },
+        "strength": {
+            "label": "Denoise strength",
+            "description": "Blend weight against the original chroma",
+        },
+    },
+    "edge_antialias": {
+        "radius": {"label": "Soften radius", "description": "Gaussian radius near detected edges"},
+        "strength": {"label": "Effect strength", "description": "Edge softening blend weight"},
+        "threshold": {"label": "Edge threshold", "description": "FIND_EDGES response threshold"},
+    },
+    "cel_banding_reduce": {
+        "strength": {"label": "Dither strength", "description": "Ordered-dither amplitude"},
+        "threshold": {
+            "label": "Flat threshold",
+            "description": "Local luminance span treated as a gradient",
+        },
+    },
     "guided_smooth": {
         "radius": {"label": "Neighborhood radius (input pixels)", "description": ""},
         "epsilon": {
@@ -737,6 +774,8 @@ PRESET_NAMES = {
     "动漫色彩提纯": "Anime Color Purity",
     "二次元线条强化与描墨": "Anime Line Inking",
     "二次元赛璐珞顶级精修": "Anime Cel Master",
+    "ACG 赛璐璐轻修复": "ACG Cel Cleanup",
+    "ACG 压缩截图修复": "ACG Compressed Still",
     "日系通透空气感": "Shinkai Airy",
     "热血集中线": "Manga Action Focus",
     "黑白漫画网点": "Manga Screentone",
@@ -1440,6 +1479,36 @@ INTROS: dict[str, dict[str, str]] = {
         "may join, and small gaps and tonal detail may be lost.",
         "benefit": "Increases contrast in dark contours.",
         "loss": "Adjacent lines may join, and small gaps and tonal detail may be lost.",
+    },
+    "chroma_denoise": {
+        "title": "Chroma-only median denoise",
+        "summary": "Filters Cb/Cr only, then merges back into RGB and restores alpha.",
+        "principle": "Filters Cb/Cr only, then merges back into RGB and restores alpha.",
+        "scenarios": "May provide: reduces color noise in compressed anime stills. May lose: small "
+        "colored details are averaged away.",
+        "benefit": "Reduces color noise while keeping luma line work.",
+        "loss": "Small colored details are averaged away.",
+        "use_case": "Clean color noise without softening ink lines",
+    },
+    "edge_antialias": {
+        "title": "Edge-mask guided softening",
+        "summary": "Blends a Gaussian only near detected edges; flat color areas stay untouched.",
+        "principle": "Blends a Gaussian only near detected edges; flat color areas stay untouched.",
+        "scenarios": "May provide: softens staircase aliasing. May lose: edges may become slightly "
+        "soft; check text and very fine lines.",
+        "benefit": "Softens staircase aliasing.",
+        "loss": "Edges may become slightly soft; check text and very fine lines.",
+        "use_case": "Soften staircase edges after upscaling",
+    },
+    "cel_banding_reduce": {
+        "title": "Deterministic ordered dither for gradients",
+        "summary": "Adds a fixed Bayer dither only where local contrast is low.",
+        "principle": "Adds a fixed Bayer dither only where local contrast is low.",
+        "scenarios": "May provide: breaks up banding in cel gradients. May lose: flat areas gain "
+        "slight grain.",
+        "benefit": "Breaks up banding with reproducible output.",
+        "loss": "Flat areas gain slight grain.",
+        "use_case": "Break up banding in cel-style gradients",
     },
     "guided_smooth": {
         "title": "Guided edge-preserving smoothing",

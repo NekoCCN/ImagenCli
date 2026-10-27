@@ -11,6 +11,20 @@ from imagen_cli.application.operator_catalog import get_operator_item
 from imagen_cli.cli.tui.app import ParamEditScreen
 
 
+def test_mouse_can_save_parameters():
+    async def exercise():
+        app = App()
+        saved = []
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = ParamEditScreen("test", [{"op": "film_grain", "params": {}}])
+            await app.push_screen(screen, saved.append)
+            await pilot.click("#param-save")
+            await pilot.pause()
+            assert saved == [[{"op": "film_grain", "params": {}}]]
+
+    asyncio.run(exercise())
+
+
 def test_tile_catalog_has_integer_choices():
     item = get_operator_item("superres")
     tile = next(p for p in item.parameters if p.name == "tile")

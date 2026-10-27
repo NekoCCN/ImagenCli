@@ -54,7 +54,7 @@ Most daily work is available in both interfaces. Keys below are TUI shortcuts.
 | Batch requests | not available | `batch submit`, `batch get`, `batch wait` |
 | Background worker | not available | `worker start`, `worker status`, `worker recover` |
 | Agent skills | not available | `skills list`, `skills install`, `skills uninstall` |
-| Upscaling models | not available | `superres models`, `superres fetch`, `superres benchmark` |
+| Upscaling models | not available | `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
 | Command reference | `:` palette, `?` help | `imagen help`, `imagen schema` |
 | Switch interface language | `l` (remembered) | `--zh` / `--en`, `language` |
 
@@ -422,6 +422,14 @@ imagen superres fetch --model realesrgan-x4plus --accept
 imagen superres benchmark --artifact ARTIFACT_ID --model realesrgan-x4plus
 ```
 
+Install the optional runtime and the selected weights in one explicit step
+(the command previews until `--accept` is given):
+
+```bash
+imagen superres install --model realesr-animevideov3
+imagen superres install --model realesr-animevideov3 --accept
+```
+
 Install the optional runtime explicitly (the first command only previews):
 
 ```bash
@@ -449,6 +457,24 @@ Film-Degrainer by tika is listed as CC0-1.0. DeJPG_SRFormer_light by Helaman is
 CC BY 4.0: retain attribution and indicate changes. These are community ONNX
 conversions by notaneimu, not official exports. Sources and license notes appear
 in `imagen superres models`; neither model enlarges the image or guarantees improvement.
+
+Anime and cel content has two upscaling choices:
+
+```bash
+imagen superres install --model realesrgan-x4plus-anime --accept
+imagen superres install --model realesr-animevideov3 --accept
+```
+
+Both are BSD-3-Clause. `realesr-animevideov3` targets cel animation frames and
+flat color areas; its pinned ONNX export records the upstream digest and
+reference tensors. Deterministic ACG cleanup does not need a model download:
+
+```bash
+imagen transform ARTIFACT_ID --preset "ACG 赛璐璐轻修复 (ACG Cel Cleanup)"
+imagen transform ARTIFACT_ID --op 'chroma_denoise:radius=2,strength=0.8'
+imagen transform ARTIFACT_ID --op 'edge_antialias:radius=1,strength=0.6'
+imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
+```
 
 Downloaded weights are staged, checked against a pinned SHA-256 digest, and only then published into the weights directory. Failed or mismatched downloads leave no usable weight behind.
 
@@ -525,6 +551,7 @@ Sessions, plans, jobs, managed images, cache, and private credentials live in th
 - Imagen does not retry unknown creation outcomes automatically.
 - Imagen does not overwrite the source artifact during postprocessing.
 - Imagen does not download model weights without explicit acceptance.
+- Imagen never requests elevation without an explicit interactive confirmation.
 
 ## Language
 
@@ -558,6 +585,8 @@ imagen tui
 **A skill cannot be uninstalled.** The directory is unmanaged, symlinked, or was modified after installation. Inspect the reported path first. Locally modified managed skills need `--force --yes`; unmanaged directories are never taken over.
 
 **Upscaling fails before inference.** The runtime or weights are missing. Run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
+
+**A command fails with `permission_denied`.** The operation needs administrator rights; creating a symlink also needs Windows Developer Mode. An interactive terminal asks whether to rerun the same command elevated (default No; Windows shows a UAC prompt and the elevated command runs in a new console). `--agent`, `--output json`/`jsonl`, `--no-interactive`, and the TUI never launch UAC: they return `permission_denied` with `next_actions[].requires_elevation`, so an agent asks its human first.
 
 ## Roadmap
 

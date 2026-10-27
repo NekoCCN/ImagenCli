@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from imagen_cli.i18n import t
 
@@ -38,14 +38,19 @@ def ansi_blocks(path: Path, *, cols: int = 40, rows: int = 20) -> str:
 
 
 def ansi_image(image: Image.Image, *, cols: int = 40, rows: int = 20) -> str:
-    target = (max(1, cols), max(1, rows * 2))
-    scaled = image.convert("RGB").resize(target, Image.Resampling.LANCZOS)
+    """Render a contained true-color preview without stretching the source."""
+    source = image.convert("RGBA")
+    scaled = ImageOps.contain(
+        source, (max(1, cols), max(2, rows * 2)), Image.Resampling.LANCZOS
+    )
+    canvas = Image.new("RGBA", (scaled.width, scaled.height + scaled.height % 2), (9, 11, 16, 255))
+    canvas.alpha_composite(scaled)
     lines = []
-    for y in range(0, scaled.height - 1, 2):
+    for y in range(0, canvas.height - 1, 2):
         parts = []
-        for x in range(scaled.width):
-            top = cast(tuple[int, int, int], scaled.getpixel((x, y)))
-            bottom = cast(tuple[int, int, int], scaled.getpixel((x, y + 1)))
+        for x in range(canvas.width):
+            top = cast(tuple[int, int, int, int], canvas.getpixel((x, y)))
+            bottom = cast(tuple[int, int, int, int], canvas.getpixel((x, y + 1)))
             parts.append(
                 f"\x1b[38;2;{top[0]};{top[1]};{top[2]}m"
                 f"\x1b[48;2;{bottom[0]};{bottom[1]};{bottom[2]}m▀"

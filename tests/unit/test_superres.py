@@ -99,12 +99,14 @@ def test_torchscript_is_rejected_before_deserialization(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("suffix", [".onnx", ".pt"])
-def test_weights_symlink_is_rejected_without_touching_target(tmp_path, monkeypatch, suffix):
+def test_weights_symlink_is_rejected_without_touching_target(
+    tmp_path, monkeypatch, suffix, symlink_or_skip
+):
     root = tmp_path / "models"
     root.mkdir()
     external = tmp_path / "external"
     external.write_bytes(b"private bytes")
-    (root / ("realesrgan-x4plus" + suffix)).symlink_to(external)
+    symlink_or_skip(root / ("realesrgan-x4plus" + suffix), external)
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(root))
     with pytest.raises(ValueError, match="symlink"):
         superres.ensure_weights("realesrgan-x4plus", suffix=suffix)
@@ -119,7 +121,7 @@ def test_weights_size_checked_before_reading(tmp_path, monkeypatch):
         superres.ensure_weights("realesrgan-x4plus")
 
 
-def test_digest_sidecar_symlink_is_rejected(tmp_path, monkeypatch):
+def test_digest_sidecar_symlink_is_rejected(tmp_path, monkeypatch, symlink_or_skip):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     monkeypatch.setitem(superres.MANIFEST, "manual", {
         "url": None, "sha256": None, "scale": 2, "license": "test", "source": "local",
@@ -127,7 +129,7 @@ def test_digest_sidecar_symlink_is_rejected(tmp_path, monkeypatch):
     (tmp_path / "manual.onnx").write_bytes(b"weights")
     external = tmp_path / "external"
     external.write_bytes(b"private bytes")
-    (tmp_path / "manual.sha256").symlink_to(external)
+    symlink_or_skip(tmp_path / "manual.sha256", external)
     with pytest.raises(ValueError, match="symlink"):
         superres.ensure_weights("manual")
     assert external.read_bytes() == b"private bytes"
