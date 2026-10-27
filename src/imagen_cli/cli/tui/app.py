@@ -1999,15 +1999,19 @@ class WorkbenchApp(App[None]):
     }
     #preview { width: auto; height: auto; color: $ink-soft; text-align: center; }
     #film { height: 1; overflow: hidden; color: $ink-soft; }
-    #action-bar { height: 4; padding: 1 0 0 0; }
+    # Controls stay one line tall: terminal rows belong to images, not chrome.
+    # shortcut: single-line controls carry no border, so focus shows as fill
+    # rather than an outline; revisit if a theme needs bordered buttons back.
+    #action-bar { height: 1; margin-top: 1; }
     #action-bar Button {
-        height: 3; min-width: 8; width: 1fr; margin-right: 1;
-        background: $surface-raised; color: $ink-soft; border: solid $line;
+        height: 1; min-width: 8; width: 1fr; margin-right: 1; padding: 0 1;
+        background: $surface-raised; color: $ink-soft; border: none;
     }
-    #action-bar Button:hover { background: $surface-active; color: $ink; border: solid $accent; }
-    #action-bar Button:focus { border: solid $accent; text-style: bold; }
-    #action-bar Button.-primary { background: $accent; color: $accent-ink; border: none; }
-    #action-bar Button:disabled { background: $surface; color: $ink-muted; border: solid $line; }
+    #action-bar Button:hover { background: $surface-active; color: $ink; }
+    #action-bar Button:focus { background: $accent; color: $accent-ink; text-style: bold; }
+    #action-bar Button.-primary { background: $accent; color: $accent-ink; }
+    #action-bar Button.-primary:focus { text-style: bold underline; }
+    #action-bar Button:disabled { background: $surface; color: $ink-muted; }
     #status { height: 1; overflow: hidden; color: $ink-muted; }
     #keybar { height: 2; background: $surface; padding: 0 1; border-top: solid $line; }
     ModalScreen { align: center middle; background: $canvas 85%; }
@@ -2018,10 +2022,9 @@ class WorkbenchApp(App[None]):
     .panel-title { color: $ink; text-style: bold; padding-bottom: 1; }
     .panel-hint { color: $ink-muted; }
     .field { height: auto; }
-    .field-label { width: 16; color: $ink-soft; content-align: left middle; padding-top: 1; }
-    Input, Select { background: $canvas; border: solid $line; color: $ink; }
-    Input:focus, Select:focus { border: solid $accent; }
-    Input.-invalid { border: solid $danger; }
+    .field-label { width: 16; color: $ink-soft; content-align: left middle; }
+    Input, Select { background: $surface-raised; color: $ink; }
+    Input.-invalid, Select.-invalid { background: $danger; color: $canvas; }
     #providers, #palette, #model-picker { height: 90%; overflow: hidden; }
     #providers DataTable, #palette DataTable, #model-picker DataTable { height: 1fr; width: 1fr; }
     #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
@@ -2040,22 +2043,32 @@ class WorkbenchApp(App[None]):
     #palette-filter { margin-bottom: 1; width: 1fr; }
     ChoiceForm #choice-form { background: $surface; border: solid $line; }
     #form-status { color: $ink; text-style: bold; }
-    SelectCurrent, Select > SelectCurrent { background: $canvas; color: $ink; }
+    SelectCurrent, Select > SelectCurrent {
+        background: transparent; color: $ink; border: none; height: 1; padding: 0 1;
+    }
     SelectOverlay { background: $surface-raised; border: solid $line; color: $ink-soft; }
     SelectOverlay > .option-list--option-highlighted {
         background: $accent; color: $accent-ink; text-style: bold;
     }
-    Button { background: $surface-raised; color: $ink-soft; border: solid $line; min-width: 10; }
-    Button:hover { background: $surface-active; color: $ink; border: solid $accent; }
-    Button:focus { border: solid $accent; text-style: bold; }
+    Button {
+        background: $surface-raised; color: $ink-soft; border: none; height: 1;
+        padding: 0 1; min-width: 8;
+    }
+    Button:hover { background: $surface-active; color: $ink; }
+    Button:focus { background: $accent; color: $accent-ink; text-style: bold; }
     Button.-primary { background: $accent; color: $accent-ink; }
-    Button.-error { background: $surface-raised; color: $danger; border: solid $danger; }
+    Button.-primary:focus { text-style: bold underline; }
+    Button.-error { background: $surface-raised; color: $danger; }
+    Button.-error:focus { background: $danger; color: $canvas; text-style: bold; }
     Button:disabled { color: $ink-muted; background: $surface; text-style: none; }
     .field Input, .field Select { width: 1fr; }
-    Input { padding: 0 1; }
+    # Padding on Select itself swallows the click that opens its overlay; indent inside instead.
+    Input, Select { height: 1; border: none; padding: 0 1; overflow: hidden; scrollbar-size: 0 0; }
+    Select { padding: 0; }
+    Input:focus, Select:focus { background: $surface-active; }
     .dialog-actions { height: auto; margin-top: 1; }
     .dialog-actions Button { margin-right: 1; }
-    .sidebar-actions { height: 3; }
+    .sidebar-actions { height: 1; }
     .sidebar-actions Button { min-width: 8; width: 1fr; }
     #action-delete { width: 1fr; }
     .compact #sidebar { width: 26; min-width: 20; }

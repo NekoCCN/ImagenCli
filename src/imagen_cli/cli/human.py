@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import textwrap
 from typing import Any
 
 from imagen_cli.i18n import is_chinese, t
 
-__all__ = ["color_enabled", "render"]
+__all__ = ["render", "write"]
 
 _STATE_STYLE = {
     "succeeded": "green",
@@ -562,15 +561,10 @@ def _plain(value: dict[str, Any], width: int) -> list[str]:
     return wrapped
 
 
-def _rich(value: dict[str, Any], width: int) -> str:
-    from rich.console import Console
+def _rich(value: dict[str, Any], console: Any) -> None:
     from rich.panel import Panel
     from rich.table import Table
 
-    buffer = io.StringIO()
-    console = Console(
-        file=buffer, width=width, force_terminal=True, color_system="standard", highlight=False
-    )
     if not value.get("ok"):
         body = "\n".join(
             [
@@ -579,7 +573,7 @@ def _rich(value: dict[str, Any], width: int) -> str:
             ]
         )
         console.print(Panel(body, title=t("Failed", "失败"), border_style="red"))
-        return buffer.getvalue()
+        return
     data = value.get("data") or {}
     language = data.get("language")
     if isinstance(language, str):
@@ -846,11 +840,10 @@ def _rich(value: dict[str, Any], width: int) -> str:
         )
     ):
         console.print(json.dumps(data, ensure_ascii=False))
-    return buffer.getvalue()
 
 
-def render(value: dict[str, Any], *, columns: int | None = None, color: bool = False) -> str:
-    width = _columns(columns)
+def _text_summary(value: dict[str, Any]) -> str | None:
+    """Summaries that are plain text by design; None means use the panel layout."""
     data = value.get("data") or {}
     if value.get("ok") and len(data) == 1 and isinstance(data.get("version"), str):
         return f"imagen {data['version']}"
@@ -882,13 +875,45 @@ def render(value: dict[str, Any], *, columns: int | None = None, color: bool = F
             )
         )
         return "\n".join(lines)
-    text = _rich(value, width) if color else "\n".join(_plain(value, width))
-    return text.rstrip("\n")
+    return None
 
 
-def color_enabled(stream: Any) -> bool:
-    return bool(
-        getattr(stream, "isatty", lambda: False)()
-        and os.environ.get("NO_COLOR") is None
-        and os.environ.get("TERM") not in {None, "", "dumb"}
+def render(value: dict[str, Any], *, columns: int | None = None, color: bool = False) -> str:
+    summary = _text_summary(value)
+    if summary is not None:
+        return summary
+    width = _columns(columns)
+    if not color:
+        return "\n".join(_plain(value, width)).rstrip("\n")
+    from rich.console import Console
+
+    buffer = io.StringIO()
+    _rich(
+        value,
+        Console(
+            file=buffer, width=width, force_terminal=True, color_system="standard", highlight=False
+        ),
     )
+    return buffer.getvalue().rstrip("\n")
+
+
+def write(value: dict[str, Any], stream: Any, *, columns: int | None = None) -> None:
+    """Emit the human summary to a stream.
+
+    Styling and width come from Rich reading the stream itself, which is what
+    Windows consoles need; a pipe, ``NO_COLOR`` or a dumb terminal still gets
+    the plain layout.
+    """
+    summary = _text_summary(value)
+    if summary is not None:
+        stream.write(summary + "\n")
+        stream.flush()
+        return
+    from rich.console import Console
+
+    console = Console(file=stream, width=columns, highlight=False)
+    if console.is_terminal and not console.no_color:
+        _rich(value, console)
+        return
+    stream.write("\n".join(_plain(value, _columns(columns))) + "\n")
+    stream.flush()

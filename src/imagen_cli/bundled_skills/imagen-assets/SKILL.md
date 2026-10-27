@@ -41,7 +41,7 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3 --agent
 
 `superres` also runs same-size restoration: `film-degrainer` denoises and `dejpg-srformer-light` reduces JPEG artifacts. Neither enlarges the image. Inspect the catalog task, source, and license rather than inferring capabilities from the command name.
 
-Preview runtime installation with `imagen runtime install --backend cpu --agent`. After the user authorizes installing dependencies, add `--accept`. Available installation backends are `cpu`, `cuda`, and `openvino`. The command targets the current virtual environment, refuses system Python and conflicting ONNX packages, and does not install GPU drivers. Restart Imagen after installation. Dependency installation does not authorize weight downloads or paid provider calls.
+Preview runtime installation with `imagen superres install --backend cpu --agent` (no `--model` installs the runtime alone). After the user authorizes installing dependencies, add `--accept`. Available installation backends are `cpu`, `cuda`, and `openvino`. The command targets the current virtual environment, refuses system Python and conflicting ONNX packages, and does not install GPU drivers. Restart Imagen after installation. Dependency installation does not authorize weight downloads or paid provider calls.
 
 Inspect the catalog and let the user select a model and review its source/license. Only download after explicit approval; this example does not select a model for the user:
 

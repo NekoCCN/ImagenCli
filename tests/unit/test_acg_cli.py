@@ -10,7 +10,7 @@ def test_superres_install_is_discoverable_and_accepts_a_model():
     assert schema["properties"]["model"]["type"] == "string"
     assert schema["properties"]["backend"]["default"] == "cpu"
     assert schema["properties"]["accept"]["default"] is False
-    assert schema["required"] == ["model"]
+    assert schema.get("required", []) == []  # no model means: runtime only
     assert "superres install" in {row["name"] for row in command["commands"]}
 
 

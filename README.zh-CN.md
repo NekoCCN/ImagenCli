@@ -401,11 +401,11 @@ imagen superres install --model realesr-animevideov3
 imagen superres install --model realesr-animevideov3 --accept
 ```
 
-也可以只安装运行时（第一条仅预览）：
+也可以只安装运行时，不给 `--model` 即可（第一条仅预览）：
 
 ```bash
-imagen runtime install --backend cpu
-imagen runtime install --backend cpu --accept
+imagen superres install --backend cpu
+imagen superres install --backend cpu --accept
 ```
 
 命令只安装到当前 ImagenCli 所在虚拟环境，拒绝修改系统 Python。

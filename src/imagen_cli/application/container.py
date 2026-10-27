@@ -206,13 +206,6 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
-        if command == "runtime install":
-            from jsonschema import validate
-
-            from imagen_cli.application import runtime_service
-
-            validate(args, discover(command)["input_schema"])
-            return runtime_service.install(**args)
         if command == "update":
             from imagen_cli.application import update_service
 
@@ -436,7 +429,7 @@ class Container:
                 return "succeeded", superres.catalog()
             if command == "superres install":
                 return "succeeded", superres.install(
-                    args["model"],
+                    args.get("model"),
                     backend=args.get("backend", "cpu"),
                     accept=args.get("accept") is True,
                 )

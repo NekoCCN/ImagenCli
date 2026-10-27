@@ -2,6 +2,7 @@
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -174,3 +175,29 @@ def test_install_rejects_unknown_model(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="unknown super-resolution model"):
         superres.install(["not-a-model"], accept=False)
+
+
+def test_install_without_a_model_touches_only_the_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(superres, "available_providers", lambda: [])
+    calls: list[dict[str, Any]] = []
+
+    def runtime_install(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+        calls.append(kwargs)
+        return "succeeded", {"installed": True}
+
+    preview = superres.install(
+        None, accept=False, runtime_install=runtime_install, download=lambda *args: calls.append({})
+    )
+    assert calls == []
+    assert preview["models"] == []
+    assert preview["installed"] is False
+    assert "runtime_installed" in preview
+
+    data = superres.install(
+        None, accept=True, backend="cpu", runtime_install=runtime_install
+    )
+    assert calls == [{"backend": "cpu", "accept": True}]
+    assert data["models"] == []
+    assert data["runtime_installed"] is True
+    assert data["installed"] is True

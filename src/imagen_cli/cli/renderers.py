@@ -150,11 +150,9 @@ class Renderer:
                 }
             )
         elif self.mode == "human":
-            from imagen_cli.cli.human import color_enabled, render
+            from imagen_cli.cli.human import write
 
-            safe = redact(value)
-            self.stdout.write(render(safe, color=color_enabled(self.stdout)) + "\n")
-            self.stdout.flush()
+            write(redact(value), self.stdout)
             self.ended = True
         else:
             self._write(value)

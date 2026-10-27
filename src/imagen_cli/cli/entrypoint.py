@@ -399,7 +399,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             f"imagen help {command}",
         )
     schema = discover(command)["input_schema"]
-    if command in {"update", "runtime install"}:
+    if command == "update":
         if words:
             raise _no_positional(command, words)
         validate(parameters, schema)
@@ -683,7 +683,7 @@ def main(
                 for name in selected:
                     argv.extend(["--target", name])
             if (
-                argv[:2] in (["superres", "fetch"], ["superres", "install"])
+                argv[:2] == ["superres", "fetch"]
                 and not any(
                     value in {"--help", "-h", "--model"} or value.startswith("--model=")
                     for value in argv
@@ -708,14 +708,6 @@ def main(
                         "Download size is unknown; review the source and license first. "
                         "Download now? [y/N] ",
                         "下载大小未知；请先查阅来源许可。确认下载？[y/N] ",
-                    )
-                    if argv[:2] == ["superres", "fetch"]
-                    else i18n.t(
-                        "This installs the inference runtime into this environment and "
-                        "downloads the selected weights; review the source and license first. "
-                        "Continue? [y/N] ",
-                        "将把推理运行时安装到当前环境并下载所选权重；请先查阅来源与许可。"
-                        "继续？[y/N] ",
                     )
                 )
                 stderr.flush()

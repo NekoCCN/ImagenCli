@@ -20,7 +20,7 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
     ChoiceForm { align: center middle; }
     ChoiceForm #choice-form { width: 90%; max-width: 100; height: 90%; padding: 1 2;
                               background: $surface; border: round $primary; }
-    ChoiceForm Static { height: auto; margin-bottom: 1; }
+    ChoiceForm Static { height: auto; }
     ChoiceForm Input, ChoiceForm Select { margin-bottom: 1; }
     """
     BINDINGS = [Binding("escape", "cancel", "Cancel")]

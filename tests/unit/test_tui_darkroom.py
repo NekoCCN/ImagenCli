@@ -9,7 +9,7 @@ from imagen_cli.cli.tui.app import WorkbenchApp
 from imagen_cli.cli.tui.forms import ChoiceForm
 
 
-def test_action_buttons_have_room_for_text_and_borders():
+def test_action_buttons_are_single_line_with_room_for_text():
     class Harness(App):
         CSS = WorkbenchApp.CSS
 
@@ -22,7 +22,60 @@ def test_action_buttons_have_room_for_text_and_borders():
         app = Harness()
         async with app.run_test(size=(80, 24)):
             button = app.query_one(Button)
-            assert button.content_size.height >= 1
+            assert button.region.height == 1
+            assert button.content_size.height == 1
+            assert button.content_size.width >= len("Edit")
+
+    asyncio.run(exercise())
+
+
+def test_field_inputs_are_single_line():
+    from textual.containers import Horizontal, Vertical
+    from textual.widgets import Input, Static
+
+    class Harness(App):
+        CSS = WorkbenchApp.CSS
+
+        def compose(self):
+            with Vertical(classes="panel"):
+                yield Horizontal(
+                    Static("Model", classes="field-label"), Input(id="model"), classes="field"
+                )
+
+    async def exercise():
+        app = Harness()
+        async with app.run_test(size=(100, 30)):
+            field = app.query_one(Input)
+            assert field.region.height == 1
+            assert field.content_size.height == 1
+
+    asyncio.run(exercise())
+
+
+def test_single_line_select_still_opens_its_choices():
+    """A one-row Select must not clip the overlay it opens below itself."""
+    from textual.containers import Vertical
+    from textual.widgets import Select
+    from textual.widgets._select import SelectOverlay
+
+    class Harness(App):
+        CSS = WorkbenchApp.CSS
+
+        def compose(self):
+            with Vertical(classes="panel"):
+                yield Select([("one", "one"), ("two", "two")], id="model")
+
+    async def exercise():
+        app = Harness()
+        async with app.run_test(size=(80, 24)) as pilot:
+            select = app.query_one(Select)
+            assert select.region.height == 1
+            await pilot.click(Select)
+            await pilot.pause()
+            overlay = app.query_one(SelectOverlay)
+            assert overlay.display
+            assert overlay.region.height >= 2
+            assert overlay.region.bottom <= 24
 
     asyncio.run(exercise())
 

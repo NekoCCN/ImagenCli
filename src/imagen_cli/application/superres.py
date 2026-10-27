@@ -470,7 +470,7 @@ def fetch(model: str, *, accept: bool = False) -> dict[str, Any]:
 
 
 def install(
-    models: str | list[str],
+    models: str | list[str] | None = None,
     *,
     backend: str = "cpu",
     accept: bool = False,
@@ -479,13 +479,14 @@ def install(
 ) -> dict[str, Any]:
     """Preview or install the inference runtime and requested model weights.
 
-    Nothing is installed or downloaded unless ``accept`` is true. Runtime
-    installation and weight download are separate steps so a missing backend
-    never silently falls back and weights never arrive by accident.
+    Without model names only the runtime is handled. Nothing is installed or
+    downloaded unless ``accept`` is true. Runtime installation and weight
+    download are separate steps so a missing backend never silently falls back
+    and weights never arrive by accident.
     """
-    names = [models] if isinstance(models, str) else list(models)
-    if not names or len(set(names)) != len(names):
-        raise ValueError("install needs one or more distinct model names")
+    names = [] if models is None else ([models] if isinstance(models, str) else list(models))
+    if len(set(names)) != len(names):
+        raise ValueError("install needs distinct model names")
     for name in names:
         if name not in MANIFEST:
             raise ValueError("unknown super-resolution model")
@@ -535,6 +536,9 @@ def install(
         data["hint"] = (
             "Review each license and source, then rerun with --accept to install "
             "the runtime and download the selected weights."
+            if names
+            else "No model selected: --accept installs only the runtime. "
+            "Add --model NAME (see: imagen superres models) to include weights."
         )
     return data
 

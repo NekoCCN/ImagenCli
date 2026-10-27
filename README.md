@@ -430,11 +430,11 @@ imagen superres install --model realesr-animevideov3
 imagen superres install --model realesr-animevideov3 --accept
 ```
 
-Install the optional runtime explicitly (the first command only previews):
+Install the runtime alone by leaving `--model` out (the first command only previews):
 
 ```bash
-imagen runtime install --backend cpu
-imagen runtime install --backend cpu --accept
+imagen superres install --backend cpu
+imagen superres install --backend cpu --accept
 ```
 
 The command targets the running ImagenCli virtual environment, never system Python.

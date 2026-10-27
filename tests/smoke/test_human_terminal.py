@@ -70,6 +70,46 @@ def test_colored_terminal_uses_panels_and_tables(tmp_path):
     assert "费用：未知" in text
 
 
+_ERROR = {
+    "schema_version": 1, "ok": False, "status": "validation_error",
+    "data": {}, "error": {"message": "命令未成功完成。"},
+}
+
+
+def test_a_terminal_is_enough_for_styling_without_a_term_variable(tmp_path, monkeypatch):
+    """Windows consoles never set TERM, so Rich — not an env check — decides styling."""
+    import fcntl
+    import os
+    import pty
+    import struct
+    import termios
+
+    from imagen_cli.cli.renderers import Renderer
+
+    for name in ("TERM", "NO_COLOR", "FORCE_COLOR", "WT_SESSION"):
+        monkeypatch.delenv(name, raising=False)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    with os.fdopen(slave, "w", encoding="utf-8") as stream:
+        code = Renderer("human", stdout=stream).finish(_ERROR)
+    output = os.read(master, 65536).decode("utf-8", "replace")
+    os.close(master)
+    assert code == 2
+    assert "\x1b[" in output
+    assert "失败" in output
+
+
+def test_piped_human_output_stays_plain_text():
+    import io
+
+    from imagen_cli.cli.renderers import Renderer
+
+    buffer = io.StringIO()
+    Renderer("human", stdout=buffer).finish(_ERROR)
+    assert "\x1b[" not in buffer.getvalue()
+    assert buffer.getvalue().startswith("失败：")
+
+
 def test_empty_result_and_refusal_and_partial_are_rendered_truthfully():
     empty = render({"ok": True, "status": "succeeded", "data": {}})
     assert empty

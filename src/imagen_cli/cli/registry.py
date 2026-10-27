@@ -92,9 +92,8 @@ COMMANDS = {
                 ("compare", "计算两个产物的 PSNR 与 SSIM；只读，不创建新产物"),
                 ("sheet", "把多个产物拼成联系表并生成新产物"),
                 ("ops", "列出可用的确定性变换操作"),
-                ("runtime install", "预览或确认安装本地推理依赖；需 --accept 才安装"),
                 ("superres models", "列出超分模型、许可、下载与安装状态"),
-                ("superres install", "显式安装推理运行时并下载所选模型；需 --accept"),
+                ("superres install", "装运行时与所选模型；不给 --model 只装运行时；需 --accept"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
                 ("language", "查看或设置默认界面语言"),
@@ -175,11 +174,9 @@ _SUMMARY_EN = {
     "compare": "Compute PSNR and SSIM for two artifacts; read-only, creates no artifact",
     "sheet": "Compose artifacts into a contact sheet as a new artifact",
     "ops": "List available deterministic transform operations",
-    "runtime install": "Preview inference dependency installation; "
-    "--accept installs into this venv",
     "superres models": "List upscaling models, licenses, download and install state",
-    "superres install": "Install the inference runtime and download selected models; "
-    "requires --accept",
+    "superres install": "Install the inference runtime and any named models; "
+    "without --model it installs only the runtime; requires --accept",
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
@@ -385,11 +382,6 @@ def _input_schema(name: str) -> dict[str, Any]:
             "verbose": {"type": "boolean"},
         }
         required = ()
-    elif name == "runtime install":
-        properties = {
-            "backend": {"enum": ["cpu", "cuda", "openvino"], "default": "cpu"},
-            "accept": {"type": "boolean", "default": False},
-        }
     elif name == "superres models":
         properties = {}
         required = ()
@@ -399,7 +391,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "backend": {"enum": ["cpu", "cuda", "openvino"], "default": "cpu"},
             "accept": {"type": "boolean", "default": False},
         }
-        required = ("model",)
+        required = ()
     elif name == "superres fetch":
         properties = {"model": text, "accept": {"const": True}}
         required = ("model", "accept")
@@ -475,12 +467,6 @@ def _data_schema(command: Command) -> dict[str, Any]:
             },
             ("artifact", "sources"),
         )
-    if command.name == "runtime install":
-        return _object({
-            "backend": {"type": "string"}, "environment": {"type": "string"},
-            "python": {"type": "string"}, "command": {"type": "array"},
-            "packages": {"type": "object"}, "installed": {"type": "boolean"},
-        }, ("backend", "environment", "python", "command", "packages", "installed"))
     if command.name == "superres models":
         return _object(
             {
