@@ -394,6 +394,32 @@ imagen superres fetch --model realesrgan-x4plus --accept
 imagen superres benchmark --artifact ARTIFACT_ID --model realesrgan-x4plus
 ```
 
+显式安装可选推理依赖（第一条仅预览）：
+
+```bash
+imagen runtime install --backend cpu
+imagen runtime install --backend cpu --accept
+```
+
+命令只安装到当前 ImagenCli 所在虚拟环境，拒绝修改系统 Python。
+CUDA 或 OpenVINO 需显式选择 `cuda` 或 `openvino`；检测到其他 ONNX 后端包时拒绝安装，
+不会擅自卸载或切换后端，也不安装显卡驱动。安装后请重启 ImagenCli。
+源码环境后续执行 `uv run` / `uv sync` 时仍需保留 `--extra ai-onnx`（或所选后端 extra）。
+TUI 命令面板提供同样的后端与确认选项。
+
+原尺寸降噪和 JPEG 伪影清理复用现有 `superres` 操作：
+
+```bash
+imagen superres fetch --model film-degrainer --accept
+imagen transform ARTIFACT_ID --op superres:model=film-degrainer
+imagen superres fetch --model dejpg-srformer-light --accept
+imagen transform ARTIFACT_ID --op superres:model=dejpg-srformer-light
+```
+
+Film-Degrainer（tika）标记为 CC0-1.0；DeJPG_SRFormer_light（Helaman）为 CC BY 4.0，
+要求保留署名并说明变更。两者均为 notaneimu 的社区 ONNX 转换，不是官方导出。
+`imagen superres models` 显示来源与许可说明；这两种模型不放大图片，也不保证提升画质。
+
 下载会先进入临时目录，按固定 SHA-256 摘要校验，再发布到权重目录。失败或摘要不符不会留下可用权重。
 
 Imagen 不会静默安装超分运行依赖或权重。源码许可不等于模型权重许可。模型重建的纹理不保证存在于原图中。

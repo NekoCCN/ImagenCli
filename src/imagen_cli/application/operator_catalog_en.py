@@ -90,9 +90,9 @@ OPERATORS: dict[str, dict[str, str]] = {
         "neighbor expansion.",
     },
     "superres": {
-        "name": "Super-Resolution",
-        "description": "Single-image super-resolution based on deep residual convolution and "
-        "self-attention networks.",
+        "name": "Model Restoration",
+        "description": "Local model inference for upscaling, same-size denoising or JPEG cleanup; "
+        "the selected weights determine the task.",
     },
     "aces_tonemap": {
         "name": "ACES Filmic Tone",

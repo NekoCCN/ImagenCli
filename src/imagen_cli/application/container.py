@@ -206,6 +206,13 @@ class Container:
             )
         if not isinstance(args, dict):
             return "unsupported_capability", {}
+        if command == "runtime install":
+            from jsonschema import validate
+
+            from imagen_cli.application import runtime_service
+
+            validate(args, discover(command)["input_schema"])
+            return runtime_service.install(**args)
         if command == "update":
             from imagen_cli.application import update_service
 

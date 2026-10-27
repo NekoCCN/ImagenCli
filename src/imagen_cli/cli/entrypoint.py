@@ -361,7 +361,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             f"imagen help {command}",
         )
     schema = discover(command)["input_schema"]
-    if command == "update":
+    if command in {"update", "runtime install"}:
         if words:
             raise _no_positional(command, words)
         validate(parameters, schema)

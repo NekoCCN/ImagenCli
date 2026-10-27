@@ -775,10 +775,10 @@ OPERATORS: list[OperatorItem] = [
     # --- Super-Resolution ---
     OperatorItem(
         key="superres",
-        name="AI 超分辨率 (Super-Resolution)",
+        name="AI 模型恢复 (Model Restoration)",
         category="superres",
         category_label=CATEGORIES["superres"],
-        description="基于深度残差卷积与自注意力网络的单图像超分辨率重构算子。",
+        description="本地模型推理：超分辨率、原尺寸降噪或 JPEG 伪影清理；任务取决于所选权重。",
         default_op="superres",
         default_params={"model": "realesrgan-x4plus-anime", "tile": 256, "overlap": 16},
         parameters=[
@@ -793,6 +793,8 @@ OPERATORS: list[OperatorItem] = [
                     "realesrgan-x2plus",
                     "swinir-s-x2",
                     "swinir-s-x4",
+                    "film-degrainer",
+                    "dejpg-srformer-light",
                 ],
                 description="用于推理重构的预训练权重结构",
             ),

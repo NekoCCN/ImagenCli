@@ -39,6 +39,37 @@ def test_overlapping_tiles_are_averaged():
     assert np.allclose(result, 10.1, atol=0.01)
 
 
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+def test_nonfinite_model_output_is_rejected(value):
+    def invalid(tile):
+        return np.full((tile.shape[0] * 4, tile.shape[1] * 4, 3), value)
+
+    with pytest.raises(ValueError, match="finite"):
+        superres.upscale(Image.new("RGB", (4, 4)), runner=invalid)
+
+
+def test_x2_model_pads_odd_dimensions():
+    pytest.importorskip("onnxruntime")
+    # Exercise the real exported model when available, without downloading.
+    path = superres.weights_path("realesrgan-x2plus")
+    if not path.exists():
+        pytest.skip("local x2 model is not installed")
+    output, _ = superres.upscale(
+        Image.new("RGB", (9, 7)), model="realesrgan-x2plus", backend="cpu",
+    )
+    assert output.size == (18, 14)
+
+
+@pytest.mark.parametrize("model", ["film-degrainer", "dejpg-srformer-light"])
+def test_restoration_models_preserve_dimensions_and_alpha(model):
+    source = Image.new("RGBA", (9, 7), (80, 120, 160, 128))
+    output, _ = superres.upscale(source, model=model, runner=lambda tile: tile)
+    assert output.size == (9, 7)
+    assert output.getpixel((0, 0)) == (80, 120, 160, 128)
+    entry = next(item for item in superres.catalog()["models"] if item["model"] == model)
+    assert entry["task"] in {"denoise", "dejpeg"}
+
+
 def test_unknown_model_and_backend_are_refused():
     image = Image.new("RGB", (4, 4))
     with pytest.raises(ValueError, match="unknown super-resolution model"):

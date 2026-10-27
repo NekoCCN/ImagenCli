@@ -1,6 +1,6 @@
 ---
 name: imagen-assets
-version: 1.1.0
+version: 1.2.0
 description: Use when browsing or resuming Imagen sessions, opening or exporting artifacts, applying local transforms, comparing images, upscaling, or reclaiming workspace disk space.
 ---
 
@@ -37,7 +37,11 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3 --agent
 
 `transform` requires `--op`, `--pipeline`, or `--preset`. `compare` reports PSNR/SSIM without creating an artifact. A contact sheet infers a common source session; use `--session` for inputs from different sessions. Postprocessing is experimental: metric changes do not establish better perceptual quality.
 
-## Upscaling
+## Model restoration and runtime installation
+
+`superres` also runs same-size restoration: `film-degrainer` denoises and `dejpg-srformer-light` reduces JPEG artifacts. Neither enlarges the image. Inspect the catalog task, source, and license rather than inferring capabilities from the command name.
+
+Preview runtime installation with `imagen runtime install --backend cpu --agent`. After the user authorizes installing dependencies, add `--accept`. Available installation backends are `cpu`, `cuda`, and `openvino`. The command targets the current virtual environment, refuses system Python and conflicting ONNX packages, and does not install GPU drivers. Restart Imagen after installation. Dependency installation does not authorize weight downloads or paid provider calls.
 
 Inspect the catalog and let the user select a model and review its source/license. Only download after explicit approval; this example does not select a model for the user:
 

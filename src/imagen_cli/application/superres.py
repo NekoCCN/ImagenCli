@@ -15,6 +15,22 @@ from PIL import Image
 # The x2/x4 entries are pinned exports of the canonical Real-ESRGAN weights; the
 # anime entry has no maintained ONNX release, so users place it themselves.
 MANIFEST: dict[str, dict[str, Any]] = {
+    "film-degrainer": {
+        "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1x-Film-Degrainer-1-000.onnx",
+        "sha256": "8dae380741328caf5bf3abe29636732dc2db9b7e7a9a812d7314279cc7e682fa",
+        "scale": 1, "task": "denoise", "license": "CC0-1.0",
+        "source": "https://openmodeldb.info/models/1x-Film-Degrainer-1-000",
+        "note": "Film-Degrainer by tika; community ONNX conversion by notaneimu",
+    },
+    "dejpg-srformer-light": {
+        "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1xDeJPG_SRFormer_light_fp32_64.onnx",
+        "sha256": "63e85f102025f024aa92eb2d9a73851b5c3a342e6aedebd02f2bff985ef3bd3b",
+        "scale": 1, "task": "dejpeg", "multiple": 8, "fixed_input": 64,
+        "license": "CC-BY-4.0",
+        "source": "https://openmodeldb.info/models/1x-DeJPG-SRFormer-light",
+        "note": "DeJPG_SRFormer_light by Helaman; ONNX conversion by notaneimu; "
+                "attribution and indication of changes required",
+    },
     "realesrgan-x4plus": {
         "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x4.onnx",
         "sha256": "5c586662929cbc686c1a5c38d9c060dbdb4ea5863a1f7672b8c0761e6b89c033",
@@ -24,7 +40,7 @@ MANIFEST: dict[str, dict[str, Any]] = {
     "realesrgan-x2plus": {
         "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x2.onnx",
         "sha256": "7115ba92e8a1bfa63d68558ef006ef3d91273a068d321b1439f8bb1c9179002c",
-        "scale": 2, "license": "BSD-3-Clause",
+        "scale": 2, "license": "BSD-3-Clause", "multiple": 2,
         "source": "https://huggingface.co/SceneWorks/real-esrgan-onnx",
     },
     "realesrgan-x4plus-anime": {
@@ -305,6 +321,8 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
         output = session.run(  # type: ignore[no-untyped-call, unused-ignore]
             None, {name: chw}
         )[0]
+        if not numpy.isfinite(output).all():
+            raise ValueError("model output must contain only finite values")
         result = numpy.squeeze(output, axis=0)
         result = numpy.transpose(result, (1, 2, 0))
         scale = int(MANIFEST[model]["scale"])
@@ -345,6 +363,8 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
             expected = ((y1 - y0) * scale, (x1 - x0) * scale, 3)
             if piece.shape != expected:
                 raise ValueError("model output shape does not match its scale")
+            if not numpy.isfinite(piece).all():
+                raise ValueError("model output must contain only finite values")
             area = (
                 slice(top * scale - y0 * scale, bottom * scale - y0 * scale),
                 slice(left * scale - x0 * scale, right * scale - x0 * scale),
@@ -403,6 +423,7 @@ def catalog() -> dict[str, Any]:
         path = weights_path(name)
         models.append({
             "model": name,
+            "task": entry.get("task", "upscale"),
             "scale": entry["scale"],
             "license": entry["license"],
             "source": entry["source"],

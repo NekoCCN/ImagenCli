@@ -422,6 +422,34 @@ imagen superres fetch --model realesrgan-x4plus --accept
 imagen superres benchmark --artifact ARTIFACT_ID --model realesrgan-x4plus
 ```
 
+Install the optional runtime explicitly (the first command only previews):
+
+```bash
+imagen runtime install --backend cpu
+imagen runtime install --backend cpu --accept
+```
+
+The command targets the running ImagenCli virtual environment, never system Python.
+Choose `cuda` or `openvino` explicitly for those distributions; conflicting ONNX runtime
+packages are refused, not silently removed. GPU drivers are not installed. Restart
+ImagenCli after installation. In a uv-managed source checkout, keep `--extra ai-onnx`
+(or the selected backend extra) in subsequent `uv run`/`uv sync` commands.
+The TUI command palette exposes the same backend and acceptance choices.
+
+Same-size restoration also uses the existing `superres` operation:
+
+```bash
+imagen superres fetch --model film-degrainer --accept
+imagen transform ARTIFACT_ID --op superres:model=film-degrainer
+imagen superres fetch --model dejpg-srformer-light --accept
+imagen transform ARTIFACT_ID --op superres:model=dejpg-srformer-light
+```
+
+Film-Degrainer by tika is listed as CC0-1.0. DeJPG_SRFormer_light by Helaman is
+CC BY 4.0: retain attribution and indicate changes. These are community ONNX
+conversions by notaneimu, not official exports. Sources and license notes appear
+in `imagen superres models`; neither model enlarges the image or guarantees improvement.
+
 Downloaded weights are staged, checked against a pinned SHA-256 digest, and only then published into the weights directory. Failed or mismatched downloads leave no usable weight behind.
 
 Imagen does not silently install the upscaling runtime or weights. A source-code license does not grant permission to use model weights. Reconstructed texture is not guaranteed to have existed in the original image.
