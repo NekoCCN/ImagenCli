@@ -1126,7 +1126,14 @@ class TransformScreen(Modal[bool]):
                 for step in pipeline
             ])
 
-        self.app.push_screen(LocalModelScreen(current), chosen)
+        fetch = (
+            (lambda model: _executor(self.deps)(
+                "superres fetch", {"model": model, "accept": True}
+            ))
+            if self.deps.execute is not None
+            else None
+        )
+        self.app.push_screen(LocalModelScreen(current, fetch=fetch), chosen)
 
     def _run_pipeline(self, pipeline: list[dict[str, Any]]) -> None:
         assert self.deps.transform is not None
@@ -1395,28 +1402,40 @@ class SuperresScreen(Modal[bool]):
 
 
 class LocalModelScreen(Modal[str | None]):
-    """Pick the local model for one transform run; nothing runs before this is answered."""
+    """Pick the local model for one transform run; nothing runs before this is answered.
+
+    Weights that are not on disk yet are asked about, never fetched behind the user's back.
+    """
 
     BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
 
-    def __init__(self, current: str = "") -> None:
+    def __init__(
+        self,
+        current: str = "",
+        *,
+        fetch: Callable[[str], tuple[str, dict[str, Any]]] | None = None,
+    ) -> None:
         super().__init__()
         self.current = current
-        self.rows = list(superres.catalog()["models"])
+        self.fetch = fetch
+        self.downloading = False
+        self.rows: list[dict[str, Any]] = []
         self.table: DataTable[Any] = DataTable(id="local-model-table")
+        self.status = Static("", id="local-model-status")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(t("Choose the local model", "选择本地模型"), classes="panel-title"),
             Static(
                 t(
-                    "Weights run on this machine; licence and source are below. Fetch a model "
-                    "that is not downloaded yet in the local models panel (s).",
-                    "权重在本机推理；许可与来源见下表。尚未下载的模型在本地模型面板（s）下载。",
+                    "Weights run on this machine; licence and source are below. A model that "
+                    "is not on disk is downloaded only after you confirm it.",
+                    "权重在本机推理；许可与来源见下表。尚未下载的模型会先问你，确认后才下载。",
                 ),
                 classes="panel-hint",
             ),
             self.table,
+            self.status,
             Horizontal(
                 Button(t("Apply", "应用"), id="local-model-apply", variant="primary"),
                 Button(t("Cancel", "取消"), id="local-model-cancel"),
@@ -1431,10 +1450,86 @@ class LocalModelScreen(Modal[str | None]):
         self.table.add_columns(
             t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"), t("State", "状态")
         )
+        self._populate(self.current)
+
+    def on_data_table_row_highlighted(self, _: DataTable.RowHighlighted) -> None:
+        self._describe()
+
+    def _populate(self, select: str = "") -> None:
+        self.rows = list(superres.catalog()["models"])
+        self.table.clear()
         for row in self.rows:
             self.table.add_row(*_weights_cells(row), key=_sanitize(row["model"]))
         names = [str(row["model"]) for row in self.rows]
-        self.table.move_cursor(row=names.index(self.current) if self.current in names else 0)
+        if names:
+            self.table.move_cursor(row=names.index(select) if select in names else 0)
+            self._describe()
+
+    def _current(self) -> dict[str, Any] | None:
+        if not self.rows or self.table.row_count == 0:
+            return None
+        return self.rows[self.table.cursor_coordinate.row]
+
+    def _describe(self) -> None:
+        row = self._current()
+        if row is None:
+            return
+        tail = (
+            t("enter runs it", "enter 应用")
+            if row["downloaded"]
+            else t("enter asks to download it first", "enter 会先问是否下载")
+        )
+        self.status.update(
+            f"{_sanitize(row['model'])} · {_weights_cells(row)[3]} · {tail}"
+        )
+
+    def _choose(self) -> None:
+        row = self._current()
+        if row is None or self.downloading:
+            return
+        model = str(row["model"])
+        if row["downloaded"]:
+            self.dismiss(model)
+            return
+        if self.fetch is None:
+            self.status.update(t(f"{model} is not on disk yet", f"{model} 尚未下载"))
+            return
+
+        def confirmed(answer: bool | None) -> None:
+            if answer:
+                self._start_download(model)
+
+        self.app.push_screen(
+            ConfirmScreen(
+                t(
+                    f"Download {model} from {row['source']}? License: {row['license']}",
+                    f"从 {row['source']} 下载 {model}？许可：{row['license']}",
+                )
+            ),
+            confirmed,
+        )
+
+    def _start_download(self, model: str) -> None:
+        self.downloading = True
+        self.status.update(t(f"Downloading {model}…", f"正在下载 {model}…"))
+        self._download(model)
+
+    @work(thread=True, group="local-model-download")
+    def _download(self, model: str) -> None:
+        try:
+            status, _ = self.fetch(model) if self.fetch else ("failed", {})
+            message = t(f"{model}: {status} · enter runs it", f"{model}：{status} · enter 应用")
+        except Exception as error:  # noqa: BLE001 - reported in the panel
+            message = _sanitize(error)
+        self.app.call_from_thread(self._downloaded, message)
+
+    def _downloaded(self, message: str) -> None:
+        if not self.is_mounted:
+            return
+        self.downloading = False
+        row = self._current()
+        self._populate(str(row["model"]) if row else "")
+        self.status.update(message)
 
     def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
         self._choose()
@@ -1445,11 +1540,6 @@ class LocalModelScreen(Modal[str | None]):
             self._choose()
         elif event.button.id == "local-model-cancel":
             self.action_cancel()
-
-    def _choose(self) -> None:
-        if self.table.row_count:
-            key = self.table.coordinate_to_cell_key(self.table.cursor_coordinate).row_key
-            self.dismiss(str(key.value) if key.value else None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)

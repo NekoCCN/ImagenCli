@@ -2152,6 +2152,9 @@ def test_transform_panel_asks_before_running_a_local_model(deps):
         return {"artifact": {"id": "art_" + "e" * 32}}
 
     deps_value.transform = transform
+    weights = superres.weights_path("realesr-animevideov3")
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"weights")
     identity = "art_" + "e" * 32
     session = f"ses_{0:032x}"
     buffer = BytesIO()
@@ -2193,6 +2196,86 @@ def test_transform_panel_asks_before_running_a_local_model(deps):
             assert len(calls) == 1
             assert calls[0][1] == [
                 {"op": "superres", "params": {"model": "realesr-animevideov3", "accept": True}}
+            ]
+
+    asyncio.run(run())
+
+
+def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatch, tmp_path):
+    """A model that is not on disk is asked about, downloaded, and only then run."""
+    from io import BytesIO
+
+    from textual.widgets import DataTable, Static
+
+    module = _superres_workspace(monkeypatch, tmp_path)
+    from imagen_cli.application.superres import catalog
+
+    deps_value, _ = deps
+    commands = []
+    runs = []
+
+    def execute(command, arguments):
+        commands.append((command, arguments))
+        target = module.weights_path(arguments["model"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"weights")
+        return "succeeded", {}
+
+    deps_value.execute = execute
+    deps_value.transform = lambda artifact, pipeline, session: (
+        runs.append(pipeline), {"artifact": {"id": "art_" + "f" * 32}}
+    )[1]
+    identity = "art_" + "f" * 32
+    buffer = BytesIO()
+    Image.new("RGB", (16, 16), "blue").save(buffer, format="PNG")
+    deps_value.store.stage(identity, buffer.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": f"ses_{0:032x}", "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    model = "realesr-animevideov3"
+    assert catalog()["models"][[r["model"] for r in catalog()["models"]].index(model)][
+        "downloaded"
+    ] is False
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            app.screen.table.move_cursor(row=app.screen.names.index("superres"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            chooser = app.screen
+            table = chooser.query_one("#local-model-table", DataTable)
+            names = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+            table.move_cursor(row=names.index(model))
+            await pilot.pause()
+            assert "未下载" in str(chooser.query_one("#local-model-status", Static).render())
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"  # asked before fetching
+            assert commands == [] and runs == []
+            await pilot.press("y")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert commands == [("superres fetch", {"model": model, "accept": True})]
+            assert runs == []  # downloading is not running
+            table = app.screen.query_one("#local-model-table", DataTable)
+            row = next(
+                table.get_row_at(i)
+                for i in range(table.row_count)
+                if str(table.get_row_at(i)[0]) == model
+            )
+            assert "已下载" in str(row[-1])
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runs == [
+                [{"op": "superres", "params": {"model": model, "accept": True}}]
             ]
 
     asyncio.run(run())
