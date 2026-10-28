@@ -834,6 +834,18 @@ class TransformScreen(Modal[bool]):
             k: [dict(step, params=dict(step.get("params", {}))) for step in v]
             for k, v in PRESETS.items()
         }
+        # Local model restoration is reachable from the panel, but the model and its licence
+        # are asked for on every run instead of being baked into a catalogue entry.
+        from imagen_cli.application import operator_catalog
+
+        item = operator_catalog.get_operator_item("superres")
+        if item is not None:
+            # Name and group are the CLI's own labels for this operator's category.
+            label = operator_catalog.category_label(item.category)
+            self.entries["superres"] = {"key": "superres", "name": label, "group": label}
+            self.pipelines["superres"] = [{"op": "superres", "params": {}}]
+            self.all_names.append("superres")
+            self.filtered_names.append("superres")
         self.category_table: DataTable[Any] = DataTable(id="transform-categories")
         self.table: DataTable[Any] = DataTable(id="transform-presets")
         self.status = Static("")
@@ -984,6 +996,10 @@ class TransformScreen(Modal[bool]):
         self.table.move_cursor(row=row)
         self.render_preview()
 
+    def _pipeline(self, name: str) -> list[dict[str, Any]]:
+        """Edited parameters win; PRESETS is the catalogue default. Never index it eagerly."""
+        return self.pipelines.get(name) or PRESETS[name]
+
     def _describe_pipeline(self, pipeline: list[dict[str, Any]]) -> str:
         parts = []
         for step in pipeline:
@@ -1002,7 +1018,7 @@ class TransformScreen(Modal[bool]):
             return
         name = self.names[row]
         display = self.entries[name]["name"]
-        pipeline = self.pipelines.get(name, PRESETS[name])
+        pipeline = self._pipeline(name)
         from imagen_cli.application import operator_catalog
 
         intro_text = operator_catalog.get_intro_text(name)
@@ -1059,7 +1075,7 @@ class TransformScreen(Modal[bool]):
             return
         name = self.names[row]
         display = self.entries[name]["name"]
-        pipeline = self.pipelines.get(name, PRESETS[name])
+        pipeline = self._pipeline(name)
         from imagen_cli.application.operator_catalog import get_operator_item
 
         def _step_has_params(step: dict[str, Any]) -> bool:
@@ -1090,8 +1106,30 @@ class TransformScreen(Modal[bool]):
         if not 0 <= row < len(self.names):
             return
         name = self.names[row]
+        pipeline = self._pipeline(name)
+        if any(step.get("op") == "superres" for step in pipeline):
+            self._ask_local_model(pipeline)
+            return
+        self._run_pipeline(pipeline)
+
+    def _ask_local_model(self, pipeline: list[dict[str, Any]]) -> None:
+        """A licence is answered per run: a stored acceptance would be consent by default."""
+        current = str(pipeline[0].get("params", {}).get("model") or "")
+
+        def chosen(model: str | None) -> None:
+            if model is None or self.running:
+                return
+            self._run_pipeline([
+                {**step, "params": {**step.get("params", {}), "model": model, "accept": True}}
+                if step.get("op") == "superres"
+                else step
+                for step in pipeline
+            ])
+
+        self.app.push_screen(LocalModelScreen(current), chosen)
+
+    def _run_pipeline(self, pipeline: list[dict[str, Any]]) -> None:
         assert self.deps.transform is not None
-        pipeline = self.pipelines.get(name, PRESETS[name])
         if self.deps.transform == self.deps._transform:
             self.running = True
             self.cancelled.clear()
@@ -1215,6 +1253,22 @@ class ModelPickerScreen(Modal[str | None]):
         self.dismiss(None)
 
 
+def _weights_cells(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Model, scale, licence, state: the columns both local-weight panels show."""
+    megabytes = int(row["bytes"] or 0) / 1048576
+    state = (
+        t(f"Downloaded {megabytes:.0f} MB", f"已下载 {megabytes:.0f} MB")
+        if row["downloaded"]
+        else t("Not downloaded", "未下载")
+    )
+    return (
+        _sanitize(row["model"]),
+        f"{row['scale']}x",
+        _ellipsize(_sanitize(row["license"]), 16),
+        state,
+    )
+
+
 class SuperresScreen(Modal[bool]):
     """Local upscaling models: the CLI's own catalog, and no download without consent."""
 
@@ -1272,19 +1326,7 @@ class SuperresScreen(Modal[bool]):
         self.rows = list(report["models"])
         self.table.clear()
         for row in self.rows:
-            megabytes = int(row["bytes"] or 0) / 1048576
-            state = (
-                t(f"Downloaded {megabytes:.0f} MB", f"已下载 {megabytes:.0f} MB")
-                if row["downloaded"]
-                else t("Not downloaded", "未下载")
-            )
-            self.table.add_row(
-                _sanitize(row["model"]),
-                f"{row['scale']}x",
-                _ellipsize(_sanitize(row["license"]), 16),
-                state,
-                key=_sanitize(row["model"]),
-            )
+            self.table.add_row(*_weights_cells(row), key=_sanitize(row["model"]))
         runtime = t("runtime ready", "运行时可用") if report["onnxruntime"] else t(
             "runtime missing", "缺少运行时"
         )
@@ -1350,6 +1392,67 @@ class SuperresScreen(Modal[bool]):
 
     def action_dismiss_screen(self) -> None:
         self.dismiss(False)
+
+
+class LocalModelScreen(Modal[str | None]):
+    """Pick the local model for one transform run; nothing runs before this is answered."""
+
+    BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
+
+    def __init__(self, current: str = "") -> None:
+        super().__init__()
+        self.current = current
+        self.rows = list(superres.catalog()["models"])
+        self.table: DataTable[Any] = DataTable(id="local-model-table")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(t("Choose the local model", "选择本地模型"), classes="panel-title"),
+            Static(
+                t(
+                    "Weights run on this machine; licence and source are below. Fetch a model "
+                    "that is not downloaded yet in the local models panel (s).",
+                    "权重在本机推理；许可与来源见下表。尚未下载的模型在本地模型面板（s）下载。",
+                ),
+                classes="panel-hint",
+            ),
+            self.table,
+            Horizontal(
+                Button(t("Apply", "应用"), id="local-model-apply", variant="primary"),
+                Button(t("Cancel", "取消"), id="local-model-cancel"),
+                classes="dialog-actions",
+            ),
+            classes="panel",
+            id="local-model",
+        )
+
+    def on_mount(self) -> None:
+        self.table.cursor_type = "row"
+        self.table.add_columns(
+            t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"), t("State", "状态")
+        )
+        for row in self.rows:
+            self.table.add_row(*_weights_cells(row), key=_sanitize(row["model"]))
+        names = [str(row["model"]) for row in self.rows]
+        self.table.move_cursor(row=names.index(self.current) if self.current in names else 0)
+
+    def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
+        self._choose()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "local-model-apply":
+            self._choose()
+        elif event.button.id == "local-model-cancel":
+            self.action_cancel()
+
+    def _choose(self) -> None:
+        if self.table.row_count:
+            key = self.table.coordinate_to_cell_key(self.table.cursor_coordinate).row_key
+            self.dismiss(str(key.value) if key.value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ProvidersScreen(Modal[bool]):
@@ -2250,10 +2353,11 @@ class WorkbenchApp(App[None]):
     .field-label { width: 16; color: $ink-soft; content-align: left middle; }
     Input, Select { background: $surface-raised; color: $ink; }
     Input.-invalid, Select.-invalid { background: $danger; color: $canvas; }
-    #providers, #palette, #model-picker, #superres { height: 90%; overflow: hidden; }
-    #providers DataTable, #palette DataTable, #model-picker DataTable, #superres DataTable {
-        height: 1fr; width: 1fr;
+    #providers, #palette, #model-picker, #superres, #local-model {
+        height: 90%; overflow: hidden;
     }
+    #providers DataTable, #palette DataTable, #model-picker DataTable,
+    #superres DataTable, #local-model DataTable { height: 1fr; width: 1fr; }
     #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
     #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid $line; }
     #transform-preset-col { width: 33%; min-width: 26; height: 1fr; margin-left: 1; }

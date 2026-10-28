@@ -2134,3 +2134,65 @@ def test_palette_transform_offers_the_cli_operator_and_preset_names(deps):
             assert form.values()["op"].startswith("superres:")
 
     asyncio.run(run())
+
+
+def test_transform_panel_asks_before_running_a_local_model(deps):
+    """Local weights are selectable, but the model and its licence are answered first."""
+    from io import BytesIO
+
+    from textual.widgets import DataTable
+
+    from imagen_cli.application import superres
+
+    deps_value, _ = deps
+    calls = []
+
+    def transform(artifact, pipeline, session):
+        calls.append((artifact, pipeline, session))
+        return {"artifact": {"id": "art_" + "e" * 32}}
+
+    deps_value.transform = transform
+    identity = "art_" + "e" * 32
+    session = f"ses_{0:032x}"
+    buffer = BytesIO()
+    Image.new("RGB", (16, 16), "red").save(buffer, format="PNG")
+    deps_value.store.stage(identity, buffer.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": session, "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert "superres" in screen.names
+            assert screen.entries["superres"]["group"] == "模型恢复"
+            screen.table.move_cursor(row=screen.names.index("superres"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "LocalModelScreen"
+            assert calls == []  # nothing runs before the question is answered
+            table = app.screen.query_one("#local-model-table", DataTable)
+            rows = [
+                [str(cell) for cell in table.get_row_at(index)]
+                for index in range(table.row_count)
+            ]
+            assert [row[0] for row in rows] == [m["model"] for m in superres.catalog()["models"]]
+            assert ("已下载" in rows[0][-1]) is superres.catalog()["models"][0]["downloaded"]
+            index = next(i for i, row in enumerate(rows) if row[0] == "realesr-animevideov3")
+            table.move_cursor(row=index)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(calls) == 1
+            assert calls[0][1] == [
+                {"op": "superres", "params": {"model": "realesr-animevideov3", "accept": True}}
+            ]
+
+    asyncio.run(run())
