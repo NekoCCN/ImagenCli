@@ -2170,11 +2170,12 @@ def test_transform_panel_asks_before_running_a_local_model(deps):
         app = WorkbenchApp(deps_value)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await pilot.press("t")
+            await pilot.press("u")
             await pilot.pause()
             screen = app.screen
+            assert type(screen).__name__ == "ModelProcessScreen"
             assert "superres" in screen.names
-            assert screen.entries["superres"]["group"] == "模型恢复"
+            assert screen.entries["superres"]["group"] == "模型处理"
             screen.table.move_cursor(row=screen.names.index("superres"))
             await pilot.pause()
             await pilot.press("enter")
@@ -2243,7 +2244,7 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
         app = WorkbenchApp(deps_value)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await pilot.press("t")
+            await pilot.press("u")
             await pilot.pause()
             app.screen.table.move_cursor(row=app.screen.names.index("superres"))
             await pilot.pause()

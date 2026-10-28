@@ -28,6 +28,14 @@ def test_tiled_upscale_matches_a_single_tile():
     assert np.array_equal(result, expected)
 
 
+def test_tiled_upscale_avoids_full_image_double_precision_buffers():
+    source = np.full((9, 7, 3), 123, dtype=np.uint8)
+    result = superres.tiled_upscale(source, nearest_runner, scale=2, tile=4, overlap=1)
+    assert result.dtype == np.float32
+    assert result.nbytes == 18 * 14 * 3 * 4
+    assert np.array_equal(result, np.full((18, 14, 3), 123, dtype=np.uint8))
+
+
 def test_overlapping_tiles_are_averaged():
     array = np.full((16, 16, 3), 10, dtype=np.uint8)
 

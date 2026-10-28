@@ -6,9 +6,11 @@ import difflib
 import hashlib
 import inspect
 import io
+import json
 import math
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -19,7 +21,7 @@ from imagen_cli import i18n
 from imagen_cli.application import media_ops
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.storage import queries
-from imagen_cli.storage.artifacts import ArtifactStore
+from imagen_cli.storage.artifacts import ArtifactStore, image_limits
 from imagen_cli.storage.repositories import Repositories
 
 MAX_STEPS = 20
@@ -218,11 +220,36 @@ def replay_pipeline(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                      for step in manifest["resolved_pipeline"]])
 
 
-def check_budget(size: tuple[int, int], pipeline: list[dict[str, Any]]) -> None:
-    # shortcut: pixel preflight is not a hard memory/time limit; use isolated workers for that.
+class BudgetApprovalRequired(ValueError):
+    """A valid pipeline needs a decision about its estimated resource use."""
+
+    def __init__(self, report: dict[str, Any]) -> None:
+        self.report = report
+        width, height = report["output_size"]
+        estimated_mib = report["estimated_working_bytes"] / 1024**2
+        super().__init__(i18n.t(
+            f"{'; '.join(report['reasons'])}: output {width}x{height} "
+            f"({report['output_pixels']:,} pixels), estimated working buffers "
+            f"{estimated_mib:,.0f} MiB (model/runtime memory additional). "
+            "Large processing may exhaust memory; continue only after explicit confirmation.",
+            f"{'；'.join(report['reasons'])}：预计输出 {width}×{height} "
+            f"（{report['output_pixels']:,} 像素），估算工作缓冲 {estimated_mib:,.0f} MiB"
+            "（不含模型与运行时）。大图处理可能耗尽内存，请确认是否继续。",
+        ))
+
+
+def check_budget(
+    size: tuple[int, int], pipeline: list[dict[str, Any]], *, allow_large: bool = False,
+) -> None:
+    # shortcut: estimates are not a hard allocation cap; isolated workers enforce that.
     width, height = size
+    reasons: list[str] = []
+    peak_pixels = width * height
+    working_bytes = 0
+    if width <= 0 or height <= 0:
+        raise ValueError("input dimensions must be positive")
     if width * height > MAX_INPUT_PIXELS:
-        raise ValueError("input pixel budget exceeded")
+        reasons.append("input pixel budget exceeded")
     for step in pipeline:
         name, params = step["op"], step.get("params", {})
         # Conservative buffer estimates, not measured peak RSS or an OS allocation cap.
@@ -243,15 +270,17 @@ def check_budget(size: tuple[int, int], pipeline: list[dict[str, Any]]) -> None:
             if type(radius) is not int or not 1 <= radius <= 8:
                 raise ValueError("invalid weighted median radius")
             estimate = width * height * 96 + width * (2 * radius + 1)**2 * 128
+            working_bytes = max(working_bytes, estimate)
             if estimate > MAX_WORKING_BYTES:
-                raise ValueError("estimated working memory budget exceeded")
+                reasons.append("estimated working memory budget exceeded")
         if name == "kuwahara_anisotropic":
             sectors = params.get("sectors", 8)
             if type(sectors) is not int or sectors not in (4, 8, 12, 16):
                 raise ValueError("invalid Kuwahara sectors")
             bytes_per_pixel = 512 + sectors * 56
+        working_bytes = max(working_bytes, width * height * bytes_per_pixel)
         if width * height * bytes_per_pixel > MAX_WORKING_BYTES:
-            raise ValueError("estimated working memory budget exceeded")
+            reasons.append("estimated working memory budget exceeded")
         if name in {"resize", "linear_resize", "pad", "perspective"}:
             scale = params.get("scale")
             target_width, target_height = params.get("width"), params.get("height")
@@ -301,12 +330,44 @@ def check_budget(size: tuple[int, int], pipeline: list[dict[str, Any]]) -> None:
                 raise ValueError("unknown super-resolution model")
             factor = MANIFEST[model]["scale"]
             width, height = width * factor, height * factor
+            working_bytes = max(working_bytes, width * height * 16)
         if width <= 0 or height <= 0:
             raise ValueError("target dimensions must be positive")
+        peak_pixels = max(peak_pixels, width * height)
         if width * height > MAX_OUTPUT_PIXELS:
-            raise ValueError("output pixel budget exceeded")
-        if name == "linear_resize" and width * height * 128 > MAX_WORKING_BYTES:
-            raise ValueError("estimated working memory budget exceeded")
+            reasons.append("output pixel budget exceeded")
+        if name == "linear_resize":
+            working_bytes = max(working_bytes, width * height * 128)
+            if width * height * 128 > MAX_WORKING_BYTES:
+                reasons.append("estimated working memory budget exceeded")
+    if reasons and not allow_large:
+        raise BudgetApprovalRequired({
+            "input_size": list(size), "output_size": [width, height],
+            "output_pixels": width * height, "peak_pixels": peak_pixels,
+            "estimated_working_bytes": working_bytes,
+            "reasons": list(dict.fromkeys(reasons)),
+        })
+
+
+def budget_preflight(path: Path, pipeline: Any, approval: str | None = None) -> dict[str, Any]:
+    """Bind a one-run decision to the actual source, normalized steps and estimates."""
+    steps = validate(pipeline)
+    with image_limits(True), Image.open(path) as opened:
+        size = opened.size
+    try:
+        check_budget(size, steps)
+    except BudgetApprovalRequired as error:
+        report = error.report
+        payload = {"source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                   "pipeline": steps, "budget": report}
+        digest = hashlib.sha256(json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        report["digest"] = digest
+        if approval != digest:
+            raise BudgetApprovalRequired(report) from None
+        return {"budget_approval": digest, "budget": report}
+    return {}
 
 
 def normalize_color(image: Image.Image) -> tuple[Image.Image, dict[str, Any]]:
@@ -362,11 +423,11 @@ def _owner(repositories: Repositories, source: str) -> str:
     raise ValueError("source artifact belongs to several sessions; pass --session")
 
 
-def render(path: Any, pipeline: Any) -> tuple[bytes, dict[str, Any]]:
+def render(path: Any, pipeline: Any, *, allow_large: bool = False) -> tuple[bytes, dict[str, Any]]:
     """Compute bytes and provenance without touching storage or session state."""
     steps = validate(pipeline)
-    with Image.open(path) as opened:
-        check_budget(opened.size, steps)
+    with image_limits(allow_large), Image.open(path) as opened:
+        check_budget(opened.size, steps, allow_large=allow_large)
         opened.load()
         current, color_record = normalize_color(opened)
     output_profile = current.info.get("icc_profile")
@@ -416,6 +477,7 @@ def apply(
     session_id: str | None = None,
     timeout: float = 120,
     cancelled: Event | None = None,
+    budget_approval: str | None = None,
 ) -> dict[str, Any]:
     steps = validate(pipeline)
     row = repositories.get("artifacts", source, include_private=True)
@@ -436,7 +498,8 @@ def apply(
         raise ValueError(i18n.t(f"Session {session} was not found.", f"会话 {session} 不存在。"))
     from imagen_cli.application.postprocess_worker import execute
 
-    data, metadata = execute(path, steps, timeout=timeout, cancelled=cancelled)
+    data, metadata = execute(path, steps, timeout=timeout, cancelled=cancelled,
+                             budget_approval=budget_approval)
     if cancelled is not None and cancelled.is_set():
         raise ValueError("postprocess cancelled")
     return publish_result(repositories, store, source, steps, data, metadata, session_id=session)
@@ -467,7 +530,11 @@ def publish_result(repositories: Repositories, store: ArtifactStore, source: str
         "deterministic": not any(step["op"] in NONDETERMINISTIC_OPS for step in recorded),
         "seed": None,
     }
-    store.stage(identity, data, origin_manifest=manifest)
+    if metadata.get("budget_approval"):
+        manifest.update({"budget_approval": metadata["budget_approval"],
+                         "budget": metadata["budget"]})
+    store.stage(identity, data, origin_manifest=manifest,
+                allow_large=bool(metadata.get("budget_approval")))
     store.publish(identity)
     repositories.insert(
         "artifact_links",

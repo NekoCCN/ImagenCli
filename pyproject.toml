@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "imagen-cli"
-version = "0.1.9"
+version = "0.1.10"
 description = "Persistent image creation workbench for humans and agents"
 requires-python = ">=3.12"
 license = "MIT"

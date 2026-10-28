@@ -93,6 +93,7 @@ COMMANDS = {
                 ("compare", "计算两个产物的 PSNR 与 SSIM；只读，不创建新产物"),
                 ("sheet", "把多个产物拼成联系表并生成新产物"),
                 ("ops", "列出可用的确定性变换操作"),
+                ("superres run", "独立本地模型处理：恢复或超分，保存新产物；超预算先确认"),
                 ("superres models", "列出超分模型、许可、下载与安装状态"),
                 ("superres install", "装运行时与所选模型；不给 --model 只装运行时；需 --accept"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
@@ -178,6 +179,8 @@ _SUMMARY_EN = {
     "superres models": "List upscaling models, licenses, download and install state",
     "superres install": "Install the inference runtime and any named models; "
     "without --model it installs only the runtime; requires --accept",
+    "superres run": "Run local model restoration or upscaling; save a new artifact, "
+    "asking for approval when resource budgets are exceeded",
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
@@ -403,6 +406,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "preset": text,
             "session": text,
             "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 120},
+            "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         }
         required = ("artifact",)
     elif name == "sheet":
@@ -420,6 +424,17 @@ def _input_schema(name: str) -> dict[str, Any]:
             "verbose": {"type": "boolean"},
         }
         required = ()
+    elif name == "superres run":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "model": text, "backend": text, "session": text,
+            "tile": {"type": "integer", "minimum": 4, "default": 256},
+            "overlap": {"type": "integer", "minimum": 0, "default": 16},
+            "accept": {"type": "boolean", "default": False},
+            "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 120},
+        }
+        required = ("artifact", "model")
     elif name == "superres models":
         properties = {}
         required = ()
@@ -495,8 +510,9 @@ def _data_schema(command: Command) -> dict[str, Any]:
         )
     if command.name == "profile secret":
         return _object({"profile": {"type": "object"}}, ("profile",))
-    if command.name == "transform":
-        return _object({"artifact": {"type": "object"}, "source": {"type": "string"}})
+    if command.name in {"transform", "superres run"}:
+        return _object({"artifact": {"type": "object"}, "source": {"type": "string"},
+                        "budget": {"type": "object"}, "error": {"type": "object"}})
     if command.name == "sheet":
         return _object(
             {

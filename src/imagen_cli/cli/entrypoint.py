@@ -233,6 +233,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "tile",
                 "overlap",
                 "accept",
+                "budget-approval",
                 "key-file",
                 "folder",
                 "skill",
@@ -574,6 +575,15 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         if words or parameters:
             raise _no_arguments(command, words, parameters)
         return command, {}, options
+    if command == "superres run":
+        if words:
+            if len(words) != 1 or "artifact" in parameters:
+                raise _need(command, words, 1, "one artifact id", "一个产物标识")
+            parameters["artifact"] = words[0]
+        if "timeout" in controls:
+            parameters["timeout"] = options.timeout
+        validate(parameters, schema)
+        return command, parameters, options
     if command == "superres fetch" and words:
         if len(words) != 1 or "model" in parameters:
             raise _need(command, words, 1, "one model name", "一个模型名")
@@ -720,11 +730,29 @@ def main(
         command, args, options = _parse(argv)
         if renderer.mode == "jsonl":
             renderer.start(command)
+        data: dict[str, Any]
         if command == "version":
             status, data = "succeeded", {"version": installed_version()}
         else:
             with Container(workspace=options.workspace, options=options) as container:
                 status, data = container.execute(command, args)
+                if (command in {"transform", "superres run"} and status == "approval_required"
+                        and data.get("budget") and isinstance(args, dict)):
+                    digest = data["budget"]["digest"]
+                    if _interactive(renderer, stdout, argv):
+                        stderr.write(str(data["error"]["detail"]) + i18n.t(
+                            " Continue? [y/N] ", " 继续？[y/N] ",
+                        ))
+                        stderr.flush()
+                        if sys.stdin.readline().strip().lower() == "y":
+                            status, data = container.execute(
+                                command, {**args, "budget_approval": digest},
+                            )
+                    if status == "approval_required":
+                        data["error"]["detail"] += i18n.t(
+                            " To confirm this exact request, rerun with ",
+                            " 确认本次请求后，使用相同参数重跑并加上 ",
+                        ) + f"--budget-approval {digest}"
         value = result(status, data)
     except UsageError as error:
         error.next_command = error.next_command or _command_hint(argv)

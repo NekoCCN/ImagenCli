@@ -4,8 +4,11 @@ import hashlib
 import io
 import os
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -17,15 +20,36 @@ MAX_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 100_000_000
 
 
-def inspect_media(data: bytes) -> dict[str, Any]:
-    if not data or len(data) > MAX_BYTES:
+_IMAGE_LIMIT_LOCK = RLock()
+
+
+@contextmanager
+def image_limits(allow_large: bool = False) -> Iterator[None]:
+    """Serialize Pillow's global bomb threshold while inspecting confirmed local images."""
+    with _IMAGE_LIMIT_LOCK:
+        previous = Image.MAX_IMAGE_PIXELS
+        if allow_large:
+            Image.MAX_IMAGE_PIXELS = None
+        try:
+            yield
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous
+
+
+def inspect_media(
+    data: bytes, *, max_pixels: int | None = None, max_bytes: int | None = None,
+    allow_large: bool = False,
+) -> dict[str, Any]:
+    max_pixels = MAX_PIXELS if max_pixels is None else max_pixels
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
+    if not data or len(data) > max_bytes:
         raise ValueError("image byte limit exceeded")
     try:
-        with warnings.catch_warnings():
+        with image_limits(allow_large), warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
                 width, height = image.size
-                if width * height > MAX_PIXELS:
+                if width * height > max_pixels:
                     raise ValueError("image pixel limit exceeded")
                 media_type = Image.MIME.get(image.format or "")
                 if not media_type:
@@ -63,9 +87,18 @@ class ArtifactStore:
         producer_turn_id: str | None = None,
         producer_job_id: str | None = None,
         origin_manifest: dict[str, Any] | None = None,
+        allow_large: bool = False,
     ) -> dict[str, Any]:
         storage_id(identity)
-        metadata = inspect_media(data)
+        approved = allow_large
+        pixels = (origin_manifest or {}).get("budget", {}).get("output_pixels", MAX_PIXELS)
+        metadata = inspect_media(data, max_pixels=pixels if approved else MAX_PIXELS,
+                                 max_bytes=max(MAX_BYTES, len(data)) if approved else MAX_BYTES,
+                                 allow_large=approved)
+        if approved:
+            origin_manifest = {**(origin_manifest or {}), "local_media_limits": {
+                "pixels": metadata["width"] * metadata["height"], "bytes": len(data),
+            }}
         if self.repositories.get("artifacts", identity) is not None:
             raise FileExistsError(identity)
         name = identity + ".staging"
@@ -98,9 +131,14 @@ class ArtifactStore:
         return row
 
     def _verified_bytes(self, row: dict[str, Any], path: Path) -> bytes:
+        manifest = row.get("origin_manifest") or {}
+        approved = bool(manifest.get("kind") == "postprocess" and manifest.get("budget_approval"))
+        limits = manifest.get("local_media_limits", {}) if approved else {}
+        max_bytes = max(MAX_BYTES, limits.get("bytes", MAX_BYTES))
         with path.open("rb") as source:
-            data = source.read(MAX_BYTES + 1)
-        actual = inspect_media(data)
+            data = source.read(max_bytes + 1)
+        actual = inspect_media(data, max_pixels=max(MAX_PIXELS, limits.get("pixels", MAX_PIXELS)),
+                               max_bytes=max_bytes, allow_large=approved)
         if any(row.get(key) != value for key, value in actual.items()):
             raise ValueError("artifact metadata mismatch")
         return data

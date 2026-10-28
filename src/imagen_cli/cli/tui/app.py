@@ -289,6 +289,7 @@ _KEYBAR_KEYS: list[tuple[str, tuple[str, str]]] = [
     ("s", ("Local models", "本地模型")),
     ("n", ("New", "新建")),
     ("e", ("Export", "导出")),
+    ("u", ("Model processing", "模型处理")),
     ("c", ("Cache", "缓存")),
     ("f", ("Fork", "分支")),
     ("r", ("Refresh", "刷新")),
@@ -812,7 +813,6 @@ class TransformScreen(Modal[bool]):
                 "Lines and color areas",
                 "Color and tone",
                 "Style and optics",
-                "Model restoration",
                 "Size and geometry",
             ]
             if not is_chinese()
@@ -823,7 +823,6 @@ class TransformScreen(Modal[bool]):
                 "线条与色块",
                 "颜色明暗",
                 "风格光学",
-                "模型恢复",
                 "尺寸几何",
             ]
         )
@@ -835,18 +834,14 @@ class TransformScreen(Modal[bool]):
             k: [dict(step, params=dict(step.get("params", {}))) for step in v]
             for k, v in PRESETS.items()
         }
-        # Local model restoration is reachable from the panel, but the model and its licence
-        # are asked for on every run instead of being baked into a catalogue entry.
-        from imagen_cli.application import operator_catalog
-
-        item = operator_catalog.get_operator_item("superres")
-        if item is not None:
-            # Name and group are the CLI's own labels for this operator's category.
-            label = operator_catalog.category_label(item.category)
-            self.entries["superres"] = {"key": "superres", "name": label, "group": label}
-            self.pipelines["superres"] = [{"op": "superres", "params": {}}]
-            self.all_names.append("superres")
-            self.filtered_names.append("superres")
+        self.entries = {
+            key: entry for key, entry in self.entries.items()
+            if key in self.pipelines
+            and not any(step["op"] == "superres" for step in self.pipelines[key])
+        }
+        self.all_names = list(self.entries)
+        self.filtered_names = list(self.all_names)
+        self.names = self.filtered_names
         self.category_table: DataTable[Any] = DataTable(id="transform-categories")
         self.table: DataTable[Any] = DataTable(id="transform-presets")
         self.status = Static("")
@@ -1136,7 +1131,29 @@ class TransformScreen(Modal[bool]):
         )
         self.app.push_screen(LocalModelScreen(current, fetch=fetch), chosen)
 
-    def _run_pipeline(self, pipeline: list[dict[str, Any]]) -> None:
+    def _run_pipeline(
+        self, pipeline: list[dict[str, Any]], budget_approval: str | None = None,
+    ) -> None:
+        from imagen_cli.application.postprocess_service import (
+            BudgetApprovalRequired,
+            budget_preflight,
+        )
+
+        try:
+            budget_preflight(self.path, pipeline, budget_approval)
+        except BudgetApprovalRequired as error:
+            digest = error.report["digest"]
+            frozen = [{**step, "params": dict(step.get("params", {}))} for step in pipeline]
+
+            def decided(answer: bool | None) -> None:
+                if answer and self.is_mounted and not self.running:
+                    self._run_pipeline(frozen, digest)
+
+            self.app.push_screen(ConfirmScreen(str(error)), decided)
+            return
+        except (ValueError, OSError) as error:
+            self.status.update(_sanitize(error))
+            return
         assert self.deps.transform is not None
         if self.deps.transform == self.deps._transform:
             self.running = True
@@ -1147,7 +1164,7 @@ class TransformScreen(Modal[bool]):
                     "处理中 · Esc 取消，成功后保存新产物",
                 )
             )
-            self.run_worker(self._apply_isolated(pipeline), exclusive=True)
+            self.run_worker(self._apply_isolated(pipeline, budget_approval), exclusive=True)
             return
         try:
             result = self.deps.transform(self.artifact, pipeline, self.session)
@@ -1156,18 +1173,20 @@ class TransformScreen(Modal[bool]):
             return
         self.dismiss(bool(result))
 
-    async def _apply_isolated(self, pipeline: list[dict[str, Any]]) -> None:
+    async def _apply_isolated(
+        self, pipeline: list[dict[str, Any]], budget_approval: str | None = None,
+    ) -> None:
         from imagen_cli.application import postprocess_service
         from imagen_cli.application.postprocess_worker import execute
 
         try:
             # Only file computation leaves the UI thread; SQLite publication stays here.
             steps = postprocess_service.validate(pipeline)
+            execution_options: dict[str, Any] = {"cancelled": self.cancelled}
+            if budget_approval:
+                execution_options["budget_approval"] = budget_approval
             data, metadata = await asyncio.to_thread(
-                execute,
-                self.path,
-                steps,
-                cancelled=self.cancelled,
+                execute, self.path, steps, **execution_options,
             )
             if self.cancelled.is_set():
                 self.status.update(
@@ -1199,6 +1218,21 @@ class TransformScreen(Modal[bool]):
             self.status.update(t("Canceling processing…", "正在取消处理…"))
             return
         self.dismiss(False)
+
+
+class ModelProcessScreen(TransformScreen):
+    """Separate model-processing page; execution and budget confirmation stay shared."""
+
+    def __init__(self, deps: Deps, artifact: str, session: str, path: Path) -> None:
+        super().__init__(deps, artifact, session, path)
+        label = t("Model processing", "模型处理")
+        self.entries = {"superres": {"key": "superres", "name": label, "group": label}}
+        self.pipelines = {"superres": [{"op": "superres", "params": {}}]}
+        self.categories = [label]
+        self.all_names = ["superres"]
+        self.filtered_names = list(self.all_names)
+        self.names = self.filtered_names
+        self.header_title.update(label)
 
 
 class ModelPickerScreen(Modal[str | None]):
@@ -2562,6 +2596,7 @@ class WorkbenchApp(App[None]):
         Binding("delete", "delete_artifact", t("Delete image", "删除图片"), show=False),
         Binding("f", "fork", t("Fork session", "分支会话")),
         Binding("e", "export", t("Export session", "导出会话")),
+        Binding("u", "model_process", t("Model processing", "模型处理")),
         Binding("t", "transform", t("Transform", "变换")),
         Binding("o", "open_image", t("Open image", "打开图片")),
         Binding("O", "open_folder", t("Open folder", "打开目录")),
@@ -2623,6 +2658,7 @@ class WorkbenchApp(App[None]):
                 yield Horizontal(
                     Button(t("Generate", "生成"), id="action-generate", classes="-primary"),
                     Button(t("Edit", "编辑"), id="action-edit"),
+                    Button(t("Models", "模型"), id="action-model-process"),
                     Button(t("Transform", "变换"), id="action-transform"),
                     Button(t("Open", "打开"), id="action-open"),
                     Static(id="action-gap"),
@@ -2641,6 +2677,7 @@ class WorkbenchApp(App[None]):
             "action-delete": self.action_delete,
             "action-generate": self.action_generate,
             "action-edit": self.action_edit,
+            "action-model-process": self.action_model_process,
             "action-transform": self.action_transform,
             "action-open": self.action_open_image,
             "action-prev": self.action_previous_artifact,
@@ -2677,6 +2714,7 @@ class WorkbenchApp(App[None]):
             "new": t("New", "新建"), "providers": t("Providers", "端点"),
             "delete": t("Delete session", "删除会话"),
             "generate": t("Generate", "生成"), "edit": t("Edit", "编辑"),
+            "model-process": t("Models", "模型"),
             "transform": t("Transform", "变换"), "open": t("Open", "打开"),
         }
         for identity, label in labels.items():
@@ -2780,7 +2818,7 @@ class WorkbenchApp(App[None]):
         self.show_detail()
 
     def _sync_actions(self) -> None:
-        for identity in ("edit", "transform", "open"):
+        for identity in ("edit", "transform", "model-process", "open"):
             self.query_one(f"#action-{identity}", Button).disabled = not self.film_items
         self.query_one("#action-prev", Button).disabled = self.film_index <= 0
         self.query_one("#action-next", Button).disabled = (
@@ -3189,7 +3227,7 @@ class WorkbenchApp(App[None]):
                 if known:  # an empty list would leave nothing to pick and nothing to type
                     choices[name] = known
                     custom.add(name)
-        if command in {"superres fetch", "superres benchmark"}:
+        if command in {"superres fetch", "superres benchmark", "superres run"}:
             choices["model"] = superres.fetch_choices()
         if command == "transform":
             # Same two lists `imagen ops` prints; parameters are appended by hand.
@@ -3679,7 +3717,10 @@ class WorkbenchApp(App[None]):
             done,
         )
 
-    def action_transform(self) -> None:
+    def action_model_process(self) -> None:
+        self.action_transform(model_processing=True)
+
+    def action_transform(self, model_processing: bool = False) -> None:
         if self.current is None or self.deps.transform is None:
             return
         found = self._current_artifact()
@@ -3693,4 +3734,5 @@ class WorkbenchApp(App[None]):
                 self.show_detail()
                 self._select_artifact(len(self.film_items) - 1)
 
-        self.push_screen(TransformScreen(self.deps, identity, self.current, path), finished)
+        screen_type = ModelProcessScreen if model_processing else TransformScreen
+        self.push_screen(screen_type(self.deps, identity, self.current, path), finished)

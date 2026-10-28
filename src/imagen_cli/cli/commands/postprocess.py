@@ -80,9 +80,13 @@ def transform_(
     preset: str | None = None,
     session: str | None = None,
     timeout: float = 120,
+    budget_approval: str | None = None,
+    model_params: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     steps: list[dict[str, Any]]
-    if pipeline is not None:
+    if model_params is not None:
+        steps = [{"op": "superres", "params": model_params}]
+    elif pipeline is not None:
         from imagen_cli.cli.input_readers import read_json
 
         payload = read_json(pipeline, allow_array=True)
@@ -121,5 +125,12 @@ def transform_(
         steps = match
     else:
         raise ValueError("pipeline, op or preset is required")
-    row = apply(repositories, store, artifact, steps, session_id=session, timeout=timeout)
+    from imagen_cli.application.postprocess_service import BudgetApprovalRequired
+
+    try:
+        row = apply(repositories, store, artifact, steps, session_id=session, timeout=timeout,
+                    budget_approval=budget_approval)
+    except BudgetApprovalRequired as error:
+        return "approval_required", {"budget": error.report,
+                                    "error": {"type": "approval_required", "detail": str(error)}}
     return "succeeded", {"artifact": row, "source": artifact}

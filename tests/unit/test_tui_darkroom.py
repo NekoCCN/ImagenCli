@@ -9,6 +9,44 @@ from imagen_cli.cli.tui.app import WorkbenchApp
 from imagen_cli.cli.tui.forms import ChoiceForm
 
 
+def test_large_transform_asks_and_cancel_keeps_source(tmp_path, monkeypatch):
+    from PIL import Image
+
+    from imagen_cli.application import postprocess_service
+    from imagen_cli.cli.tui.app import ConfirmScreen, Deps, TransformScreen
+
+    monkeypatch.setattr(postprocess_service, "MAX_OUTPUT_PIXELS", 100)
+    path = tmp_path / "source.png"
+    Image.new("RGB", (10, 10)).save(path)
+    calls = []
+    deps = Deps(None, None, transform=lambda *args: calls.append(args) or {"id": "new"})
+
+    class Harness(App):
+        CSS = WorkbenchApp.CSS
+
+    async def exercise():
+        app = Harness()
+        async with app.run_test(size=(80, 24)) as pilot:
+            screen = TransformScreen(deps, "art", "session", path)
+            await app.push_screen(screen)
+            screen._run_pipeline([{"op": "resize", "params": {"scale": 2}}])
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmScreen)
+            assert calls == []
+            app.screen.dismiss(False)
+            await pilot.pause()
+            assert app.screen is screen
+            assert calls == []
+            screen._run_pipeline([{"op": "resize", "params": {"scale": 2}}])
+            await pilot.pause()
+            app.screen.dismiss(True)
+            await pilot.pause()
+            assert len(calls) == 1
+            assert path.exists()
+
+    asyncio.run(exercise())
+
+
 def test_action_buttons_are_single_line_with_room_for_text():
     class Harness(App):
         CSS = WorkbenchApp.CSS

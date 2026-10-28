@@ -59,6 +59,7 @@ COMMAND_CONTROLS: dict[str, set[str]] = {
     "cache purge": {"plan", "yes"},
     "skills uninstall": {"yes"},
     "transform": {"pipeline", "op", "preset", "session", "timeout"},
+    "superres run": {"timeout"},
     "ops": {"op", "preset", "verbose"},
     "models refresh": {"profile", "send_credential"},
     "models add": {"profile", "id"},

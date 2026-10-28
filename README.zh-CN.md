@@ -54,7 +54,7 @@ Imagen 为人和 coding agent 提供同一个图像工作区。人可以在 TUI 
 | 批量请求 | 不支持 | `batch submit`、`batch get`、`batch wait` |
 | 后台 worker | 不支持 | `worker start`、`worker status`、`worker recover` |
 | Agent skills | 不支持 | `skills list`、`skills install`、`skills uninstall` |
-| 超分模型 | 不支持 | `superres models`、`superres install`、`superres fetch`、`superres benchmark` |
+| 超分与模型恢复 | `u` 模型处理；`s` 运行时与权重管理 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark` |
 | 命令参考 | `:` 命令面板、`?` 帮助 | `imagen help`、`imagen schema` |
 | 切换界面语言 | `l`（会记住） | `--zh` / `--en`、`language` |
 
@@ -375,7 +375,9 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3
 - 差异指标不能替代视觉检查。
 - 尚未完成插画、摄影等领域的图像质量与偏好评价。
 
-TUI：`t` 打开变换工作室，`p` 调参，`enter` 应用。应用会生成新产物，源文件保持不变。
+TUI：`t` 打开普通图像处理页，`p` 调参，`enter` 应用；`u` 打开独立模型处理页，`s` 管理本地权重与运行时。应用会生成新产物，源文件保持不变。
+
+超过默认像素或工作缓冲预算时，Imagen 显示尺寸和内存风险，询问是否继续，默认取消。非交互 CLI 返回 `approval_required`；用户明确接受风险后，用响应中的摘要加 `--budget-approval DIGEST` 重跑同一请求。确认绑定原图内容与处理参数，修改任一项都需要重新确认。确认不保证内存充足：worker 隔离、超时与资源限制仍然保留。
 
 ## 可选超分
 
@@ -414,14 +416,17 @@ CUDA 或 OpenVINO 需显式选择 `cuda` 或 `openvino`；检测到其他 ONNX �
 源码环境后续执行 `uv run` / `uv sync` 时仍需保留 `--extra ai-onnx`（或所选后端 extra）。
 TUI 命令面板提供同样的后端与确认选项。
 
-原尺寸降噪和 JPEG 伪影清理复用现有 `superres` 操作：
+超分、原尺寸降噪与 JPEG 伪影清理使用独立模型处理命令：
 
 ```bash
+imagen superres run ARTIFACT_ID --model realesrgan-x4plus
 imagen superres fetch --model film-degrainer --accept
-imagen transform ARTIFACT_ID --op superres:model=film-degrainer
+imagen superres run ARTIFACT_ID --model film-degrainer
 imagen superres fetch --model dejpg-srformer-light --accept
-imagen transform ARTIFACT_ID --op superres:model=dejpg-srformer-light
+imagen superres run ARTIFACT_ID --model dejpg-srformer-light
 ```
+
+旧 `transform --op superres:...` 脚本保持兼容。独立入口复用同一套执行、预算确认与产物保存链路。
 
 Film-Degrainer（tika）标记为 CC0-1.0；DeJPG_SRFormer_light（Helaman）为 CC BY 4.0，
 要求保留署名并说明变更。两者均为 notaneimu 的社区 ONNX 转换，不是官方导出。

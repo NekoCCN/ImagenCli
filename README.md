@@ -54,7 +54,7 @@ Most daily work is available in both interfaces. Keys below are TUI shortcuts.
 | Batch requests | not available | `batch submit`, `batch get`, `batch wait` |
 | Background worker | not available | `worker start`, `worker status`, `worker recover` |
 | Agent skills | not available | `skills list`, `skills install`, `skills uninstall` |
-| Upscaling models | not available | `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
+| Upscaling and restoration | `u` for model processing; `s` for runtime and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
 | Command reference | `:` palette, `?` help | `imagen help`, `imagen schema` |
 | Switch interface language | `l` (remembered) | `--zh` / `--en`, `language` |
 
@@ -403,7 +403,9 @@ Limits:
 - Difference metrics do not replace visual inspection.
 - Operations have not completed image-quality and preference evaluation across illustration, photography, and other domains.
 
-TUI: `t` opens the transform studio; `p` edits parameters; `enter` applies. Applying saves a new artifact and leaves the source untouched.
+TUI: `t` opens ordinary image processing; `p` edits parameters; `enter` applies. Model processing has its own page under `u`; `s` manages local weights and runtimes. Applying saves a new artifact and leaves the source untouched.
+
+If processing exceeds the default pixel or working-buffer budget, Imagen reports the dimensions and memory risk and asks whether to continue; the default is cancel. Non-interactive CLI calls return `approval_required`. After explicitly accepting the risk, repeat the same request with `--budget-approval DIGEST` from that response. Approval is bound to the source contents and processing parameters; changing either requires a new confirmation. Approval does not guarantee enough memory: worker isolation, timeouts, and resource limits still apply.
 
 ## Optional upscaling
 
@@ -444,14 +446,17 @@ ImagenCli after installation. In a uv-managed source checkout, keep `--extra ai-
 (or the selected backend extra) in subsequent `uv run`/`uv sync` commands.
 The TUI command palette exposes the same backend and acceptance choices.
 
-Same-size restoration also uses the existing `superres` operation:
+Run upscaling or same-size restoration through the dedicated model-processing command:
 
 ```bash
+imagen superres run ARTIFACT_ID --model realesrgan-x4plus
 imagen superres fetch --model film-degrainer --accept
-imagen transform ARTIFACT_ID --op superres:model=film-degrainer
+imagen superres run ARTIFACT_ID --model film-degrainer
 imagen superres fetch --model dejpg-srformer-light --accept
-imagen transform ARTIFACT_ID --op superres:model=dejpg-srformer-light
+imagen superres run ARTIFACT_ID --model dejpg-srformer-light
 ```
+
+Existing `transform --op superres:...` scripts remain compatible. The separate entry uses the same execution, budget-confirmation, and artifact-storage path.
 
 Film-Degrainer by tika is listed as CC0-1.0. DeJPG_SRFormer_light by Helaman is
 CC BY 4.0: retain attribution and indicate changes. These are community ONNX

@@ -418,6 +418,8 @@ class Container:
                 op=args.get("op"),
                 preset=args.get("preset"),
                 session=args.get("session"),
+                timeout=args.get("timeout", 120),
+                budget_approval=args.get("budget_approval"),
             )
         if command.startswith("superres "):
             from jsonschema import validate
@@ -425,6 +427,19 @@ class Container:
             from imagen_cli.application import superres
 
             validate(args, discover(command)["input_schema"])
+            if command == "superres run":
+                from imagen_cli.cli.commands import postprocess
+
+                params: dict[str, Any] = {
+                    key: args[key] for key in ("model", "backend", "tile", "overlap", "accept")
+                    if key in args
+                }
+                return postprocess.transform_(
+                    self.repositories, self.artifact_store, args["artifact"],
+                    model_params=params,
+                    session=args.get("session"), timeout=args.get("timeout", 120),
+                    budget_approval=args.get("budget_approval"),
+                )
             if command == "superres models":
                 return "succeeded", superres.catalog()
             if command == "superres install":

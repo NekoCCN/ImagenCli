@@ -366,13 +366,12 @@ def _round_up(value: int, multiple: int) -> int:
 
 def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
                   overlap: int = 16) -> Any:
-    """Run a tile-wise upscaler and average overlapping predictions."""
+    """Run overlapping tiles and write their disjoint cores into one output buffer."""
     numpy = _numpy()
     if tile < 4 or not 0 <= overlap < tile:
         raise ValueError("invalid tile geometry")
     height, width = array.shape[:2]
-    output = numpy.zeros((height * scale, width * scale, 3), dtype=numpy.float64)
-    weights = numpy.zeros((height * scale, width * scale, 1), dtype=numpy.float64)
+    output = numpy.empty((height * scale, width * scale, 3), dtype=numpy.float32)
     for top in range(0, height, tile):
         for left in range(0, width, tile):
             bottom = min(height, top + tile)
@@ -393,9 +392,8 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
                 slice(top * scale, bottom * scale),
                 slice(left * scale, right * scale),
             )
-            output[destination] += piece[area]
-            weights[destination] += 1
-    return numpy.clip(output / numpy.maximum(weights, 1), 0, 255)
+            output[destination] = numpy.clip(piece[area], 0, 255)
+    return output
 
 
 def upscale(image: Image.Image, *, model: str = "realesrgan-x4plus",

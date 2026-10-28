@@ -15,7 +15,8 @@ from typing import Any
 MAX_WORKING_BYTES = 2 * 1024**3
 
 
-def _run(source: str, pipeline_path: str, output: str, response: str) -> None:
+def _run(source: str, pipeline_path: str, output: str, response: str,
+         approval: str = "") -> None:
     try:
         limits = "unavailable"
         if sys.platform == "linux":
@@ -27,10 +28,12 @@ def _run(source: str, pipeline_path: str, output: str, response: str) -> None:
             ceiling = pages * os.sysconf("SC_PAGE_SIZE") + MAX_WORKING_BYTES
             resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
             limits = "linux_address_space_plus_2gib"
-        from imagen_cli.application.postprocess_service import render
+        from imagen_cli.application.postprocess_service import budget_preflight, render
 
         pipeline = json.loads(Path(pipeline_path).read_text(encoding="utf-8"))
-        data, metadata = render(source, pipeline)
+        consent = budget_preflight(Path(source), pipeline, approval or None)
+        data, metadata = render(source, pipeline, allow_large=bool(consent))
+        metadata.update(consent)
         Path(output).write_bytes(data)
         metadata["execution"] = {"isolation": "spawn_process", "memory_limit": limits}
         payload = {"ok": True, "metadata": metadata}
@@ -40,11 +43,15 @@ def _run(source: str, pipeline_path: str, output: str, response: str) -> None:
 
 
 def execute(source: Path, pipeline: Any, *, timeout: float = 120,
-            cancelled: Event | None = None) -> tuple[bytes, dict[str, Any]]:
+            cancelled: Event | None = None,
+            budget_approval: str | None = None) -> tuple[bytes, dict[str, Any]]:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be finite and positive")
     if cancelled is not None and cancelled.is_set():
         raise ValueError("postprocess cancelled")
+    from imagen_cli.application.postprocess_service import budget_preflight
+
+    consent = budget_preflight(source, pipeline, budget_approval)
     with tempfile.TemporaryDirectory(prefix="imagen-postprocess-") as directory:
         root = Path(directory)
         output, response, specification = (
@@ -54,7 +61,8 @@ def execute(source: Path, pipeline: Any, *, timeout: float = 120,
         deadline = time.monotonic() + timeout
         process = subprocess.Popen(
             [sys.executable, "-m", "imagen_cli.application.postprocess_worker",
-             str(source), str(specification), str(output), str(response)],
+             str(source), str(specification), str(output), str(response),
+             budget_approval or ""],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         try:
@@ -76,6 +84,7 @@ def execute(source: Path, pipeline: Any, *, timeout: float = 120,
             if not payload["ok"]:
                 raise ValueError(payload["error"])
             metadata: dict[str, Any] = payload["metadata"]
+            metadata.update(consent)
             metadata["execution"]["timeout_seconds"] = timeout
             return output.read_bytes(), metadata
         finally:
