@@ -2,7 +2,7 @@
 
 <p align="center"><img src="assets/imagen-title-catgirl.png" alt="Imagen 项目插画" width="240"></p>
 
-**面向人和 coding agent 的图像工作台：共享 CLI/TUI 会话，在本地管理和处理图片。**
+**面向人和 coding agent 的终端图像工作台：共享 CLI/TUI 会话，可审阅的生成计划，本地后处理。**
 
 <!-- README-I18N:START -->
 [English](README.md) · **中文**

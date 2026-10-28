@@ -2,7 +2,7 @@
 
 <p align="center"><img src="assets/imagen-title-catgirl.png" alt="Imagen project artwork" width="240"></p>
 
-**An image workbench for humans and coding agents, with shared CLI/TUI sessions and local post-processing.**
+**A terminal image workbench for people and coding agents: shared CLI/TUI sessions, reviewable generation plans, local post-processing.**
 
 <!-- README-I18N:START -->
 **English** · [中文](README.zh-CN.md)
