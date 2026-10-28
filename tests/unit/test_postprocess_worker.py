@@ -55,3 +55,12 @@ def test_operation_error_is_reported_as_value_error(tmp_path):
     Image.new("RGB", (3, 4)).save(source)
     with pytest.raises(ValueError, match="radius"):
         postprocess_worker.execute(source, [{"op": "guided_smooth", "params": {"radius": 0}}])
+
+
+def test_operation_error_message_is_plain(tmp_path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (3, 4)).save(source)
+    with pytest.raises(ValueError) as raised:
+        postprocess_worker.execute(source, [{"op": "guided_smooth", "params": {"radius": 0}}])
+    assert "ValueError:" not in str(raised.value)
+    assert "radius" in str(raised.value)

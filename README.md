@@ -629,7 +629,7 @@ imagen tui
 
 **A skill cannot be uninstalled.** The directory is unmanaged, symlinked, or was modified after installation. Inspect the reported path first. Locally modified managed skills need `--force --yes`; unmanaged directories are never taken over.
 
-**Upscaling fails before inference.** The runtime or weights are missing. Run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
+**Upscaling fails before inference.** The runtime or weights are missing. For the runtime, run `superres install --backend cpu --accept`. For weights, run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
 
 **A command fails with `permission_denied`.** Check the file permissions and required platform privileges before retrying. Where supported, an interactive terminal offers elevation for the same command, defaulting to No. Machine output modes, `--no-interactive`, and the TUI do not launch UAC; an agent must ask its human before any elevated action.
 

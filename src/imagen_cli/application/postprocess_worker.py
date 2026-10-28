@@ -38,7 +38,12 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
         metadata["execution"] = {"isolation": "spawn_process", "memory_limit": limits}
         payload = {"ok": True, "metadata": metadata}
     except Exception as error:
-        payload = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        # User-facing text: the class name only helps when the failure is unexpected.
+        message = (
+            str(error) if isinstance(error, ValueError)
+            else f"{type(error).__name__}: {error}"
+        )
+        payload = {"ok": False, "error": message}
     Path(response).write_text(json.dumps(payload), encoding="utf-8")
 
 

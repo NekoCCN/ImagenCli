@@ -625,7 +625,7 @@ imagen tui
 
 **skill 无法卸载。** 目录未托管、是符号链接，或安装后被本地修改。先检查报出的路径；已修改的受管 skill 需要 `--force --yes`，未托管目录不会被接管。
 
-**超分在推理前失败。** 缺少运行依赖或权重。运行 `superres models`，审阅许可后执行 `superres fetch --model NAME --accept`。
+**超分在推理前失败。** 缺少运行依赖或权重。运行时用 `superres install --backend cpu --accept` 安装；权重先运行 `superres models`，审阅许可后执行 `superres fetch --model NAME --accept`。
 
 **命令返回 `permission_denied`。** 重试前先检查文件权限与所需的平台权限。在支持的平台上，交互式终端可以询问是否提权重跑同一命令，默认否。机器输出模式、`--no-interactive` 和 TUI 不会发起 UAC；agent 必须先询问人类，再执行任何提权操作。
 

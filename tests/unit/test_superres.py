@@ -409,6 +409,12 @@ def test_missing_onnx_explains_extra_without_starting_ort(onnx_boundary, monkeyp
     assert "session" not in onnx_boundary.events
 
 
+def test_missing_runtime_names_the_install_command(monkeypatch):
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
+    with pytest.raises(ValueError, match="imagen superres install --backend cpu --accept"):
+        superres._make_runner("manual", backend=None, device=None, accept=False)
+
+
 def test_pinned_digest_is_enforced_before_preflight(onnx_boundary, monkeypatch):
     monkeypatch.setitem(superres.MANIFEST["manual"], "sha256", "0" * 64)
     with pytest.raises(ValueError, match="digest mismatch"):

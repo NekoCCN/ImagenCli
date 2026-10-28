@@ -102,11 +102,17 @@ class Runner(Protocol):
     def __call__(self, tile: Any) -> Any: ...
 
 
+_RUNTIME_MISSING = (
+    "super-resolution needs the ai-onnx extra or a local runtime; run: "
+    "imagen superres install --backend cpu --accept"
+)
+
+
 def _numpy() -> Any:
     try:
         import numpy
     except ImportError as error:
-        raise ValueError("super-resolution requires the ai-onnx extra") from error
+        raise ValueError(_RUNTIME_MISSING) from error
     return numpy
 
 
@@ -121,7 +127,7 @@ def available_providers() -> list[str]:
 def _choose_provider(backend: str | None, device: str | None) -> list[str]:
     providers = available_providers()
     if not providers:
-        raise ValueError("super-resolution requires the ai-onnx extra")
+        raise ValueError(_RUNTIME_MISSING)
     requested = backend or device
     if requested is not None:
         if requested not in PROVIDERS:
@@ -303,7 +309,7 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
     try:
         import onnxruntime
     except ImportError as error:  # pragma: no cover - depends on the extra
-        raise ValueError("super-resolution requires the ai-onnx extra") from error
+        raise ValueError(_RUNTIME_MISSING) from error
     providers = _choose_provider(backend, device)
     path = ensure_weights(model, accept=accept)
     data = path.read_bytes()
