@@ -1624,7 +1624,7 @@ class ProvidersScreen(Modal[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("Providers", classes="panel-title"),
+            Static(t("Providers", "端点"), classes="panel-title"),
             Static(
                 t(
                     "a add · u update · m refresh models · n enter model · enter selects "
