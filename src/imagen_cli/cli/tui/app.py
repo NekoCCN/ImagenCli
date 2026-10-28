@@ -14,17 +14,18 @@ from threading import Event
 from typing import Any, cast
 
 from PIL import Image
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import Button, DataTable, Input, Select, Static
 
-from imagen_cli.application import cache_service, media_ops
+from imagen_cli.application import cache_service, media_ops, superres
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
+from imagen_cli.application.skill_targets import prompt_order
 from imagen_cli.cli.human import render as human_render
 from imagen_cli.cli.options import COMMAND_CONTROLS, SharedOptions
 from imagen_cli.cli.registry import COMMANDS, command_summary, discover
@@ -36,7 +37,8 @@ from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 from . import preview
-from .forms import ChoiceForm, CreationForm, ProviderForm
+from .forms import ChoiceForm, CreationForm, ModelUseForm, ProviderForm, SheetForm
+from .modal import Modal
 
 
 @dataclass
@@ -274,17 +276,68 @@ def _label(name: str) -> str:
     return t(*labels) if labels else name
 
 
-def _keybar(entries: list[tuple[str, str]]) -> Text:
+_KEYBAR_KEYS: list[tuple[str, tuple[str, str]]] = [
+    ("g", ("Generate", "生成")),
+    ("m", ("Edit", "编辑")),
+    ("t", ("Transform", "变换")),
+    ("o", ("Open", "打开")),
+    ("d", ("Delete", "删图")),
+    ("x", ("Delete session", "删除会话")),
+    ("[ ]", ("Artifacts", "产物")),
+    ("v", ("Providers", "端点")),
+    ("s", ("Local models", "本地模型")),
+    ("n", ("New", "新建")),
+    ("e", ("Export", "导出")),
+    ("c", ("Cache", "缓存")),
+    ("f", ("Fork", "分支")),
+    ("r", ("Refresh", "刷新")),
+    ("l", ("Language", "语言")),
+    ("q", ("Quit", "退出")),
+]
+_KEYBAR_TAIL = [(":", ("Commands", "命令")), ("?", ("Help", "帮助"))]
+_KEYBAR_EMPTY_WORKSPACE = {"n", "v", "s", "c", "l", "q"}
+
+
+def _ellipsize(value: str, width: int) -> str:
+    """Cut a cell to its column so a clipped name reads as clipped, not as a typo."""
+    if cell_len(value) <= width:
+        return value
+    kept = value
+    while kept and cell_len(kept) + 1 > width:
+        kept = kept[:-1]
+    return kept + "…"
+
+
+def _keybar_width(key: str, label: str) -> int:
+    """Cells one legend entry takes, key badge included."""
+    return cell_len(f" {key} ") + cell_len(f" {label}")
+
+
+def _keybar(entries: list[tuple[str, str]], width: int) -> Text:
+    """Fit the legend to the terminal: commands and help stay, the rest is cut from the end."""
     text = Text()
-    for index, (key, label) in enumerate(entries):
-        if index:
+    if not entries:
+        return text
+    # One separator between entries, and the tail always keeps its slot.
+    tail_width = sum(_keybar_width(key, label) + 1 for key, label in entries[-2:])
+    budget = max(0, width - tail_width)
+    shown: list[tuple[str, str]] = []
+    used = 0
+    for key, label in entries[:-2]:
+        cost = _keybar_width(key, label) + 1
+        if used + cost > budget:
+            break
+        used += cost
+        shown.append((key, label))
+    for key, label in shown + entries[-2:]:
+        if text:
             text.append(" ")
         text.append(f" {key} ", style="bold #24131b on #e98cab")
         text.append(f" {label}", style="#9aa2af")
     return text
 
 
-class ConfirmScreen(ModalScreen[bool]):
+class ConfirmScreen(Modal[bool]):
     """Yes/No dialog with No selected first; Enter confirms the highlighted choice."""
 
     BINDINGS = [
@@ -358,7 +411,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class FormScreen(ModalScreen[dict[str, str] | None]):
+class FormScreen(Modal[dict[str, str] | None]):
     """Small labelled form; Enter submits, Escape cancels."""
 
     BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
@@ -429,7 +482,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
         self.dismiss(None)
 
 
-class CacheScreen(ModalScreen[bool]):
+class CacheScreen(Modal[bool]):
     BINDINGS = [
         Binding("p", "plan", t("Build digest", "生成摘要")),
         Binding("escape", "dismiss_screen", t("Close", "关闭")),
@@ -515,7 +568,7 @@ class CacheScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
+class ParamEditScreen(Modal[list[dict[str, Any]] | None]):
     """Adjust parameters for the current transform pipeline."""
 
     BINDINGS = [
@@ -727,7 +780,7 @@ class ParamEditScreen(ModalScreen[list[dict[str, Any]] | None]):
         self.dismiss(None)
 
 
-class TransformScreen(ModalScreen[bool]):
+class TransformScreen(Modal[bool]):
     AUTO_FOCUS = ""
     BINDINGS = [
         Binding("up", "cursor_up", t("Previous", "上一个"), show=False),
@@ -1102,7 +1155,7 @@ class TransformScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class ModelPickerScreen(ModalScreen[str | None]):
+class ModelPickerScreen(Modal[str | None]):
     """Pick the default model from the declared catalog, with a text filter."""
 
     BINDINGS = [Binding("escape", "cancel", t("Close", "关闭"))]
@@ -1162,7 +1215,144 @@ class ModelPickerScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class ProvidersScreen(ModalScreen[bool]):
+class SuperresScreen(Modal[bool]):
+    """Local upscaling models: the CLI's own catalog, and no download without consent."""
+
+    BINDINGS = [
+        Binding("f", "fetch", t("Download", "下载")),
+        Binding("i", "install", t("Install runtime", "安装运行时")),
+        Binding("escape", "dismiss_screen", t("Close", "关闭")),
+    ]
+
+    def __init__(self, deps: Deps, run: Callable[[str, dict[str, Any]], None]) -> None:
+        super().__init__()
+        self.deps = deps
+        self.run = run
+        self.rows: list[dict[str, Any]] = []
+        self.table: DataTable[Any] = DataTable(id="superres-table")
+        self.status = Static("")
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(t("Local models", "本地模型"), classes="panel-title"),
+            Static(
+                t(
+                    "Weights stay on this machine and are never fetched on their own. "
+                    "f downloads the selected model, i installs the inference runtime.",
+                    "权重只保存在本机，不会自行下载。f 下载选中模型，i 安装推理运行时。",
+                ),
+                classes="panel-hint",
+            ),
+            self.table,
+            self.status,
+            Horizontal(
+                Button(t("Download", "下载"), id="superres-fetch", variant="primary"),
+                Button(t("Install runtime", "安装运行时"), id="superres-install"),
+                Button(t("Close", "关闭"), id="superres-close"),
+                classes="dialog-actions",
+            ),
+            classes="panel",
+            id="superres",
+        )
+
+    def on_mount(self) -> None:
+        self.table.cursor_type = "row"
+        # A long licence would push the state column off an 80-column panel; the consent
+        # dialog carries the full text.
+        self.table.add_columns(
+            t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"), t("State", "状态")
+        )
+        self.refresh_rows()
+
+    def on_screen_resume(self) -> None:
+        self.refresh_rows()  # a finished download shows up once the result panel closes
+
+    def refresh_rows(self) -> None:
+        report = superres.catalog()
+        self.rows = list(report["models"])
+        self.table.clear()
+        for row in self.rows:
+            megabytes = int(row["bytes"] or 0) / 1048576
+            state = (
+                t(f"Downloaded {megabytes:.0f} MB", f"已下载 {megabytes:.0f} MB")
+                if row["downloaded"]
+                else t("Not downloaded", "未下载")
+            )
+            self.table.add_row(
+                _sanitize(row["model"]),
+                f"{row['scale']}x",
+                _ellipsize(_sanitize(row["license"]), 16),
+                state,
+                key=_sanitize(row["model"]),
+            )
+        runtime = t("runtime ready", "运行时可用") if report["onnxruntime"] else t(
+            "runtime missing", "缺少运行时"
+        )
+        self.status.update(
+            f"{runtime} · {_sanitize(report['model_dir'])}" if self.rows else runtime
+        )
+
+    def _selected(self) -> dict[str, Any] | None:
+        if not self.rows:
+            return None
+        return self.rows[self.table.cursor_coordinate.row]
+
+    def action_fetch(self) -> None:
+        row = self._selected()
+        if row is None:
+            return
+        name = str(row["model"])
+        if not row["downloadable"]:
+            self.status.update(
+                t(f"{name} has no published download", f"{name} 没有可下载的来源")
+            )
+            return
+
+        def done(confirmed: bool | None) -> None:
+            if confirmed:
+                self.run("superres fetch", {"model": name, "accept": True})
+
+        self.app.push_screen(
+            ConfirmScreen(
+                t(
+                    f"Download {name} from {row['source']}? License: {row['license']}",
+                    f"从 {row['source']} 下载 {name}？许可：{row['license']}",
+                )
+            ),
+            done,
+        )
+
+    def action_install(self) -> None:
+        def done(confirmed: bool | None) -> None:
+            if confirmed:
+                self.run("superres install", {"accept": True})
+
+        self.app.push_screen(
+            ConfirmScreen(
+                t(
+                    "Install the inference runtime? This downloads packages from PyPI.",
+                    "安装推理运行时？这会从 PyPI 下载安装包。",
+                )
+            ),
+            done,
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        actions = {
+            "superres-fetch": self.action_fetch,
+            "superres-install": self.action_install,
+            "superres-close": self.action_dismiss_screen,
+        }
+        action = actions.get(str(event.button.id))
+        if action is not None:
+            action()
+
+    def action_dismiss_screen(self) -> None:
+        self.dismiss(False)
+
+
+class ProvidersScreen(Modal[bool]):
     BINDINGS = [
         Binding("a", "add", t("Add", "新增")),
         Binding("u", "update", t("Update", "更新")),
@@ -1447,7 +1637,7 @@ class ProvidersScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class PlanScreen(ModalScreen[bool]):
+class PlanScreen(Modal[bool]):
     """Show a frozen plan; approval and execution are separate keys."""
 
     AUTO_FOCUS = ""
@@ -1689,7 +1879,7 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
     return arguments
 
 
-class ResultScreen(ModalScreen[None]):
+class ResultScreen(Modal[None]):
     BINDINGS = [Binding("escape", "close", t("Close", "关闭"))]
 
     def __init__(self, command: str, status: str, data: dict[str, Any]) -> None:
@@ -1729,7 +1919,7 @@ class ResultScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-class CommandPaletteScreen(ModalScreen[str | None]):
+class CommandPaletteScreen(Modal[str | None]):
     """Every registered CLI command; the form is generated from its schema."""
 
     BINDINGS = [
@@ -1849,6 +2039,14 @@ _CONTROL_ATTRS = {
 }
 
 
+# Commands whose `profile` field must name a profile that already exists.
+_EXISTING_PROFILE_COMMANDS = {
+    "providers", "models list", "models refresh", "models add", "models use",
+    "profile show", "profile update", "profile set", "profile secret",
+    "session create", "generate", "edit",
+}
+
+
 def _control_fields(command: str) -> list[tuple[str, str, str]]:
     """Run options this command accepts as shared options, not arguments."""
     allowed = COMMAND_CONTROLS.get(command, set())
@@ -1902,6 +2100,7 @@ _BINDING_TEXT = {
     "quit": ("Quit", "退出"),
     "cache": ("Cache", "缓存"),
     "providers": ("Providers", "端点"),
+    "superres": ("Local models", "本地模型"),
     "new_session": ("New session", "新建会话"),
     "generate": ("Generate", "生成"),
     "edit": ("Edit", "编辑"),
@@ -1921,7 +2120,29 @@ _BINDING_TEXT = {
 }
 
 
-class HelpScreen(ModalScreen[None]):
+def _help_lines(rows: list[tuple[str, str]]) -> list[str]:
+    """Two legend columns once the list outgrows the panel, so no key scrolls out of sight."""
+    if len(rows) <= 10:
+        return [f"{key}  {description}" for key, description in rows]
+    half = (len(rows) + 1) // 2
+    left, right = rows[:half], rows[half:]
+    key_width = max(cell_len(key) for key, _ in rows)
+
+    def entry(row: tuple[str, str]) -> str:
+        key, description = row
+        return f"{key:<{key_width}}  {description}"
+
+    gutter = max(cell_len(entry(row)) for row in left) + 3
+    lines = []
+    for index, row in enumerate(left):
+        line = entry(row)
+        if index < len(right):
+            line += " " * (gutter - cell_len(line)) + entry(right[index])
+        lines.append(line.rstrip())
+    return lines
+
+
+class HelpScreen(Modal[None]):
     """Every shown binding in one panel; keeps the key bar short."""
 
     BINDINGS = [Binding("escape", "close", t("Close", "关闭"))]
@@ -1933,7 +2154,7 @@ class HelpScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(t("Keyboard shortcuts", "快捷键"), classes="panel-title"),
-            *(Static(f"{key}  {description}") for key, description in self.rows),
+            *(Static(line) for line in _help_lines(self.rows)),
             Static(
                 t(": opens all commands · esc closes", ": 打开全部命令 · esc 关闭"),
                 classes="panel-hint",
@@ -2003,8 +2224,9 @@ class WorkbenchApp(App[None]):
     # shortcut: single-line controls carry no border, so focus shows as fill
     # rather than an outline; revisit if a theme needs bordered buttons back.
     #action-bar { height: 1; margin-top: 1; }
+    #action-gap { width: 1fr; height: 1; }
     #action-bar Button {
-        height: 1; min-width: 8; width: 1fr; margin-right: 1; padding: 0 1;
+        height: 1; width: auto; min-width: 6; margin-right: 1; padding: 0 1;
         background: $surface-raised; color: $ink-soft; border: none;
     }
     #action-bar Button:hover { background: $surface-active; color: $ink; }
@@ -2012,6 +2234,9 @@ class WorkbenchApp(App[None]):
     #action-bar Button.-primary { background: $accent; color: $accent-ink; }
     #action-bar Button.-primary:focus { text-style: bold underline; }
     #action-bar Button:disabled { background: $surface; color: $ink-muted; }
+    #action-bar #action-prev, #action-bar #action-next {
+        width: 3; min-width: 3; margin-right: 0; padding: 0;
+    }
     #status { height: 1; overflow: hidden; color: $ink-muted; }
     #keybar { height: 2; background: $surface; padding: 0 1; border-top: solid $line; }
     ModalScreen { align: center middle; background: $canvas 85%; }
@@ -2025,8 +2250,10 @@ class WorkbenchApp(App[None]):
     .field-label { width: 16; color: $ink-soft; content-align: left middle; }
     Input, Select { background: $surface-raised; color: $ink; }
     Input.-invalid, Select.-invalid { background: $danger; color: $canvas; }
-    #providers, #palette, #model-picker { height: 90%; overflow: hidden; }
-    #providers DataTable, #palette DataTable, #model-picker DataTable { height: 1fr; width: 1fr; }
+    #providers, #palette, #model-picker, #superres { height: 90%; overflow: hidden; }
+    #providers DataTable, #palette DataTable, #model-picker DataTable, #superres DataTable {
+        height: 1fr; width: 1fr;
+    }
     #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
     #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid $line; }
     #transform-preset-col { width: 33%; min-width: 26; height: 1fr; margin-left: 1; }
@@ -2049,6 +2276,26 @@ class WorkbenchApp(App[None]):
     SelectOverlay { background: $surface-raised; border: solid $line; color: $ink-soft; }
     SelectOverlay > .option-list--option-highlighted {
         background: $accent; color: $accent-ink; text-style: bold;
+    }
+    # A checklist is the multi-value twin of Select: one row per option, same palette.
+    SelectionList {
+        height: auto; max-height: 12; background: $surface-raised; color: $ink-soft;
+        border: none; padding: 0;
+        & > .option-list--option-highlighted {
+            background: $accent; color: $accent-ink; text-style: bold;
+        }
+        # Textual draws the same glyph in both states and only recolours it, so the box is
+        # filled when ticked and invisible when not; the [x]/[ ] in the label is the words.
+        & > .selection-list--button {
+            color: $surface-raised; background: $surface-raised;
+        }
+        & > .selection-list--button-selected {
+            color: $accent; background: $surface-raised;
+        }
+        & > .selection-list--button-highlighted,
+        & > .selection-list--button-selected-highlighted {
+            color: $accent-ink; background: $accent;
+        }
     }
     Button {
         background: $surface-raised; color: $ink-soft; border: none; height: 1;
@@ -2073,7 +2320,7 @@ class WorkbenchApp(App[None]):
     #action-delete { width: 1fr; }
     .compact #sidebar { width: 26; min-width: 20; }
     .compact #detail-pane { padding: 1 1 0 1; }
-    .compact #action-bar Button { min-width: 7; margin-right: 0; width: 1fr; }
+    .compact #action-bar Button { min-width: 6; margin-right: 0; }
     .compact .panel { width: 96%; padding: 1; }
     #transform-content { height: 1fr; }
     #transform-preview-col > Static:first-child { height: 1fr; }
@@ -2084,21 +2331,15 @@ class WorkbenchApp(App[None]):
     .compact #transform-preview-col > Static:last-child { height: 1; overflow: hidden; }
     .compact #transform-cat-col { width: 1fr; min-width: 12; }
     .compact #transform-preset-col { width: 1fr; min-width: 18; }
-    #action-prev, #action-next { width: 4; min-width: 4; }
-    .compact #action-bar Button { min-width: 5; width: 8; padding: 0; }
-    .compact #action-bar #action-generate { width: 10; }
-    .compact #action-bar #action-transform { width: 13; }
     .compact .sidebar-actions Button { padding: 0; }
     .compact .sidebar-actions #action-providers { width: 13; }
-    .compact #action-bar #action-prev, .compact #action-bar #action-next {
-        width: 3; min-width: 3; padding: 0;
-    }
     """
     BINDINGS = [
         Binding("q", "quit", t("Quit", "退出")),
         Binding("c", "cache", t("Cache", "缓存")),
         Binding("v", "providers", "Providers"),
         Binding("p", "providers", "Providers", show=False),
+        Binding("s", "superres", t("Local models", "本地模型")),
         Binding("n", "new_session", t("New session", "新建会话")),
         Binding("g", "generate", t("Generate", "生成")),
         Binding("m", "edit", t("Edit", "编辑")),
@@ -2140,6 +2381,7 @@ class WorkbenchApp(App[None]):
         self.film_items: list[dict[str, Any]] = []
         self.film_index = -1
         self.planning = False
+        self._name_width = 12
         self.meta_base = ""
         self._preview_cache: dict[tuple[str, int, int, float], str] = {}
         self._preview_request_id: int = 0
@@ -2169,13 +2411,14 @@ class WorkbenchApp(App[None]):
                     Button(t("Edit", "编辑"), id="action-edit"),
                     Button(t("Transform", "变换"), id="action-transform"),
                     Button(t("Open", "打开"), id="action-open"),
+                    Static(id="action-gap"),
                     Button(t("‹", "‹"), id="action-prev", tooltip=t("Previous image", "上一张")),
                     Button(t("›", "›"), id="action-next", tooltip=t("Next image", "下一张")),
                     id="action-bar",
                 )
                 yield self.film
                 yield self.status
-        yield Static(_keybar(self._keybar_entries()), id="keybar")
+        yield Static(id="keybar")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
@@ -2194,17 +2437,15 @@ class WorkbenchApp(App[None]):
             action()
 
     def _keybar_entries(self) -> list[tuple[str, str]]:
-        return [
-            ("g", t("Generate", "生成")),
-            ("m", t("Edit", "编辑")),
-            ("t", t("Transform", "变换")),
-            ("d", t("Delete image", "删图")),
-            ("x", t("Delete session", "删除会话")),
-            ("[ ]", t("Artifacts", "产物")),
-            (":", t("Commands", "命令")),
-            ("l", t("Language", "语言")),
-            ("?", t("Help", "帮助")),
-        ]
+        keys = _KEYBAR_KEYS
+        if self.current is None:
+            keys = [entry for entry in keys if entry[0] in _KEYBAR_EMPTY_WORKSPACE]
+        return [(key, t(*labels)) for key, labels in [*keys, *_KEYBAR_TAIL]]
+
+    def _render_keybar(self) -> None:
+        """Re-fit the legend after a resize or a selection change."""
+        width = (self.size.width or 80) - 2  # keybar padding
+        self.query_one("#keybar", Static).update(_keybar(self._keybar_entries(), width))
 
     def action_toggle_language(self) -> None:
         from imagen_cli import i18n
@@ -2215,10 +2456,9 @@ class WorkbenchApp(App[None]):
             i18n.save_language(target)
         except OSError:
             pass
-        self.sessions.clear(columns=True)
-        self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
+        self._add_session_columns()
         self.refresh_rows()
-        self.query_one("#keybar", Static).update(_keybar(self._keybar_entries()))
+        self._render_keybar()
         labels = {
             "new": t("New", "新建"), "providers": t("Providers", "端点"),
             "delete": t("Delete session", "删除会话"),
@@ -2233,25 +2473,42 @@ class WorkbenchApp(App[None]):
         self.title = "Imagen"
         self.sessions.focus()
         self.sessions.cursor_type = "row"
-        self.sessions.add_columns(t("Session", "会话"), t("Turns", "轮次"), t("Version", "版本"))
+        self._add_session_columns()
         self.refresh_rows()
+        self._render_keybar()
+
+    def _add_session_columns(self) -> None:
+        """Narrow fixed columns: the last header stays visible and long names truncate.
+
+        Compact drops the turn count, which costs the most and tells the least; the table
+        width is the sidebar minus its padding and scrollbar, cells pad by one per side.
+        """
+        compact = self.has_class("compact")
+        version = max(5, cell_len(t("Version", "版本")))
+        turns = max(5, cell_len(t("Turns", "轮次")))
+        cells = (22 if compact else 28) - 2 * (2 if compact else 3)
+        self._name_width = cells - version if compact else cells - turns - version
+        self.sessions.clear(columns=True)
+        if compact:
+            self.sessions.add_column(t("Session", "会话"), key="name", width=self._name_width)
+            self.sessions.add_column(t("Version", "版本"), key="version", width=version)
+        else:
+            self.sessions.add_column(t("Session", "会话"), key="name", width=self._name_width)
+            self.sessions.add_column(t("Turns", "轮次"), key="turns", width=turns)
+            self.sessions.add_column(t("Version", "版本"), key="version", width=version)
 
     def _say(self, message: str, tone: str = "muted") -> None:
         self.status.update(Text(message, style=_TONES[tone]))
 
     def refresh_rows(self) -> None:
         self.sessions.clear()
-        sessions = [
-            row
-            for row in queries.iter_all(self.deps.repositories, "sessions")
-            if row.get("deleted_at") is None
-        ]
+        sessions = self._session_rows()
+        compact = self.has_class("compact")
         for row in sessions:
             turns = len(queries.iter_all(self.deps.repositories, "turns", session_id=row["id"]))
             self.sessions.add_row(
-                _sanitize(row["name"]),
-                str(turns),
-                str(row["version"]),
+                _ellipsize(_sanitize(row["name"]), self._name_width),
+                *([str(row["version"])] if compact else [str(turns), str(row["version"])]),
                 key=row["id"],
             )
         identities = [str(row["id"]) for row in sessions]
@@ -2265,22 +2522,22 @@ class WorkbenchApp(App[None]):
             self.film_items = []
             self.film_index = -1
             self.film.update("")
+            # One instruction, in the panel that has room for it; the status line stays for results.
             self.preview.update(
                 Text(
-                    t("No artifacts yet\n\nPress n for a new session", "尚无产物\n\n按 n 新建会话"),
+                    t(
+                        "No sessions yet\n\nPress n to create one, then v to pick the endpoint",
+                        "尚无会话\n\n按 n 新建，v 选择端点与模型",
+                    ),
                     justify="center",
                 )
             )
-            self._say(
-                t(
-                    "Press n for a new session; v selects endpoint and model",
-                    "按 n 新建会话，v 选择端点与模型",
-                ),
-                "info",
-            )
+            self._say("")
+            self._render_keybar()
             return
         self.sessions.move_cursor(row=identities.index(str(self.current)))
         self.show_detail()
+        self._render_keybar()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         # Repopulating the table queues highlights for old positions; only the live cursor counts.
@@ -2297,9 +2554,15 @@ class WorkbenchApp(App[None]):
         self.show_detail()
 
     def on_resize(self, event: events.Resize) -> None:
-        self.set_class(event.size.width < 110, "compact")
+        compact = event.size.width < 110
+        if compact != self.has_class("compact"):
+            # The column set changes with the sidebar width, so the rows are rebuilt too.
+            self.set_class(compact, "compact")
+            self._add_session_columns()
+            self.refresh_rows()
         for screen in self.screen_stack:
-            screen.set_class(event.size.width < 110, "compact")
+            screen.set_class(compact, "compact")
+        self._render_keybar()
         self.show_detail()
 
     def _sync_actions(self) -> None:
@@ -2330,14 +2593,15 @@ class WorkbenchApp(App[None]):
             "height": artifact.get("height"),
         }
 
-    def _load_artifacts(self) -> list[dict[str, Any]]:
+    def _load_artifacts(self, session: str | None = None) -> list[dict[str, Any]]:
         """One entry per published output, oldest turn first."""
-        if self.current is None:
+        identity = session or self.current
+        if identity is None:
             return []
         items: list[dict[str, Any]] = []
         seen: set[str] = set()
         turns = sorted(
-            queries.iter_all(self.deps.repositories, "turns", session_id=self.current),
+            queries.iter_all(self.deps.repositories, "turns", session_id=identity),
             key=lambda row: (row.get("created_at", ""), row["id"]),
         )
         for turn in turns:
@@ -2354,7 +2618,7 @@ class WorkbenchApp(App[None]):
                     seen.add(identity)
                     items.append(item)
         for link in queries.iter_all(
-            self.deps.repositories, "artifact_links", session_id=self.current
+            self.deps.repositories, "artifact_links", session_id=identity
         ):
             identity = str(link["artifact_id"])
             if identity in seen:
@@ -2510,9 +2774,11 @@ class WorkbenchApp(App[None]):
         )
         profile, model = self._creation_defaults(row)
         model = model.rsplit("/", 1)[-1]
-        self.meta_base = " · ".join(part for part in (profile, model) if part) or t(
-            "No endpoint or model selected yet", "尚未选择端点与模型"
-        )
+        # The endpoint reads as a name; its id is 36 cells of noise on a one-line summary.
+        stored = self.deps.repositories.get("profiles", profile) if profile else None
+        self.meta_base = " · ".join(
+            part for part in (str((stored or {}).get("name") or profile), model) if part
+        ) or t("No endpoint or model selected yet", "尚未选择端点与模型")
         self.meta.update(self.meta_base)
         previous = (
             str(self.film_items[self.film_index]["id"])
@@ -2617,10 +2883,132 @@ class WorkbenchApp(App[None]):
                 choices[name] = [("true", "true"), ("false", "false")]
         for name in control_names - {"timeout"}:
             choices[name] = [("true", "true"), ("false", "false")]
+        names = {name for name, _, _ in fields}
+        choices, multiple, custom = self._command_choices(command, choices, names)
+        title = t(f"Command {command}", f"命令 {command}")
+        if command == "sheet":
+            self.push_screen(
+                SheetForm(title, fields, choices=choices, multiple=multiple, custom=custom,
+                          artifacts_for=self._sheet_artifacts, optional=optional), done
+            )
+            return
+        if command == "models use":
+            # A model id belongs to one profile, so the list follows the profile field.
+            choices["id"] = []
+            custom.add("id")
+            self.push_screen(
+                ModelUseForm(title, fields, choices=choices, custom=custom,
+                             models=self._declared_models(), optional=optional), done
+            )
+            return
         self.push_screen(
-            ChoiceForm(t(f"Command {command}", f"命令 {command}"), fields,
-                       optional=optional, choices=choices), done
+            ChoiceForm(title, fields, choices=choices, multiple=multiple, custom=custom,
+                       optional=optional), done
         )
+
+    def _declared_models(self) -> dict[str, list[str]]:
+        """Declared ids per profile: one source for the endpoint panel and the palette."""
+        return {
+            str(row["id"]): [
+                str(model["model_id"])
+                for model in queries.iter_all(
+                    self.deps.repositories, "provider_models", profile_id=str(row["id"])
+                )
+            ]
+            for row in queries.iter_all(self.deps.repositories, "profiles")
+        }
+
+    def _sheet_artifacts(self, session: str) -> list[tuple[str, str]]:
+        """One session's outputs; the current session stands in while the field is empty."""
+        return self._artifact_choices(session or None)
+
+    def _session_rows(self) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in queries.iter_all(self.deps.repositories, "sessions")
+            if row.get("deleted_at") is None
+        ]
+
+    def _session_choices(self) -> list[tuple[str, str]]:
+        """Names the user recognises, ids the CLI resolves."""
+        return [
+            (f"{_sanitize(row['name'])} ({row['id']})", str(row["id"]))
+            for row in self._session_rows()
+        ]
+
+    def _artifact_choices(self, session: str | None = None) -> list[tuple[str, str]]:
+        """One session's outputs, numbered the way the film strip numbers them."""
+        choices = []
+        for index, item in enumerate(self._load_artifacts(session)):
+            width, height = item["width"], item["height"]
+            label = " ".join(
+                part
+                for part in (
+                    f"{index + 1:02d}.",
+                    _sanitize(item["id"]),
+                    f"{width}×{height}" if width and height else "",
+                    _sanitize(item["operation"]),
+                )
+                if part
+            )
+            choices.append((label, str(item["id"])))
+        return choices
+
+    def _command_choices(
+        self,
+        command: str,
+        choices: dict[str, list[tuple[str, str]]],
+        names: set[str],
+    ) -> tuple[dict[str, list[tuple[str, str]]], dict[str, list[str]], set[str]]:
+        """Candidates the CLI offers for this command, so both ends pick from one list.
+
+        Commands that create an id (`profile add`) keep a free text field: nothing to pick.
+        """
+        multiple: dict[str, list[str]] = {}
+        custom: set[str] = set()
+        for name, candidates in (
+            ("session", self._session_choices),
+            ("artifact", self._artifact_choices),
+        ):
+            if name in names:
+                known = candidates()
+                if known:  # an empty list would leave nothing to pick and nothing to type
+                    choices[name] = known
+                    custom.add(name)
+        if command in {"superres fetch", "superres benchmark"}:
+            choices["model"] = superres.fetch_choices()
+        if command == "transform":
+            # Same two lists `imagen ops` prints; parameters are appended by hand.
+            from imagen_cli.application.operator_catalog import browse_entries
+
+            choices["op"] = [(name, name) for name in sorted(media_ops.OPS)]
+            choices["preset"] = [
+                (key, key)
+                for key in dict.fromkeys(
+                    entry["key"].split(" (", 1)[0] for entry in browse_entries()
+                )
+            ]
+            custom |= {"op", "preset"}
+        if "artifacts" in names:
+            # A sheet's sources come from one session; an empty list would leave a field
+            # with nothing to tick and nothing to type.
+            known = self._artifact_choices()
+            if known:
+                choices["artifacts"] = known
+                multiple["artifacts"] = [value for _, value in known]
+        if command.startswith("skills "):
+            labels, preselected = prompt_order()
+            choices["target"] = [(label, label) for label in labels]
+            multiple["target"] = preselected
+        if command in _EXISTING_PROFILE_COMMANDS:
+            choices["profile"] = [
+                (
+                    f"{row.get('name') or row['id']} · {row.get('provider', '')} ({row['id']})",
+                    str(row["id"]),
+                )
+                for row in queries.iter_all(self.deps.repositories, "profiles")
+            ]
+        return choices, multiple, custom
 
     def _run_command(
         self,
@@ -2674,12 +3062,7 @@ class WorkbenchApp(App[None]):
         self, title: str, fields: list[tuple[str, str, str]], *, optional: set[str],
     ) -> CreationForm:
         profiles = queries.iter_all(self.deps.repositories, "profiles")
-        models = {
-            str(row["id"]): [str(model["model_id"]) for model in queries.iter_all(
-                self.deps.repositories, "provider_models", profile_id=str(row["id"]),
-            )]
-            for row in profiles
-        }
+        models = self._declared_models()
         def fetch_models(identity: str) -> list[str]:
             from functools import partial
 
@@ -2895,6 +3278,9 @@ class WorkbenchApp(App[None]):
 
     def action_providers(self) -> None:
         self.push_screen(ProvidersScreen(self.deps))
+
+    def action_superres(self) -> None:
+        self.push_screen(SuperresScreen(self.deps, self._run_command))
 
     def action_refresh(self) -> None:
         self.refresh_rows()
