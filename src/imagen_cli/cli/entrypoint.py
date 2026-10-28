@@ -199,6 +199,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "reference",
                 "count",
                 "size",
+                "aspect-ratio",
+                "image-size",
                 "provider-params-file",
                 "digest",
                 "scope",

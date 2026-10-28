@@ -40,6 +40,51 @@ Gemini discovery prefers `models`; it accepts `data[].id` only when that field i
 
 Updating with `profile set` requires `--revision CURRENT_REVISION`; query `profile show PROFILE` first. `profile update` takes `--config-file`, not individual fields. A user-authorized key-file import uses `profile secret PROFILE --key-file PATH`; never read or display the key yourself.
 
+## Geometry and model limits
+
+These are this build's local acceptance rules, not proof that a gateway serves the model or returns the requested dimensions. Consult installed `schema generate` / `schema edit`; the offline plan validates the selected route and model.
+
+- Only `openai/images` and `gemini/generate_content` dispatch. Other profiles fail with `unsupported_capability` before a plan exists. Keep the user's endpoint/model; report the limit instead of switching silently.
+- OpenAI `size` accepts `auto`, `1024x1024`, `1536x1024`, and `1024x1536`. The `gpt-image-2*` family also accepts `WIDTHxHEIGHT`: both edges divisible by 16, ratio 1:3–3:1, each edge at most 3840, total pixels 655,360–8,294,400. `count` is 1–10.
+- OpenAI `provider_params.quality` accepts `auto`, `low`, `medium`, `high`; `gpt-image-2.5*` also accepts `xhigh`, `max`. `input_fidelity` is edit-only. Never duplicate `count` or geometry in `provider_params`.
+- Namespaced model IDs such as `A6N/gpt-image-2.5-sunburst` retain the full ID in requests; local model-family checks use its last slash-delimited segment. This does not establish gateway compatibility.
+- Gemini uses top-level `aspect_ratio` and `image_size`, never `size`. Ratios: `1:1`, `1:4`, `4:1`, `1:8`, `8:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`. `count` must be 1.
+
+| Gemini model | Accepted `image_size` |
+|---|---|
+| `gemini-3.1-flash-image` | `512`, `1K`, `2K`, `4K` |
+| `gemini-3-pro-image`, `gemini-nano-banana-2.1`, gateway alias `nano-banana-2` | `1K`, `2K`, `4K` |
+| `gemini-3.1-flash-lite-image` | `1K` |
+| `gemini-2.5-flash-image` | Omit `image_size`; no tier control |
+
+Use uppercase `K`; `2k` is invalid. Explain invalid requests and obtain the user's corrected choice rather than silently changing size, quality, model, or count.
+
+Locally refused IDs: OpenAI `gpt-image-1`, `dall-e-2`, `dall-e-3`; Gemini `gemini-3-pro-image-preview`, `gemini-3.1-flash-image-preview`. A stale catalog cannot override this refusal. Do not select a replacement without the user.
+
+For a user-selected OpenAI 2.5-family model, a 1536×864, xhigh request is:
+
+```json
+{
+  "schema_version": 1,
+  "operation": "generate",
+  "session": "ses_REPLACE",
+  "profile": "USER_SELECTED_OPENAI_PROFILE",
+  "model": "A6N/gpt-image-2.5-sunburst",
+  "prompt": "USER_APPROVED_PROMPT",
+  "count": 1,
+  "size": "1536x864",
+  "provider_params": {"quality": "xhigh"}
+}
+```
+
+For the user's Gemini `gemini-3.1-flash-image` request, use their Gemini profile/model, remove `size` and `provider_params.quality`, and set `"aspect_ratio": "16:9", "image_size": "2K"` at the top level. Unspecified geometry is omitted, never empty or `null`.
+
+```bash
+imagen generate --input-json request.json --dry-run --agent
+```
+
+Expect `planned` with `data.plan.normalized_parameters`; no creation request is sent. Without `--dry-run` (and without `--async`), expect `approval_required`. A valid plan is not a generated artifact or proof of remote availability. `validation_error` / `unsupported_capability` exit with 2; retain the error's reason and do not approve a refused request.
+
 ## Create and execute
 
 Create a user-named session with `imagen session create NAME --agent`, or reuse their selected session. Put its returned ID in `request.json`:

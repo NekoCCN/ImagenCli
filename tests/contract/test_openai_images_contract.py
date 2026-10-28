@@ -24,7 +24,7 @@ def profile() -> ProviderProfile:
         provider="openai",
         family="images",
         base_url="https://api.openai.com/v1",
-        model_default="gpt-image-1",
+        model_default="gpt-image-2.5-sunburst",
         credential_ref="fixture:only",
         trust_policy={},
         revision=1,
@@ -39,7 +39,7 @@ def creation() -> ValidatedRequest:
         profile_identity="openai-local",
         profile_revision=1,
         operation="generate",
-        model="gpt-image-1",
+        model="gpt-image-2.5-sunburst",
         model_revision="fixture-revision",
         prompt="画一只猫",
         normalized_parameters={"count": 2, "size": "1024x1024"},
@@ -83,7 +83,7 @@ def test_generate_normalizes_and_extracts_independent_candidates(
         assert str(sent.url) == "https://api.openai.com/v1/images/generations"
         assert sent.headers["authorization"] == "Bearer fixture-secret"
         assert json.loads(sent.content) == {
-            "model": "gpt-image-1",
+            "model": "gpt-image-2.5-sunburst",
             "prompt": "画一只猫",
             "n": 2,
             "size": "1024x1024",
@@ -466,3 +466,82 @@ def test_creation_snapshot_does_not_change_with_callers_mutable_parameters(
     assert frozen.normalized_parameters["count"] == 1
     with pytest.raises(TypeError):
         frozen.normalized_parameters["count"] = 3  # type: ignore[index]
+
+
+def test_arbitrary_resolution_reaches_the_provider(
+    profile: ProviderProfile, creation: ValidatedRequest, png_bytes: bytes,
+) -> None:
+    sent: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=payload(png_bytes, 1))
+
+    adapter(profile, respond).create(
+        replace(creation, model="gpt-image-2.5-sunburst",
+                normalized_parameters={"count": 1, "size": "1536x864"})
+    )
+    assert json.loads(sent[0].content)["size"] == "1536x864"
+
+
+@pytest.mark.parametrize("size", ["1920x1081", "512x512", "4096x1024", "1024x4096"])
+def test_a_size_outside_the_documented_rules_never_reaches_the_provider(
+    profile: ProviderProfile, creation: ValidatedRequest, size: str,
+) -> None:
+    with pytest.raises(ProviderFailure) as caught:
+        adapter(profile, lambda _: pytest.fail("no network")).create(
+            replace(creation, model="gpt-image-2.5-sunburst",
+                    normalized_parameters={"count": 1, "size": size})
+        )
+    assert caught.value.type == "validation_error"
+
+
+def test_extended_quality_tiers_reach_the_provider(
+    profile: ProviderProfile, creation: ValidatedRequest, png_bytes: bytes,
+) -> None:
+    sent: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=payload(png_bytes, 1))
+
+    adapter(profile, respond).create(
+        replace(creation, model="gpt-image-2.5-sunburst",
+                normalized_parameters={"count": 1, "quality": "xhigh"})
+    )
+    assert json.loads(sent[0].content)["quality"] == "xhigh"
+
+
+def test_a_quality_tier_the_model_does_not_offer_is_refused(
+    profile: ProviderProfile, creation: ValidatedRequest,
+) -> None:
+    with pytest.raises(ProviderFailure) as caught:
+        adapter(profile, lambda _: pytest.fail("no network")).create(
+            replace(creation, model="gpt-image-1.5",
+                    normalized_parameters={"count": 1, "quality": "xhigh"})
+        )
+    assert caught.value.type == "validation_error"
+
+
+def test_a_shut_down_model_id_is_refused(
+    profile: ProviderProfile, creation: ValidatedRequest,
+) -> None:
+    for model in ("gpt-image-1", "dall-e-3"):
+        with pytest.raises(ProviderFailure) as caught:
+            adapter(profile, lambda _: pytest.fail("no network")).create(
+                replace(creation, model=model)
+            )
+        assert caught.value.type == "unsupported_capability"
+
+
+def test_a_current_model_other_than_the_profile_default_is_accepted(
+    profile: ProviderProfile, creation: ValidatedRequest, png_bytes: bytes,
+) -> None:
+    sent: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=payload(png_bytes, 1))
+
+    adapter(profile, respond).create(replace(creation, model="gpt-image-2.5-flare"))
+    assert json.loads(sent[0].content)["model"] == "gpt-image-2.5-flare"

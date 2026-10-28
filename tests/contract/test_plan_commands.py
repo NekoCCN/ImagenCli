@@ -69,14 +69,14 @@ def test_cli_executes_approved_plan_once_with_real_adapter(tmp_path, png_bytes, 
         repo = container.repositories
         repo.update("profiles", "local", {"credential_ref": "env:IMAGEN_TEST_CREDENTIAL"})
         session = SessionService(repo, container.artifact_store).create_session("execution")
-        record = capability(id="execution", model="gpt-image-1", parameter_schema={
+        record = capability(id="execution", model="gpt-image-2.5-sunburst", parameter_schema={
             "type": "object", "properties": {"count": {"const": 1}},
             "additionalProperties": False,
         })
         repo.insert("capabilities", record)
         planning = PlanningService(repo)
         plan, _ = planning.create_plan(
-            session_id=session.id, operation="generate", model="gpt-image-1",
+            session_id=session.id, operation="generate", model="gpt-image-2.5-sunburst",
             normalized_parameters={"count": 1}, prompt_snapshot="blue sky", input_hashes=[],
             portable_context={"kind": "none"}, capability_digest=record["digest"],
             target_snapshot={
@@ -132,7 +132,7 @@ def test_cli_generate_resume_and_edit_preserves_history(tmp_path, png_bytes, mon
         })
         for operation in ("generate", "edit"):
             container.repositories.insert("capabilities", capability(
-                id=f"journey-{operation}", model="gpt-image-1", operation=operation,
+                id=f"journey-{operation}", model="gpt-image-2.5-sunburst", operation=operation,
                 continuation_strategy="explicit_images" if operation == "edit" else "none",
                 parameter_schema={"type": "object", "properties": {"count": {"const": 1}},
                                   "additionalProperties": False},
@@ -160,7 +160,7 @@ def test_cli_generate_resume_and_edit_preserves_history(tmp_path, png_bytes, mon
 
     def create(operation, *inputs):
         code, planned = invoke(workspace, operation, "--session", "poster", "--model",
-                               "gpt-image-1", "--prompt-file", str(prompt), *inputs)
+                               "gpt-image-2.5-sunburst", "--prompt-file", str(prompt), *inputs)
         assert code == 6, planned
         plan = planned["data"]["plan"]
         # Pending approval must not create a job or send anything.

@@ -13,7 +13,7 @@ from imagen_cli.storage.repositories import Repositories
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static  # noqa: E402
+from textual.widgets import Input, Select, Static  # noqa: E402
 
 from imagen_cli.cli.tui.app import Deps, WorkbenchApp  # noqa: E402
 
@@ -2277,5 +2277,107 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
             assert runs == [
                 [{"op": "superres", "params": {"model": model, "accept": True}}]
             ]
+
+    asyncio.run(run())
+
+
+def _route_session(deps_value, provider, family, model, base_url, identity):
+    deps_value.repositories.insert("profiles", {
+        "id": identity, "name": identity, "provider": provider, "family": family,
+        "base_url": base_url, "model_default": model,
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    session = "ses_" + identity.rjust(32, "0")
+    deps_value.repositories.insert("sessions", {
+        "id": session, "name": identity, "version": 0, "created_at": "2026-10-24T00:00:00Z",
+        "default_profile_id": identity, "default_model": model,
+    })
+    return session
+
+
+def test_generate_keeps_the_pixel_prefill_only_where_the_route_takes_a_size(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "openai", "images", "gpt-image-2.5-sunburst",
+        "https://api.openai.com/v1", "p-openai",
+    )
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app_screen = None
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            app_screen = app.screen
+            assert app_screen.values()["size"] == "1024x1024"
+
+    asyncio.run(run())
+
+
+def test_generate_leaves_gemini_geometry_empty_and_offers_the_documented_tiers(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "gemini", "generate_content", "gemini-3.1-flash-image",
+        "https://generativelanguage.googleapis.com/v1beta", "p-gemini",
+    )
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        return "approval_required", {"plan": {"id": "pln_" + "1" * 32,
+                                             "plan_digest": "a" * 64,
+                                             "operation": "generate", "model": "m"}}
+
+    deps_value.execute = execute
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            form = app.screen
+            assert form.values()["size"] == ""
+            form.query_one("#aspect_ratio", Input).value = "16:9"
+            form.query_one("#image_size-choice", Select).value = "2K"
+            await pilot.pause()
+            # Selecting a documented tier is what proves the candidate exists.
+            assert form.values()["image_size"] == "2K"
+            await pilot.press(*"a cat")
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+
+    asyncio.run(run())
+    assert calls[0][1]["aspect_ratio"] == "16:9"
+    assert calls[0][1]["image_size"] == "2K"
+    assert "size" not in calls[0][1]
+
+
+def test_switching_to_a_route_without_pixels_clears_the_pixel_field(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "openai", "images", "gpt-image-2.5-sunburst",
+        "https://api.openai.com/v1", "p-openai",
+    )
+    _route_session(
+        deps_value, "gemini", "generate_content", "gemini-3.1-flash-image",
+        "https://generativelanguage.googleapis.com/v1beta", "p-gemini",
+    )
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            form = app.screen
+            assert form.values()["size"] == "1024x1024"
+            form.query_one("#profile", Select).value = "p-gemini"
+            await pilot.pause()
+            assert form.values()["size"] == ""
 
     asyncio.run(run())

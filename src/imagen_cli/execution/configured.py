@@ -8,8 +8,11 @@ from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.providers.base import ImmediateResult, ProviderFailure, ValidatedRequest
 from imagen_cli.providers.gemini import GeminiAdapter
 from imagen_cli.providers.openai_images import OpenAIImagesAdapter
+from imagen_cli.providers.routes import SUPPORTED_ROUTES
 from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
+
+__all__ = ["ConfiguredAdapter", "SUPPORTED_ROUTES", "resolve_credential"]
 
 
 def resolve_credential(
@@ -57,6 +60,8 @@ class ConfiguredAdapter:
         if row is None:
             raise ProviderFailure("validation_error")
         profile = ProfileService().load(row)
+        if (profile.provider, profile.family) not in SUPPORTED_ROUTES:
+            raise ProviderFailure("unsupported_capability")
         if (profile.provider, profile.family) == ("gemini", "generate_content"):
             if self.private_store is None:
                 raise ProviderFailure("unsupported_capability")

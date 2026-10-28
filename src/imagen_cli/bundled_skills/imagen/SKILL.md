@@ -1,6 +1,6 @@
 ---
 name: imagen
-version: 1.1.0
+version: 1.2.0
 description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 
@@ -31,6 +31,19 @@ Use the installed version's help and schema; do not guess flags. For machine cal
 - Agents use the CLI. The human TUI uses selectors with custom text fallbacks; both share validation and execution logic.
 
 See [workflows](references/workflows.md) for configuration and request examples.
+
+## Request geometry
+
+Choose fields from the selected profile's `provider` / `family`, not the model's display name:
+
+| Route | Top-level fields | Count per request |
+|---|---|---|
+| `openai` / `images` | `size`: pixels (`WIDTHxHEIGHT`) or `auto` | 1–10 |
+| `gemini` / `generate_content` | `aspect_ratio`: e.g. `16:9`; `image_size`: model-supported tier with uppercase `K` | 1 |
+
+These are the only routes this build dispatches; other configured routes are refused with `unsupported_capability` before approval. OpenAI rejects `aspect_ratio` / `image_size`; Gemini rejects `size`. Omit unspecified geometry fields rather than sending empty strings, `null`, or a universal `1024x1024` default.
+
+Keep `count`, `size`, `aspect_ratio`, and `image_size` at the request's top level. OpenAI options such as `quality` belong in `provider_params`. Model-specific limits and an offline JSON example are in [workflows](references/workflows.md#geometry-and-model-limits). The generic schema's count maximum is not the route's limit.
 
 ## Generate and edit
 

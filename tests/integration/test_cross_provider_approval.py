@@ -46,7 +46,7 @@ def _setup(container: Container, png: bytes, *, approved: bool):
     repository = container.repositories
     session = SessionService(repository, container.artifact_store).create_session("cross")
     source = _profile(
-        "openai-source", "openai", "images", "https://api.openai.com/v1", "gpt-image-1",
+        "openai-source", "openai", "images", "https://api.openai.com/v1", "gpt-image-2.5-sunburst",
     )
     target = _profile(
         "gemini-target", "gemini", "generate_content",

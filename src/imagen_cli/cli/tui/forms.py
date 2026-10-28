@@ -14,8 +14,11 @@ from textual.widgets import Button, Input, Select, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
 from imagen_cli.i18n import t
+from imagen_cli.providers.vocabulary import specs
 
 from .modal import Modal
+
+GEOMETRY = ("aspect_ratio", "image_size")
 
 
 class ChoiceForm(Modal[dict[str, str] | None]):
@@ -526,6 +529,10 @@ class CreationForm(ChoiceForm):
         self.request_version = 0
         self.profiles = {str(row["id"]): row for row in profiles}
         self.models = models
+        self.initial_profile = dict((name, value) for name, _, value in fields).get("profile", "")
+        present = {field for field, _, _ in fields}
+        self.geometry_fields = [name for name in GEOMETRY if name in present]
+        self.geometry = self._geometry_values(self.initial_profile)
         super().__init__(
             title,
             fields,
@@ -539,9 +546,14 @@ class CreationForm(ChoiceForm):
                     for identity, row in self.profiles.items()
                 ],
                 "async": [(t("Yes", "是"), "true"), (t("No", "否"), "false")],
+                **{
+                    name: [(value, value) for value in values]
+                    for name, values in self.geometry.items()
+                    if name in self.geometry_fields
+                },
             },
+            custom=set(self.geometry_fields),
         )
-        self.initial_profile = dict((name, value) for name, _, value in fields).get("profile", "")
 
     def field_choices(self, name: str, default: str) -> ComposeResult:
         if name == "model":
@@ -587,16 +599,47 @@ class CreationForm(ChoiceForm):
         selector.value = current if current and current in choices else "custom"
         self.custom_input("model", selector.value == "custom")
 
+    def _geometry_values(self, identity: str) -> dict[str, tuple[str, ...]]:
+        """Documented values the selected route takes, as Select candidates only."""
+        row = self.profiles.get(identity) or {}
+        table = specs(
+            str(row.get("provider", "")),
+            str(row.get("family", "")),
+            str(row.get("model_default", "")),
+        ) or ()
+        return {
+            name: next((spec.values for spec in table if spec.name == name), ())
+            for name in (*GEOMETRY, "size")
+        }
+
+    def _refresh_geometry(self, identity: str) -> None:
+        self.geometry = self._geometry_values(identity)
+        for name in self.geometry_fields:
+            selector = self.query_one(f"#{name}-choice", Select)
+            selector.set_options(
+                [
+                    *((value, value) for value in self.geometry[name]),
+                    (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+                ]
+            )
+            selector.value = "custom"
+        if "size" in {field for field, _, _ in self.fields} and not self.geometry["size"]:
+            # A pixel size the new route cannot send would only fail at plan time.
+            self.query_one("#size", Input).value = ""
+
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "profile":
             identity = event.value if isinstance(event.value, str) else ""
             if identity != self.initial_profile:
                 self.initial_profile = identity
                 self._models(identity, reset=True)
+                self._refresh_geometry(identity)
         elif event.select.id == "model-choice" and isinstance(event.value, str):
             self.custom_input("model", event.value == "custom")
             if event.value != "custom":
                 self.query_one("#model", Input).value = event.value
+        else:
+            super().on_select_changed(event)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add-profile" and self.add_profile:

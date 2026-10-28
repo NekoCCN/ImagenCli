@@ -31,6 +31,7 @@ from imagen_cli.cli.options import COMMAND_CONTROLS, SharedOptions
 from imagen_cli.cli.registry import COMMANDS, command_summary, discover
 from imagen_cli.cli.renderers import data_error, error_message
 from imagen_cli.i18n import is_chinese, t
+from imagen_cli.providers import vocabulary
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.private_state import PrivateStateStore
@@ -2279,6 +2280,25 @@ def _control_options(
     return SharedOptions(**values)
 
 
+def _creation_arguments(values: dict[str, str], operation: str, session: str) -> dict[str, Any]:
+    """Creation arguments from a form; empty geometry fields stay unsent."""
+    arguments: dict[str, Any] = {
+        "schema_version": 1,
+        "operation": operation,
+        "session": session,
+        "prompt": values["prompt"],
+        "count": int(values.get("count", "1")),
+    }
+    for name in ("size", "aspect_ratio", "image_size"):
+        if values.get(name):
+            arguments[name] = values[name]
+    if values.get("profile"):
+        arguments["profile"] = values["profile"]
+    if values.get("model"):
+        arguments["model"] = values["model"]
+    return arguments
+
+
 def _needs_form(command: str) -> bool:
     """Any field at all means the user may want to fill it, even if none is required.
 
@@ -3319,6 +3339,16 @@ class WorkbenchApp(App[None]):
             done,
         )
 
+    def _pixel_default(self, identity: str, model: str) -> str:
+        """Prefill a pixel size only where the route actually has that field."""
+        row = self.deps.repositories.get("profiles", identity) if identity else None
+        table = vocabulary.specs(
+            str((row or {}).get("provider", "")),
+            str((row or {}).get("family", "")),
+            model or str((row or {}).get("model_default", "")),
+        ) or ()
+        return "1024x1024" if any(spec.name == "size" for spec in table) else ""
+
     def _creation_defaults(self, session: dict[str, Any]) -> tuple[str, str]:
         """Session defaults first; a single profile stands in when the session has none."""
         identity = str(session.get("default_profile_id") or "")
@@ -3389,18 +3419,7 @@ class WorkbenchApp(App[None]):
         def done(values: dict[str, str] | None) -> None:
             if not values or self.deps.execute is None:
                 return
-            arguments: dict[str, Any] = {
-                "schema_version": 1,
-                "operation": "generate",
-                "session": session["name"],
-                "prompt": values["prompt"],
-                "count": int(values.get("count", "1")),
-                "size": values.get("size", "1024x1024"),
-            }
-            if values.get("profile"):
-                arguments["profile"] = values["profile"]
-            if values.get("model"):
-                arguments["model"] = values["model"]
+            arguments = _creation_arguments(values, "generate", session["name"])
             options = _control_options(self.deps.options, _convert_controls(values))
             self._run_creation("generate", arguments, t("Generate", "生成"), options)
 
@@ -3413,10 +3432,16 @@ class WorkbenchApp(App[None]):
                     ("profile", t("profile (optional)", "配置（可留空）"), profile_default),
                     ("model", t("model (optional)", "模型（可留空）"), model_default),
                     ("count", t("count", "数量"), "1"),
-                    ("size", t("size", "尺寸"), "1024x1024"),
+                    (
+                        "size",
+                        t("pixels, e.g. 1536x864 or auto", "像素，如 1536x864 或 auto"),
+                        self._pixel_default(profile_default, model_default),
+                    ),
+                    ("aspect_ratio", t("ratio, e.g. 16:9", "宽高比，如 16:9"), ""),
+                    ("image_size", t("tier, e.g. 2K", "档位，如 2K"), ""),
                     ("async", "true | false", ""),
                 ],
-                optional={"profile", "model", "async"},
+                optional={"profile", "model", "async", "size", "aspect_ratio", "image_size"},
             ),
             done,
         )
@@ -3434,19 +3459,8 @@ class WorkbenchApp(App[None]):
         def done(values: dict[str, str] | None) -> None:
             if not values or self.deps.execute is None:
                 return
-            arguments: dict[str, Any] = {
-                "schema_version": 1,
-                "operation": "edit",
-                "session": session["name"],
-                "prompt": values["prompt"],
-                "inputs": ["artifact:" + identity],
-                "count": int(values.get("count", "1")),
-                "size": values.get("size", "1024x1024"),
-            }
-            if values.get("profile"):
-                arguments["profile"] = values["profile"]
-            if values.get("model"):
-                arguments["model"] = values["model"]
+            arguments = _creation_arguments(values, "edit", session["name"])
+            arguments["inputs"] = ["artifact:" + identity]
             options = _control_options(self.deps.options, _convert_controls(values))
             self._run_creation("edit", arguments, t("Edit", "编辑"), options)
 
@@ -3459,10 +3473,16 @@ class WorkbenchApp(App[None]):
                     ("profile", t("profile (optional)", "配置（可留空）"), profile_default),
                     ("model", t("model (optional)", "模型（可留空）"), model_default),
                     ("count", t("count", "数量"), "1"),
-                    ("size", t("size", "尺寸"), "1024x1024"),
+                    (
+                        "size",
+                        t("pixels, e.g. 1536x864 or auto", "像素，如 1536x864 或 auto"),
+                        self._pixel_default(profile_default, model_default),
+                    ),
+                    ("aspect_ratio", t("ratio, e.g. 16:9", "宽高比，如 16:9"), ""),
+                    ("image_size", t("tier, e.g. 2K", "档位，如 2K"), ""),
                     ("async", "true | false", ""),
                 ],
-                optional={"profile", "model", "async"},
+                optional={"profile", "model", "async", "size", "aspect_ratio", "image_size"},
             ),
             done,
         )
