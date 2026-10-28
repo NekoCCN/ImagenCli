@@ -1,157 +1,113 @@
-<p align="center">
-  <img src="assets/imagen-title-catgirl.png" alt="Imagen project icon" width="960">
-</p>
+# Imagen
 
-<p align="center">
-  <strong>A bridge between people, agents, and image generation models.</strong><br>
-  <a href="README.zh-CN.md">中文</a>
-</p>
+<p align="center"><img src="assets/imagen-title-catgirl.png" alt="Imagen project artwork" width="240"></p>
 
-Imagen connects people and coding agents to image generation models through a shared workspace. People can browse images, adjust parameters, review requests, and manage artifacts in the TUI. Agents can use the CLI, JSON output, and bundled skills to do the same work in the same sessions.
+**An image workbench for humans and coding agents, with shared CLI/TUI sessions and local post-processing.**
 
-Configure your own image endpoint, create a session, and keep working from either interface. Plans, execution records, jobs, and image artifacts are stored locally, so a request made by an agent can be inspected and continued by a person, and the other way around.
+<!-- README-I18N:START -->
+**English** · [中文](README.zh-CN.md)
+<!-- README-I18N:END -->
 
-## What it provides
+Browse and work with images in the terminal, or let a coding agent use the same workspace through structured JSON commands. Both interfaces keep the same sessions, plans, jobs, and saved artifacts, so you can inspect and continue each other's work.
 
-- **One workspace, two interfaces.** The TUI and CLI read and write the same sessions, plans, jobs, and artifacts.
-- **Your endpoint, your models.** Profiles support OpenAI-compatible Images endpoints, Gemini native `generateContent`, and other adapters. Available models and parameters come from the configured endpoint.
-- **Explicit execution.** A plan freezes the request for review. Approval and execution are separate steps; creating a plan never sends a generation request.
-- **Local postprocessing.** Smoothing, line work, tone and color changes, periodic-frequency suppression, resizing, comparison, and contact sheets.
-- **Batch and background work.** Local queues, independent child jobs, and an async worker.
-- **Agent skills.** Bundled guides teach coding agents the CLI, approval rules, artifact handling, and cost and weight boundaries. They install into project or global directories for supported agents.
-- **Optional local upscaling.** Model weights are selected and downloaded by the user, then checked against a pinned SHA-256 digest.
-- **English and Chinese interface text.** English is the default; JSON keys, statuses, and command identifiers do not change with the language.
+Connect an OpenAI-compatible Images endpoint or Gemini native `generateContent` for generation and editing. Requests are planned locally before you approve and execute them. Local transforms, model-based restoration, and upscaling save new artifacts without overwriting their inputs.
 
-Processing always creates a new artifact. It never overwrites the input.
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui.png" alt="Imagen TUI workspace with a saved session and image preview" width="960"></p>
 
-## How it fits together
+*Local sample from the project artwork. Screenshots were exported from the actual CLI and headless TUI on 2026-10-28 (v0.1.10); no generation endpoint was called.*
 
-```text
-request ──► plan (review) ──► approve ──► execute ──► job + artifact
-                                                        │
-                                          postprocess ◄─┴─► compare / sheet
-```
+> [!NOTE]
+> Imagen runs the workflow on your machine. Generation and editing send prompts and required images to the endpoint you configure, and that endpoint may charge you. Local post-processing is experimental; model runtimes and weights are optional, separate downloads.
 
-A turn records one creation attempt. A plan records the frozen request and digest. An artifact records the image and its provenance. Sessions group turns and artifacts. None of these require the TUI: the CLI produces the same records, and the TUI renders them.
+[Install](#install) · [Quick start](#quick-start) · [TUI and CLI](#tui-and-cli-at-a-glance) · [Local processing](#local-postprocessing) · [Agent interface](#machine-interface)
 
-## TUI and CLI at a glance
+## What you can do
 
-Most daily work is available in both interfaces. Keys below are TUI shortcuts.
+- **Move between people and agents.** Review in the TUI, automate with CLI/JSON, and resume the same sessions from either interface.
+- **Review before generating.** Inspect a frozen request and its digest, then approve and execute it as separate steps. Unknown outcomes are not retried automatically.
+- **Keep image work together.** Browse, fork, export, compare, and make contact sheets from saved artifacts and their provenance.
+- **Process locally.** Use ordinary transforms or the separate model-processing page for restoration and upscaling. Large processing asks for budget confirmation first.
+- **Automate with explicit boundaries.** Discover commands through JSON Schema, use bundled agent skills, and run authorized batches or local background jobs.
 
-| Task | TUI | CLI |
-| --- | --- | --- |
-| Browse sessions and images | session list, preview pane, `[` / `]` | `session list`, `session show`, `asset show` |
-| Generate an image | `g` | `generate --input-json request.json` |
-| Edit an image | `m` | `edit --input-json request.json` |
-| Approve, execute, retry a plan | plan screen: `a`, `enter`, `r` | `plan approve`, `plan execute`, `plan retry` |
-| Inspect jobs | not available | `job get`, `job wait`, `job fetch`, `job reconcile` |
-| Local postprocessing | `t`, then `p` for parameters | `ops`, `transform`, `compare`, `sheet` |
-| Open an image or folder | `o` / `O` | `asset open [--folder]` |
-| Fork, export, delete a session | `f`, `e`, `x` | `session fork`, `session export`, `session delete` |
-| Delete an image | `d` | `session remove-artifact`, `asset delete` |
-| Providers and models | `v` | `profile ...`, `models ...`, `providers` |
-| Cache audit and purge | `c` | `cache audit`, `cache purge` |
-| Batch requests | not available | `batch submit`, `batch get`, `batch wait` |
-| Background worker | not available | `worker start`, `worker status`, `worker recover` |
-| Agent skills | not available | `skills list`, `skills install`, `skills uninstall` |
-| Upscaling and restoration | `u` for model processing; `s` for runtime and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
-| Command reference | `:` palette, `?` help | `imagen help`, `imagen schema` |
-| Switch interface language | `l` (remembered) | `--zh` / `--en`, `language` |
-
-## Screenshots
-
-### TUI
-
-<p align="center"><img src="assets/imagen-tui.png" alt="Imagen TUI workspace" width="960"></p>
-
-A saved session with image preview and artifact selection.
-
-### CLI
-
-<p align="center"><img src="assets/imagen-cli.png" alt="Imagen CLI command help" width="960"></p>
-
-Command help for `generate`.
+Help, errors, and TUI text support English and Simplified Chinese. JSON keys, status names, and command identifiers stay the same.
 
 ## Install
 
-Imagen requires Python 3.12 or later.
-
-### Standard install (uv)
+Requires **Python 3.12+**. For the TUI and local processing, install both extras:
 
 ```bash
 uv tool install "imagen-cli[tui,postprocess]"
 imagen --version
+imagen tui
 ```
 
-This is the supported install: `uv tool` puts `imagen` on your `PATH` and owns
-the copy, so Imagen can update itself. Drop `[tui,postprocess]` if you only
-need the CLI.
-
-```bash
-imagen update            # is a newer release out?
-imagen update --install  # install it with the installer that owns this copy
-```
-
-### Standard install (pipx)
+Alternatively, use pipx:
 
 ```bash
 pipx install "imagen-cli[tui,postprocess]"
 ```
 
-`imagen update --install` detects pipx and runs `pipx upgrade imagen-cli`.
+`tui` installs Textual; `postprocess` installs local processing dependencies. Omit the extras for the base CLI. Neither extra installs model runtimes or weights.
 
-### From a checkout (development)
+Check for updates, then explicitly install with the tool that owns this copy:
+
+```bash
+imagen update
+imagen update --install
+```
+
+The installer recognizes `uv tool` and pipx. A checkout or plain pip installation gets a manual upgrade instruction instead of an automatic install.
+
+<details>
+<summary>Run from a source checkout</summary>
 
 ```bash
 uv sync --extra tui --extra postprocess
-uv run imagen tui
+uv run --no-sync imagen tui
 ```
 
-Install into an existing virtual environment instead:
+Or install the checkout into an existing virtual environment:
 
 ```bash
 python -m pip install '.[tui,postprocess]'
 imagen tui
 ```
 
-A checkout or a plain `pip install` has no standard owner: `imagen update`
-still reports the newest release, but `--install` refuses and prints the
-command to run instead of guessing.
+Keep any selected extras in later `uv sync` commands. Development checks are listed under [Development](#development).
 
-`tui` installs Textual. `postprocess` installs the local image-processing dependencies. The base CLI, profiles, sessions, and provider access work without either extra.
-
-Useful entry points:
-
-```bash
-imagen help                 # command index
-imagen help generate        # parameters for one command
-imagen schema generate      # JSON Schema, no network
-imagen --agent help         # machine-oriented reference
-```
+</details>
 
 ## Quick start
 
-1. Configure an endpoint and a credential reference.
-2. Create a session.
-3. Generate a plan, review it, approve it, execute it.
-4. Inspect the job and artifact.
-5. Optionally postprocess the artifact or compare it with another one.
+### 1. Explore without an endpoint
 
 ```bash
-export IMAGEN_API_KEY='your-api-key'
+imagen help
+imagen ops
+imagen schema generate
+imagen tui
+```
 
+These commands do not send image-generation requests. In the TUI, use `?` for shortcuts, `v` for profiles, and `l` to switch language. Previewing saved images needs a truecolor terminal; files can also be opened in an external viewer.
+
+### 2. Configure an endpoint and plan an image
+
+The example below assumes an **already running** OpenAI-compatible Images endpoint at `http://127.0.0.1:8000/v1`. Replace the URL and default model with values your endpoint supports; Imagen does not start a server. Use [Gemini native](#gemini-native) for Google's protocol.
+
+Supply your key through the environment, then save its reference rather than the secret itself:
+
+```bash
 imagen profile set local \
   --provider openai \
   --family images \
   --base-url http://127.0.0.1:8000/v1 \
-  --model-default your-image-model \
+  --model-default gpt-image-2.5-sunburst \
   --credential-ref env:IMAGEN_API_KEY
 
-imagen models refresh --profile local
-imagen session create sketchbook --output json
+imagen session create sketchbook --agent
 ```
 
-Then write `request.json` with the returned session ID:
+Set `IMAGEN_API_KEY` securely before execution. Write `request.json` using the returned session ID:
 
 ```json
 {
@@ -164,24 +120,70 @@ Then write `request.json` with the returned session ID:
 }
 ```
 
+Create and inspect the plan; no creation request has been sent yet:
+
 ```bash
-imagen generate --input-json request.json --output json
+imagen generate --input-json request.json --agent
+imagen plan show PLAN_ID
+```
+
+Replace `PLAN_ID` and `PLAN_DIGEST` with the returned values. **Only after reviewing the request and accepting any provider charges**, approve and execute:
+
+```bash
 imagen plan approve PLAN_ID --digest PLAN_DIGEST
 imagen plan execute PLAN_ID
 ```
 
-The same flow is available in the TUI: press `g`, fill the form, approve the plan with `a`, then execute with `enter`.
+The TUI follows the same flow: `g` opens generation, `m` opens editing, `a` approves the plan, and `enter` executes it. `--async` and `batch submit` can queue or send requests directly; they require explicit authorization for that request or batch.
+
+## How it fits together
+
+```text
+request ──► plan (review) ──► approve ──► execute ──► job + artifact
+                                                        │
+                                          postprocess ◄─┴─► compare / sheet
+```
+
+A **session** groups creation attempts (**turns**) and saved images (**artifacts**). A **plan** freezes the request and digest for review; a **job** records execution. These records live in the local workspace, independently of which interface you use.
+
+## TUI and CLI at a glance
+
+Dedicated pages cover everyday image work. `:` opens the command palette; CLI-only workflows can also be reached there where supported, rather than through their own page.
+
+| Task | TUI | CLI |
+| --- | --- | --- |
+| Browse sessions and images | session list, preview, `[` / `]` | `session list`, `session show`, `asset show` |
+| Generate / edit | `g` / `m` | `generate`, `edit` |
+| Approve / execute / retry a plan | plan page: `a`, `enter`, `r` | `plan approve`, `plan execute`, `plan retry` |
+| Ordinary image processing | `t`; `p` edits parameters | `ops`, `transform`, `compare`, `sheet` |
+| Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
+| Open image / folder | `o` / `O` | `asset open [--folder]` |
+| Fork / export / delete session | `f`, `e`, `x` | `session fork`, `session export`, `session delete` |
+| Delete image | `d` | `session remove-artifact`, `asset delete` |
+| Profiles and endpoint models | `v` | `profile ...`, `models ...`, `providers` |
+| Cache audit / purge | `c` | `cache audit`, `cache purge` |
+| Jobs / batches / worker / skills | command palette; no dedicated pages | `job ...`, `batch ...`, `worker ...`, `skills ...` |
+| Help / language | `?`, `l` | `help`, `schema`, `--zh`, `--en`, `language` |
+
+<details>
+<summary>CLI help screenshot</summary>
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-cli.png" alt="Imagen CLI command help" width="960"></p>
+
+Command help for `generate`. Run `help` and `schema` for the current parameter list.
+
+</details>
 
 ## Configure endpoints
 
-Profiles keep an endpoint, model defaults, and a credential reference. The endpoint decides which models, operations, and parameters actually work.
+Profiles keep an endpoint, model defaults, and a credential reference. This build can execute **OpenAI Images** (`openai` / `images`) and **Gemini native** (`gemini` / `generate_content`). Other adapter definitions are not executable routes in this build and are refused during planning. The configured endpoint still determines model availability and accepted parameters.
 
 ```bash
 imagen profile set local \
   --provider openai \
   --family images \
   --base-url http://127.0.0.1:8000/v1 \
-  --model-default your-image-model \
+  --model-default gpt-image-2.5-sunburst \
   --credential-ref env:IMAGEN_API_KEY
 
 imagen profile list
@@ -214,6 +216,19 @@ imagen models use local --id model-id   # set the profile default
 
 In the TUI, press `v` to manage profiles. Protocol, official endpoint, catalog path, and model are selection-first; choose **Custom / manual input** to reveal a text field. Saved custom values are preserved. Generation and edit forms let you choose a saved profile and its models.
 
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-providers.png" alt="Providers panel listing a local profile" width="960"></p>
+
+### Image size and quality
+
+Each route uses its own geometry fields:
+
+| Route | Request fields | Example |
+| --- | --- | --- |
+| OpenAI Images | `size`; quality under `provider_params.quality` | `"size": "1536x1024"`, `"provider_params": {"quality": "high"}` |
+| Gemini native | `aspect_ratio`, `image_size`; no `size` field | `"aspect_ratio": "16:9"`, `"image_size": "2K"` |
+
+Put these fields in the creation JSON alongside `prompt` and `count`. Accepted sizes and quality values depend on the model. Gemini accepts one image per request and uppercase `K` tiers; unsupported parameters are rejected during planning. Use `imagen schema generate` for field descriptions and the endpoint's documentation for actual availability.
+
 ### Gemini native
 
 Use `gemini` / `generate_content` for Gemini native requests, not the OpenAI Images protocol:
@@ -235,7 +250,7 @@ Custom HTTPS gateways are supported with a base URL ending in `/v1beta`; plain H
 
 `--models-path` is independent of the generation protocol. New CLI/TUI profiles default to `/v1/models`; Google's native catalog needs the explicit `/v1beta/models` above. A gateway may instead use `/v1/models` even when generation uses `/v1beta`. The path replaces the base URL's path on the same origin: `https://gateway.example/v1beta` plus `/v1/models` becomes `https://gateway.example/v1/models`. Full external URLs, query strings, and fragments are not accepted. Old profiles without this setting retain `base_url + /models`.
 
-Gemini catalog parsing prefers `models[].name`; only when `models` is absent does it accept `data[].id`. An empty native list is kept empty. No alternate-path request or generation retry is sent automatically. A catalog entry declares a model ID, not proof that it can generate images.
+Gemini catalog parsing prefers `models[].name`; only when `models` is absent does it accept `data[].id`. An empty native list is kept empty. No alternate-path request or generation retry is sent automatically. The catalog lists model IDs; confirm generation support with the endpoint or its documentation.
 
 Use `"profile": "gemini"` in the same generation/edit JSON workflow below. Model discovery sends credentials only with `--send-credential`; the TUI fetch button explicitly sends the selected credential to the configured endpoint.
 
@@ -255,6 +270,10 @@ imagen plan show PLAN_ID
 imagen plan approve PLAN_ID --digest PLAN_DIGEST
 imagen plan execute PLAN_ID
 ```
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-plan.png" alt="Plan screen showing approve, execute, retry and cancel" width="960"></p>
+
+This plan was created offline in a local workspace and left unapproved. `a` approves, `enter` executes, and `r` creates a new plan after a failure.
 
 Rules that matter:
 
@@ -293,6 +312,15 @@ imagen session import backup.zip
 imagen session delete ses_... --yes
 imagen session remove-artifact ses_... art_...
 ```
+
+<details>
+<summary>CLI plan and session output</summary>
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-cli-plan.png" alt="CLI plan show output with the approve command" width="760"></p>
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-cli-session.png" alt="CLI session show output" width="760"></p>
+
+</details>
 
 Artifacts can be inspected, opened, or deleted:
 
@@ -377,11 +405,11 @@ Batch submission sends real requests. Obtain explicit authorization for the whol
 
 Postprocessing is experimental. The CLI and TUI share one catalog, and every description states what the method does, what may change, and what may be lost.
 
-<p align="center"><img src="assets/imagen-tui-transform.png" alt="Transform preset browser" width="960"></p>
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-transform.png" alt="Transform preset browser" width="960"></p>
 
-<p align="center"><img src="assets/imagen-tui-params.png" alt="Parameter editor" width="560"></p>
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-params.png" alt="Cropped guided_smooth parameter editor" width="760"></p>
 
-Browse presets with a live preview, tune parameters, then apply. Results are saved as a new artifact.
+The parameter screenshot is a cropped `guided_smooth` form. Browse presets with a live preview, tune parameters, then apply. Results are saved as a new artifact.
 
 ```bash
 imagen ops                                  # catalog
@@ -395,23 +423,35 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3
 
 The catalog covers smoothing, line extraction, tone and color adjustment, periodic-frequency suppression, resizing, contact sheets, and image comparison. Some operations follow guided filtering, weighted least squares, or Local Laplacian methods; variants and approximations are labeled.
 
-Limits:
+What each transform may change:
 
-- Smoothing may remove fine lines.
-- Sharpening may amplify noise.
-- Frequency suppression may delete intentional halftone patterns.
-- Difference metrics do not replace visual inspection.
-- Operations have not completed image-quality and preference evaluation across illustration, photography, and other domains.
+- Smoothing can remove fine lines.
+- Sharpening can amplify noise.
+- Frequency suppression can delete intentional halftone patterns.
+- Difference metrics report numbers; open the images to judge the result.
 
 TUI: `t` opens ordinary image processing; `p` edits parameters; `enter` applies. Model processing has its own page under `u`; `s` manages local weights and runtimes. Applying saves a new artifact and leaves the source untouched.
 
-If processing exceeds the default pixel or working-buffer budget, Imagen reports the dimensions and memory risk and asks whether to continue; the default is cancel. Non-interactive CLI calls return `approval_required`. After explicitly accepting the risk, repeat the same request with `--budget-approval DIGEST` from that response. Approval is bound to the source contents and processing parameters; changing either requires a new confirmation. Approval does not guarantee enough memory: worker isolation, timeouts, and resource limits still apply.
+If processing exceeds the default pixel or working-buffer budget, Imagen reports the dimensions and memory risk and asks whether to continue; the default is cancel. Non-interactive CLI calls return `approval_required`. After explicitly accepting the risk, repeat the same request with `--budget-approval DIGEST` from that response. Approval is bound to the source contents and processing parameters; changing either requires a new confirmation. Memory or timeout can still fail the request after approval.
 
 ## Optional upscaling
 
+<details>
+<summary>Separate model-processing and local-model pages</summary>
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-models.png" alt="Dedicated model-processing page" width="960"></p>
+
+`u` opens model processing. The preview shows a local sample image.
+
+<p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-model-manager.png" alt="Local model manager showing weights not downloaded" width="960"></p>
+
+`s` opens local model management. No weights were downloaded and no model was run for these captures. Some license labels are truncated in the table; use `imagen superres models` and the source license notes for full details.
+
+</details>
+
 List local models and their licenses without downloading anything:
 
-<img src="assets/imagen-cli-superres.png" alt="Upscaling models and licenses" width="760">
+<img src="assets/screenshots-0.1.10/imagen-cli-superres.png" alt="Upscaling models and licenses" width="760">
 
 ```bash
 imagen superres models
@@ -483,7 +523,7 @@ imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
 
 Downloaded weights are staged, checked against a pinned SHA-256 digest, and only then published into the weights directory. Failed or mismatched downloads leave no usable weight behind.
 
-Imagen does not silently install the upscaling runtime or weights. A source-code license does not grant permission to use model weights. Reconstructed texture is not guaranteed to have existed in the original image.
+Imagen installs the upscaling runtime and weights only when you run the install command and accept the license. Source and weight licenses are granted separately, so read the weight license before downloading. The model generates new detail when it reconstructs texture, and that detail may differ from the source image.
 
 ## Agent skills
 
@@ -498,7 +538,7 @@ imagen skills install --scope global --target claude-code
 imagen skills uninstall --target codex
 ```
 
-<img src="assets/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
+<img src="assets/screenshots-0.1.10/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
 
 - Default scope is the current project; `--scope global` installs into user directories.
 - Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
@@ -552,11 +592,11 @@ Sessions, plans, jobs, managed images, cache, and private credentials live in th
 
 - Generation and editing send the prompt and required inputs to the endpoint you configured. Its retention, logging, and billing policies apply.
 - Session exports exclude private credentials.
-- Provider errors are reduced to safe categories; raw response bodies are never echoed into human output.
-- Imagen does not retry unknown creation outcomes automatically.
-- Imagen does not overwrite the source artifact during postprocessing.
-- Imagen does not download model weights without explicit acceptance.
-- Imagen never requests elevation without an explicit interactive confirmation.
+- Provider errors are reduced to safe categories; raw response bodies stay out of human output.
+- Unknown creation outcomes wait for you to inspect the job; Imagen sends no automatic retry.
+- Postprocessing writes a new artifact and leaves the source file untouched.
+- Model weights download only after you accept the license.
+- Elevation runs only after an interactive confirmation.
 
 ## Language
 
@@ -577,7 +617,7 @@ imagen tui
 
 ## Troubleshooting
 
-**`approval_required`.** Review the plan, then run `plan approve` with its digest, followed by `plan execute`.
+**`approval_required`.** For generation, review the plan, run `plan approve` with its digest, then `plan execute`. For oversized local processing, review the budget report and repeat the same request with `--budget-approval DIGEST`; that digest is its own confirmation, separate from a generation-plan approval.
 
 **`unknown` outcome.** Do not rerun the request. Use `job get` and, when a response was persisted, `job fetch` or `job reconcile`.
 
@@ -591,15 +631,15 @@ imagen tui
 
 **Upscaling fails before inference.** The runtime or weights are missing. Run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
 
-**A command fails with `permission_denied`.** The operation needs administrator rights; creating a symlink also needs Windows Developer Mode. An interactive terminal asks whether to rerun the same command elevated (default No; Windows shows a UAC prompt and the elevated command runs in a new console). `--agent`, `--output json`/`jsonl`, `--no-interactive`, and the TUI never launch UAC: they return `permission_denied` with `next_actions[].requires_elevation`, so an agent asks its human first.
+**A command fails with `permission_denied`.** Check the file permissions and required platform privileges before retrying. Where supported, an interactive terminal offers elevation for the same command, defaulting to No. Machine output modes, `--no-interactive`, and the TUI do not launch UAC; an agent must ask its human before any elevated action.
 
 ## Roadmap
 
 - **Provider execution:** complete remote asynchronous job handling alongside the local queue and worker.
 - **Image quality:** expand evaluation across illustration, photography, and other domains, including visual comparison and user preference. Postprocessing stays experimental until this is complete.
-- **Platform support:** verify Windows on physical hardware and improve processing resource controls on Windows and macOS. Current size, buffer, and timeout checks are not a complete sandbox; Linux address-space limits do not cap RSS or GPU memory.
+- **Platform support:** verify Windows on physical hardware and improve processing resource controls on Windows and macOS. Size, buffer, and timeout checks leave sandbox-level guarantees for later; Linux address-space limits cap virtual address space only, so RSS and GPU memory can still grow.
 - **Language support:** add more interface languages. English is the default; Chinese is available through `--lang zh-CN` or `IMAGEN_LANG=zh-CN`.
-- **Parity:** bring batch, worker, skills, and upscaling management into the TUI.
+- **Parity:** improve dedicated TUI workflows for batch, worker, and skills operations; the command palette and local-model management already exist.
 
 ## Development
 
@@ -624,6 +664,8 @@ Source layout:
 | `src/imagen_cli/storage` | SQLite, artifacts, private state, workspace safety |
 
 ## Contributing
+
+For usage questions or reproducible bugs, [open an issue](https://github.com/NekoCCN/ImagenCli/issues) with the Imagen version, OS, command, and sanitized error. Do not attach API keys, raw provider responses, or private workspace exports. See [Releases](https://github.com/NekoCCN/ImagenCli/releases) for published changes.
 
 Small, focused changes are preferred. Add tests for behavior changes, keep provider requests behind the plan and approval boundary, and do not add live or paid provider tests without explicit authorization.
 
