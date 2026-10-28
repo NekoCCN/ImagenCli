@@ -199,6 +199,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "reference",
                 "count",
                 "size",
+                "aspect-ratio",
+                "image-size",
                 "provider-params-file",
                 "digest",
                 "scope",
@@ -690,19 +692,18 @@ def main(
                 )
                 and not any(not value.startswith("-") for value in argv[2:])
             ):
-                from imagen_cli.application.superres import MANIFEST, weights_directory
+                from imagen_cli.application.superres import fetch_choices, weights_directory
 
-                labels = [
-                    f"{name}: {row['scale']}x | {row['license']} | {row['source']}"
-                    for name, row in MANIFEST.items()
-                ]
+                choices = fetch_choices()
                 stderr.write(
                     i18n.t("Weights directory: ", "权重目录：") + f"{weights_directory()}\n"
                 )
-                selected = choose(labels, stdin=sys.stdin, stderr=stderr)
+                selected = choose(
+                    [label for label, _ in choices], stdin=sys.stdin, stderr=stderr
+                )
                 if len(selected) != 1:
                     raise KeyboardInterrupt
-                model = selected[0].partition(":")[0]
+                model = next(name for label, name in choices if label == selected[0])
                 stderr.write(
                     i18n.t(
                         "Download size is unknown; review the source and license first. "

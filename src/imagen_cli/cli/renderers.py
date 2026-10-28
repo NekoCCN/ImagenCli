@@ -83,6 +83,8 @@ def error_message(detail: Any) -> str | None:
         label += f"（HTTP {status}）" if i18n.is_chinese() else f" (HTTP {status})"
     if isinstance(exc := detail.get("error_class"), str) and exc:
         label += f" · {exc}"
+    if isinstance(text := detail.get("detail"), str) and text:
+        label += f" · {text}"
     return label
 
 

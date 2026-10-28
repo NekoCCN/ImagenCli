@@ -13,6 +13,7 @@ from imagen_cli.cli.input_readers import read_prompt
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.models import ProviderProfile
 from imagen_cli.providers.base import ValidatedRequest
+from imagen_cli.providers.vocabulary import check
 
 
 @dataclass(frozen=True)
@@ -72,8 +73,12 @@ class CreateHandler:
             if "count" in parameters or "size" in parameters:
                 return "validation_error", {}
             parameters["count"] = creation.count
-            if creation.size is not None:
-                parameters["size"] = creation.size
+            for name in ("size", "aspect_ratio", "image_size"):
+                value = getattr(creation, name)
+                if value is not None:
+                    parameters[name] = value
+            if check(profile.provider, profile.family, model, creation.operation, parameters):
+                return "validation_error", {}
             digest = hashlib.sha256(json.dumps({
                 "provider": profile.provider, "family": profile.family,
                 "model": model, "revision": model_revision,

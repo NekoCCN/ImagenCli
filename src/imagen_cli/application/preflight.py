@@ -10,6 +10,9 @@ from imagen_cli.application.profile_service import ProfileService
 from imagen_cli.application.session_service import SessionService
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.primitive import new_id, sha256_bytes
+from imagen_cli.i18n import t
+from imagen_cli.providers.routes import SUPPORTED_ROUTES
+from imagen_cli.providers.vocabulary import check
 from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
 from imagen_cli.storage.repositories import Repositories
 
@@ -38,12 +41,30 @@ def plan_creation(
     profile = ProfileService().load(row)
     model = creation.model or session.default_model or profile.model_default
     model_revision = "local"
+    if (profile.provider, profile.family) not in SUPPORTED_ROUTES:
+        return "unsupported_capability", {
+            "error": {
+                "type": "unsupported_capability",
+                "detail": t(
+                    f"this build cannot dispatch {profile.provider} {profile.family}; "
+                    "supported routes are gemini generate_content and openai images",
+                    f"当前版本无法派发 {profile.provider} {profile.family}；"
+                    "可派发的路线是 gemini generate_content 与 openai images",
+                ),
+            }
+        }
     parameters = dict(creation.provider_params)
     if "count" in parameters or "size" in parameters:
         return "validation_error", {}
     parameters["count"] = creation.count
-    if creation.size is not None:
-        parameters["size"] = creation.size
+    for name in ("size", "aspect_ratio", "image_size"):
+        value = getattr(creation, name)
+        if value is not None:
+            parameters[name] = value
+    reason = check(profile.provider, profile.family, model, creation.operation, parameters)
+    if reason is not None:
+        # Refuse here, not at dispatch: an approved plan must be sendable as approved.
+        return "validation_error", {"error": {"type": "validation_error", "detail": reason}}
     if creation.mask or creation.references or creation.retry_of_job_id:
         return "unsupported_capability", {}
     input_hashes: list[str] = []

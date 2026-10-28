@@ -17,6 +17,7 @@ def parse_creation(operation: str, parameters: dict[str, Any]) -> CreationInput:
         data = dict(parameters)
         allowed = {
             "session", "profile", "model", "inputs", "mask", "references", "count", "size",
+            "aspect_ratio", "image_size",
             "prompt_file", "prompt_stdin", "provider_params_file",
         }
         if set(data) - allowed:

@@ -314,3 +314,89 @@ def test_nano_banana_alias_uses_configured_https_endpoint(
     assert result.artifacts[0].content == png_bytes
     assert result.context is not None
     assert len(calls) == 1
+
+
+def image_config(sent: httpx.Request) -> Any:
+    return json.loads(sent.content)["generationConfig"].get("imageConfig")
+
+
+def gemini_for(module: Any, profile: Any, store: Any, model: str, handler: Any) -> Any:
+    return module.GeminiAdapter(
+        profile.model_copy(update={"model_default": model}),
+        private_store=store, transport=httpx.MockTransport(handler),
+        resolve_credential=lambda _: "fixture-secret",
+    )
+
+
+@pytest.mark.parametrize("parameters,expected", [
+    ({"image_size": "2K"}, {"imageSize": "2K"}),
+    ({"aspect_ratio": "1:8"}, {"aspectRatio": "1:8"}),
+    ({"aspect_ratio": "21:9", "image_size": "512"}, {"aspectRatio": "21:9", "imageSize": "512"}),
+])
+def test_documented_size_and_ratio_reach_the_request(
+    setup: Any, png_bytes: bytes, parameters: dict[str, Any], expected: dict[str, Any],
+) -> None:
+    module, profile, request, store, _ = setup
+    model = "gemini-3.1-flash-image"
+    sent: list[httpx.Request] = []
+
+    def send(request_: httpx.Request) -> httpx.Response:
+        sent.append(request_)
+        return httpx.Response(200, json=response(png_bytes))
+
+    gemini_for(module, profile, store, model, send).create(
+        replace(request, model=model, normalized_parameters=parameters)
+    )
+    assert image_config(sent[0]) == expected
+
+
+def test_absent_size_leaves_the_model_default(setup: Any, png_bytes: bytes) -> None:
+    module, profile, request, store, _ = setup
+    sent: list[httpx.Request] = []
+
+    def send(request_: httpx.Request) -> httpx.Response:
+        sent.append(request_)
+        return httpx.Response(200, json=response(png_bytes))
+
+    gemini_for(module, profile, store, "gemini-3.1-flash-image", send).create(request)
+    assert "imageConfig" not in json.loads(sent[0].content)["generationConfig"]
+
+
+@pytest.mark.parametrize("model,parameters", [
+    ("gemini-3.1-flash-image", {"image_size": "2k"}),
+    ("gemini-3.1-flash-image", {"image_size": "2048x2048"}),
+    ("gemini-3.1-flash-lite-image", {"image_size": "4K"}),
+    ("gemini-nano-banana-2.1", {"image_size": "512"}),
+    ("gemini-2.5-flash-image", {"image_size": "2K"}),
+    ("gemini-3.1-flash-image", {"size": "1024x1024"}),
+    ("gemini-3.1-flash-image", {"aspect_ratio": "5:3"}),
+])
+def test_parameters_outside_the_vendor_vocabulary_are_refused(
+    setup: Any, model: str, parameters: dict[str, Any],
+) -> None:
+    module, profile, request, store, _ = setup
+    adapter = gemini_for(module, profile, store, model, lambda _: pytest.fail("no network"))
+    with pytest.raises(module.ProviderFailure) as caught:
+        adapter.create(replace(request, model=model, normalized_parameters=parameters))
+    assert caught.value.type == "validation_error"
+    assert not caught.value.accepted_maybe
+
+
+def test_a_shut_down_model_id_is_refused(setup: Any) -> None:
+    module, profile, request, store, _ = setup
+    model = "gemini-3-pro-image-preview"
+    adapter = gemini_for(module, profile, store, model, lambda _: pytest.fail("no network"))
+    with pytest.raises(module.ProviderFailure) as caught:
+        adapter.create(replace(request, model=model))
+    assert caught.value.type == "unsupported_capability"
+
+
+@pytest.mark.parametrize(
+    "model", ["gemini-nano-banana-2.1", "gemini-3-pro-image", "gemini-3.1-flash-lite-image"]
+)
+def test_current_model_ids_are_accepted(setup: Any, png_bytes: bytes, model: str) -> None:
+    module, profile, request, store, _ = setup
+    adapter = gemini_for(
+        module, profile, store, model, lambda _: httpx.Response(200, json=response(png_bytes))
+    )
+    assert adapter.create(replace(request, model=model)).actual_count == 1

@@ -13,7 +13,7 @@ from imagen_cli.storage.repositories import Repositories
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static  # noqa: E402
+from textual.widgets import Input, Select, Static  # noqa: E402
 
 from imagen_cli.cli.tui.app import Deps, WorkbenchApp  # noqa: E402
 
@@ -937,6 +937,27 @@ def test_new_session_form_creates_and_selects(deps):
     assert created == [("new-session", "", None, None)]
 
 
+def test_new_session_cancel_survives_a_second_activation(deps):
+    """Two activations for one intent must not pop the screen underneath."""
+    from textual.widgets import Button
+
+    deps_value, _ = deps
+    app = WorkbenchApp(deps_value)
+
+    async def run():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("n")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "CreationForm"
+            cancel = app.screen.query_one("#cancel", Button)
+            cancel.press()
+            cancel.press()
+            await pilot.pause()
+            assert [type(screen).__name__ for screen in app.screen_stack] == ["Screen"]
+
+    asyncio.run(run())
+
+
 def test_generate_plan_requires_approval_before_execution(deps):
     deps_value, _ = deps
     calls = []
@@ -1359,3 +1380,1004 @@ def test_toggle_language_persists_choice(deps):
 
     i18n.reset_language()
     assert i18n.saved_language() == "en"
+
+
+def _empty_deps(tmp_path: Path):
+    root = tmp_path / "empty-workspace"
+    root.mkdir()
+    repositories = Repositories(connect(root / "state.sqlite3"))
+    store = ArtifactStore(root / "artifacts", repositories)
+    return Deps(repositories, store, lambda *a, **k: [], lambda *a, **k: {}, lambda *a, **k: {})
+
+
+def test_session_columns_fit_the_sidebar_at_every_width(deps):
+    """The last header must stay on screen; long names truncate instead."""
+    deps_value, _ = deps
+
+    async def run():
+        for size in ((80, 24), (100, 30), (140, 40)):
+            app = WorkbenchApp(deps_value)
+            async with app.run_test(size=size) as pilot:
+                await pilot.pause()
+                table = app.sessions
+                total = sum(column.get_render_width(table) for column in table.columns.values())
+                assert total <= table.size.width, (size, total, table.size.width)
+                await pilot.press("q")
+
+    asyncio.run(run())
+
+
+def test_detail_shows_the_endpoint_name_not_its_id(deps):
+    deps_value, _ = deps
+    repositories = deps_value.repositories
+    identity = "ses_" + "e" * 32
+    repositories.insert("sessions", {
+        "id": identity, "name": "cel-poster", "version": 1,
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    repositories.insert("profiles", {
+        "id": "prf_" + "a" * 32, "name": "local-openai", "provider": "openai",
+        "family": "images", "base_url": "https://example.test", "revision": 1,
+        "model_default": "flux-dev", "credential_ref": "private-reference", "trust_policy": {},
+    })
+    repositories.update("sessions", identity, {
+        "default_profile_id": "prf_" + "a" * 32, "default_model": "flux-dev",
+    })
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.current = identity
+            app.show_detail()
+            await pilot.pause()
+            meta = str(app.meta.render())
+            assert "local-openai" in meta
+            assert "prf_" not in meta
+
+    asyncio.run(run())
+
+
+def test_keybar_keeps_the_common_keys_and_help_at_80_columns(deps):
+    """The legend must not silently drop the keys a narrow terminal needs most."""
+    from rich.cells import cell_len
+
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.current = "ses_" + "0" * 32
+            await pilot.pause()
+            widget = app.query_one("#keybar", Static)
+            line = str(widget.render())
+            for key in ("g", "m", "t", "d", "x", "删除", ":", "?"):
+                assert key in line, (key, line)
+            assert cell_len(line) <= widget.content_size.width
+
+    asyncio.run(run())
+
+
+def test_keybar_reveals_more_keys_on_a_wider_terminal(deps):
+    deps_value, _ = deps
+
+    async def read(size):
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=size) as pilot:
+            app.current = "ses_" + "0" * 32
+            await pilot.pause()
+            return str(app.query_one("#keybar", Static).render())
+
+    narrow = asyncio.run(read((80, 24)))
+    wide = asyncio.run(read((140, 40)))
+    assert "端点" in wide and "产物" in wide and "导出" in wide
+    assert len(wide) > len(narrow)
+
+
+def test_action_bar_pins_a_compact_pager_to_the_right(deps):
+    deps_value, _ = deps
+    from textual.widgets import Button
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            previous = app.query_one("#action-prev", Button)
+            following = app.query_one("#action-next", Button)
+            generate = app.query_one("#action-generate", Button)
+            bar = app.query_one("#action-bar")
+            assert previous.region.width <= 4 and following.region.width <= 4
+            assert generate.region.width < bar.region.width // 3
+            assert following.region.right <= bar.region.right
+
+    asyncio.run(run())
+
+
+def test_empty_workspace_gives_the_new_session_hint_once(tmp_path):
+    """The preview carries the empty-state instruction; the status line stays quiet."""
+    deps_value = _empty_deps(tmp_path)
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            preview = str(app.query_one("#preview").render())
+            status = str(app.status.render())
+            assert "新建" in preview
+            assert "新建" not in status
+
+    asyncio.run(run())
+
+
+def test_long_session_names_truncate_with_an_ellipsis(deps):
+    deps_value, _ = deps
+    repositories = deps_value.repositories
+    identity = "ses_" + "f" * 32
+    repositories.insert("sessions", {
+        "id": identity, "name": "anime-cel-chapter-12-final", "version": 7,
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+
+    async def run():
+        from rich.cells import cell_len
+
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            name_column = next(iter(app.sessions.columns.values()))
+            cell = str(app.sessions.get_row(identity)[0])
+            assert cell.endswith("…")
+            assert cell_len(cell) <= name_column.width
+
+    asyncio.run(run())
+
+
+def test_help_shows_every_shortcut_without_scrolling_at_80x24(deps):
+    """A key list that scrolls hides exactly the keys people cannot guess."""
+    deps_value, _ = deps
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("?")
+            await pilot.pause()
+            visible = "\n".join(
+                "".join(segment.text for segment in strip)
+                for strip in app.screen._compositor.render_strips()
+            )
+            for label in ("退出", "缓存", "端点", "新建会话", "帮助"):
+                assert label in visible, label
+
+    asyncio.run(run())
+
+
+def test_palette_superres_fetch_offers_the_cli_weights_catalog(deps):
+    """The CLI picker and the TUI form must read one catalog, not two."""
+    from textual.widgets import Select
+
+    from imagen_cli.application.superres import fetch_choices
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app._open_command("superres fetch")
+            await pilot.pause()
+            selector = app.screen.query_one("#model", Select)
+            shown = [
+                str(prompt) for prompt, value in selector._options if value is not Select.NULL
+            ]
+            assert shown == [label for label, _ in fetch_choices()]
+            assert any("x |" in label for label in shown)
+
+    asyncio.run(run())
+
+
+def test_palette_skills_install_offers_the_cli_target_checklist(deps):
+    from textual.widgets import SelectionList
+
+    from imagen_cli.application.skill_targets import prompt_order
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    labels, preselected = prompt_order()
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app._open_command("skills install")
+            await pilot.pause()
+            listing = app.screen.query_one("#target", SelectionList)
+            prompts = [option.prompt.plain for option in listing._options]
+            assert [prompt[4:] for prompt in prompts] == labels
+            assert [prompt[:3] for prompt in prompts] == [
+                "[x]" if label in preselected else "[ ]" for label in labels
+            ]
+            assert app.screen.values()["target"] == ",".join(preselected)
+
+    asyncio.run(run())
+
+
+def test_palette_offers_known_profiles_but_creation_still_types_its_own(deps):
+    from textual.widgets import Input, Select
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    repositories = deps_value.repositories
+    repositories.insert("profiles", {
+        "id": "prf_" + "a" * 32, "name": "local-openai", "provider": "openai",
+        "family": "images", "base_url": "https://example.test", "revision": 1,
+        "model_default": "flux-dev", "credential_ref": "private-reference", "trust_policy": {},
+    })
+    identity = "prf_" + "a" * 32
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app._open_command("models list")
+            await pilot.pause()
+            options = [value for _, value in app.screen.query_one("#profile", Select)._options]
+            assert identity in options
+            await pilot.press("escape")
+            await pilot.pause()
+            app._open_command("profile add")
+            await pilot.pause()
+            # A new id cannot be picked from the existing ones, so this one stays typeable.
+            assert app.screen.query_one("#profile", Input)
+
+    asyncio.run(run())
+
+
+def test_palette_skills_targets_submit_as_the_cli_flags(deps):
+    """Ticking the checklist must produce the arguments the CLI picker would build."""
+    from textual.widgets import Button, SelectionList
+
+    from imagen_cli.application.skill_targets import prompt_order
+
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        return "succeeded", {}
+
+    deps_value.execute = execute
+    _, preselected = prompt_order()
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app._open_command("skills install")
+            await pilot.pause()
+            listing = app.screen.query_one("#target", SelectionList)
+            assert listing.selected == preselected
+            listing.deselect("claude-code")
+            await pilot.pause()
+            app.screen.query_one("#submit", Button).press()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+    targets = [name for name in preselected if name != "claude-code"]
+    assert calls == [
+        ("skills install", {"force": False, "scope": "project", "target": targets})
+    ]
+
+
+def _superres_workspace(monkeypatch, tmp_path):
+    """Weights live here, so the catalog reports a real download state."""
+    from imagen_cli.application import superres
+
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    target = superres.weights_path("film-degrainer")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"weights")
+    return superres
+
+
+def test_superres_screen_lists_the_cli_catalog(deps, monkeypatch, tmp_path):
+    """The panel reads the same catalog the CLI prints, download state included."""
+    from textual.widgets import DataTable
+
+    _superres_workspace(monkeypatch, tmp_path)
+    from imagen_cli.application.superres import MANIFEST, catalog
+
+    deps_value, _ = deps
+    expected = catalog()["models"]
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "SuperresScreen"
+            table = app.screen.query_one("#superres-table", DataTable)
+            assert table.row_count == len(MANIFEST)
+            rows = [
+                [str(cell) for cell in table.get_row_at(index)]
+                for index in range(table.row_count)
+            ]
+            assert [row[0] for row in rows] == [row["model"] for row in expected]
+            downloaded = {row["model"]: row["downloaded"] for row in expected}
+            for row in rows:
+                assert ("已下载" in row[-1]) is downloaded[row[0]]
+
+    asyncio.run(run())
+
+
+def test_superres_screen_asks_before_downloading(deps, monkeypatch, tmp_path):
+    module = _superres_workspace(monkeypatch, tmp_path)
+    from textual.widgets import DataTable
+
+    from imagen_cli.application.superres import catalog
+
+    deps_value, _ = deps
+    calls = []
+    missing = [index for index, row in enumerate(catalog()["models"]) if not row["downloaded"]]
+    index = missing[0]
+    chosen = catalog()["models"][index]["model"]
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        target = module.weights_path(arguments["model"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"weights")
+        return "succeeded", {}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            table = app.screen.query_one("#superres-table", DataTable)
+            table.move_cursor(row=index)
+            await pilot.pause()
+            assert "未下载" in table.get_row_at(index)[-1]
+            await pilot.press("f")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            assert calls == []  # consent comes before any download
+            await pilot.press("y")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert calls == [("superres fetch", {"model": chosen, "accept": True})]
+            assert type(app.screen).__name__ == "ResultScreen"
+            app.pop_screen()
+            await pilot.pause()
+            assert type(app.screen).__name__ == "SuperresScreen"
+            assert "已下载" in app.screen.query_one(
+                "#superres-table", DataTable
+            ).get_row_at(index)[-1]
+
+    asyncio.run(run())
+
+
+def test_superres_screen_installs_the_runtime_after_consent(deps, monkeypatch, tmp_path):
+    _superres_workspace(monkeypatch, tmp_path)
+
+    deps_value, _ = deps
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        return "succeeded", {}
+
+    deps_value.execute = execute
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            await pilot.press("i")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            assert calls == []
+            await pilot.press("y")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert calls == [("superres install", {"accept": True})]
+
+    asyncio.run(run())
+
+
+def test_superres_screen_is_listed_in_the_keybar_and_help(deps):
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert "s  本地模型" in str(app.query_one("#keybar", Static).render())
+            await pilot.press("?")
+            await pilot.pause()
+            assert ("s", "本地模型") in app.screen.rows
+            visible = "\n".join(
+                "".join(segment.text for segment in strip)
+                for strip in app.screen._compositor.render_strips()
+            )
+            assert "本地模型" in visible
+
+    asyncio.run(run())
+
+
+def _option_text(option) -> str:
+    label = option[0]
+    return label.plain if hasattr(label, "plain") else str(label)
+
+
+def test_palette_session_field_offers_workspace_sessions_and_keeps_typing(deps):
+    """The CLI takes a session id; the palette offers the ones this workspace has."""
+    from textual.widgets import Input, Select
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("session show")
+            await pilot.pause()
+            form = app.screen
+            selector = form.query_one("#session-choice", Select)
+            values = [value for _, value in selector._options if value is not Select.NULL]
+            assert f"ses_{0:032x}" in values
+            assert f"ses_{99:032x}" in values
+            assert any("session-0 (" in _option_text(option) for option in selector._options)
+            # Nothing picked yet: the list shows "custom" and the field is typeable.
+            assert form.query_one("#session", Input).display
+            # Picking carries the id into the field the command reads.
+            selector.value = f"ses_{7:032x}"
+            await pilot.pause()
+            assert form.values()["session"] == f"ses_{7:032x}"
+            assert not form.query_one("#session", Input).display
+            # ...and typing an id the workspace never saw still works.
+            selector.value = "custom"
+            await pilot.pause()
+            assert form.query_one("#session", Input).display
+            typed = "ses_" + "f" * 32
+            form.query_one("#session", Input).value = typed
+            assert form.values()["session"] == typed
+
+    asyncio.run(run())
+
+
+def test_palette_artifact_field_offers_the_current_session_artifacts(deps):
+    from io import BytesIO
+
+    from textual.widgets import Input, Select
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    identities = []
+    for seed, colour in (("a", "red"), ("b", "blue")):
+        identity = "art_" + seed * 32
+        buffer = BytesIO()
+        Image.new("RGB", (8, 8), colour).save(buffer, format="PNG")
+        deps_value.store.stage(identity, buffer.getvalue())
+        deps_value.store.publish(identity)
+        deps_value.repositories.insert("artifact_links", {
+            "session_id": f"ses_{0:032x}", "artifact_id": identity, "role": "output",
+            "created_at": "2026-10-24T00:00:00Z",
+        })
+        identities.append(identity)
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("asset show")
+            await pilot.pause()
+            form = app.screen
+            selector = form.query_one("#artifact-choice", Select)
+            values = [value for _, value in selector._options if value is not Select.NULL]
+            assert set(identities) <= set(values)
+            assert isinstance(form.query_one("#artifact", Input), Input)
+
+    asyncio.run(run())
+
+
+def test_palette_fields_stay_typeable_when_there_is_nothing_to_offer(tmp_path):
+    """An empty workspace must not turn a field into a dropdown with no options."""
+    from textual.widgets import Input
+
+    deps_value = _empty_deps(tmp_path)
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("session show")
+            await pilot.pause()
+            assert isinstance(app.screen.query_one("#session", Input), Input)
+            await pilot.press("escape")
+            await pilot.pause()
+            app._open_command("asset show")
+            await pilot.pause()
+            assert isinstance(app.screen.query_one("#artifact", Input), Input)
+            assert not list(app.screen.query("#artifact-choice"))
+
+    asyncio.run(run())
+
+
+def test_superres_state_column_stays_on_screen(deps, monkeypatch, tmp_path):
+    """Same rule as the session table: truncate a cell, never push the last column away."""
+    from textual.widgets import DataTable
+
+    _superres_workspace(monkeypatch, tmp_path)
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        for size in ((80, 24), (140, 40)):
+            app = WorkbenchApp(deps_value)
+            async with app.run_test(size=size) as pilot:
+                await pilot.pause()
+                await pilot.press("s")
+                await pilot.pause()
+                table = app.screen.query_one("#superres-table", DataTable)
+                panel = app.screen.query_one("#superres")
+                total = sum(
+                    column.get_render_width(table) for column in table.columns.values()
+                )
+                assert total <= panel.content_size.width
+                visible = "\n".join(
+                    "".join(segment.text for segment in strip)
+                    for strip in app.screen._compositor.render_strips()
+                )
+                assert "未下载" in visible
+
+    asyncio.run(run())
+
+
+def test_palette_models_use_follows_the_chosen_profile(deps):
+    """`models use --id` offers that profile's declared models, and still accepts typing."""
+    from textual.widgets import Input, Select
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    repositories = deps_value.repositories
+    identities = {}
+    for seed, models in (("a", ["flux-dev"]), ("b", ["sdxl", "sdxl-turbo"])):
+        identity = "prf_" + seed * 32
+        identities[seed] = identity
+        repositories.insert("profiles", {
+            "id": identity, "name": f"profile-{seed}", "provider": "openai",
+            "family": "images", "base_url": "https://example.test", "revision": 1,
+            "model_default": models[0], "credential_ref": "private-reference",
+            "trust_policy": {},
+        })
+        for model in models:
+            repositories.insert("provider_models", {
+                "id": f"{identity}:{model}", "profile_id": identity, "model_id": model,
+                "display_name": model, "fetched_at": "2026-10-24T00:00:00Z",
+                "source_url": "https://example.test/v1/models", "evidence": "discovered",
+            })
+
+    def options(form):
+        selector = form.query_one("#id-choice", Select)
+        return [value for _, value in selector._options if value is not Select.NULL]
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("models use")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form.query_one("#id", Input), Input)
+            form.query_one("#profile", Select).value = identities["a"]
+            await pilot.pause()
+            assert options(form) == ["flux-dev", "custom"]
+            # Switching profile replaces the list instead of adding to it.
+            form.query_one("#profile", Select).value = identities["b"]
+            await pilot.pause()
+            assert options(form) == ["sdxl", "sdxl-turbo", "custom"]
+            form.query_one("#id-choice", Select).value = "sdxl-turbo"
+            await pilot.pause()
+            assert form.values()["id"] == "sdxl-turbo"
+            # `models use` registers an undeclared id too, so typing must survive.
+            form.query_one("#id-choice", Select).value = "custom"
+            await pilot.pause()
+            form.query_one("#id", Input).value = "not-declared-yet"
+            assert form.values()["id"] == "not-declared-yet"
+
+    asyncio.run(run())
+
+
+def test_checklist_tick_text_follows_the_toggle(deps):
+    """Textual draws one glyph for both states, so the [x]/[ ] label carries the state."""
+    from textual.widgets import SelectionList
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    def tick(lister, index):
+        return str(lister.options[index].prompt)[:3]
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("skills install")
+            await pilot.pause()
+            lister = app.screen.query_one("#target", SelectionList)
+            first = lister.options[0].value
+            await pilot.pause()
+            lister.deselect(first)
+            await pilot.pause()
+            assert tick(lister, 0) == "[ ]"
+            lister.select(first)
+            await pilot.pause()
+            assert tick(lister, 0) == "[x]"
+
+    asyncio.run(run())
+
+
+def test_palette_sheet_artifacts_follow_the_session_field(deps):
+    """`sheet --artifacts` ticks one session's outputs and re-ticks when the session changes."""
+    from io import BytesIO
+
+    from textual.widgets import Input, Select, SelectionList
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+    first = f"ses_{0:032x}"
+    second = "ses_" + "9" * 32
+    deps_value.repositories.insert("sessions", {
+        "id": second, "name": "second", "version": 0, "created_at": "2026-10-24T00:00:00Z",
+    })
+    seeded = {first: [], second: []}
+    for session, seeds in ((first, "ab"), (second, "cd")):
+        for seed in seeds:
+            identity = "art_" + seed * 32
+            buffer = BytesIO()
+            Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
+            deps_value.store.stage(identity, buffer.getvalue())
+            deps_value.store.publish(identity)
+            deps_value.repositories.insert("artifact_links", {
+                "session_id": session, "artifact_id": identity, "role": "output",
+                "created_at": "2026-10-24T00:00:00Z",
+            })
+            seeded[session].append(identity)
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("sheet")
+            await pilot.pause()
+            form = app.screen
+            lister = form.query_one("#artifacts", SelectionList)
+            assert [item.value for item in lister.options] == seeded[first]
+            assert form.values()["artifacts"] == ",".join(seeded[first])
+            # Naming another session replaces the list, so a sheet cannot be built from a mix.
+            form.query_one("#session-choice", Select).value = second
+            await pilot.pause()
+            assert [item.value for item in lister.options] == seeded[second]
+            assert form.values()["artifacts"] == ",".join(seeded[second])
+            # Typing the session by hand does the same, and stays possible.
+            assert isinstance(form.query_one("#session", Input), Input)
+            form.query_one("#session", Input).value = first
+            await pilot.pause()
+            assert [item.value for item in lister.options] == seeded[first]
+
+    asyncio.run(run())
+
+
+def test_checklist_untick_needs_no_button_widget(deps):
+    """The tick box is drawn inline by Textual, so a click on the row must still toggle it."""
+    from textual.widgets import SelectionList
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("skills install")
+            await pilot.pause()
+            form = app.screen
+            lister = form.query_one("#target", SelectionList)
+            first = lister.options[0].value
+            before = form.values()["target"].split(",")
+            assert first in before
+            await pilot.click("#target", offset=(3, 0))
+            await pilot.pause()
+            assert str(lister.options[0].prompt).startswith("[ ]")
+            after = form.values()["target"].split(",")
+            assert first not in after
+            await pilot.click("#target", offset=(3, 0))
+            await pilot.pause()
+            assert str(lister.options[0].prompt).startswith("[x]")
+            # Re-ticking appends, so compare as a set rather than as an order.
+            assert set(form.values()["target"].split(",")) == set(before)
+
+    asyncio.run(run())
+
+
+def test_palette_transform_offers_the_cli_operator_and_preset_names(deps):
+    """`--op`/`--preset` are typed from memory otherwise; both come from the CLI's own lists."""
+    from textual.widgets import Input, Select
+
+    deps_value, _ = deps
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._open_command("transform")
+            await pilot.pause()
+            form = app.screen
+            ops = [value for _, value in form.query_one("#op-choice", Select)._options]
+            presets = [value for _, value in form.query_one("#preset-choice", Select)._options]
+            assert "superres" in ops
+            assert "kuwahara" in ops
+            assert "线稿" in presets
+            # Params are appended by hand (`superres:model=...,accept=true`), so typing stays.
+            assert isinstance(form.query_one("#op", Input), Input)
+            assert isinstance(form.query_one("#preset", Input), Input)
+            form.query_one("#op", Input).value = "superres:model=realesr-animevideov3,accept=true"
+            assert form.values()["op"].startswith("superres:")
+
+    asyncio.run(run())
+
+
+def test_transform_panel_asks_before_running_a_local_model(deps):
+    """Local weights are selectable, but the model and its licence are answered first."""
+    from io import BytesIO
+
+    from textual.widgets import DataTable
+
+    from imagen_cli.application import superres
+
+    deps_value, _ = deps
+    calls = []
+
+    def transform(artifact, pipeline, session):
+        calls.append((artifact, pipeline, session))
+        return {"artifact": {"id": "art_" + "e" * 32}}
+
+    deps_value.transform = transform
+    weights = superres.weights_path("realesr-animevideov3")
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"weights")
+    identity = "art_" + "e" * 32
+    session = f"ses_{0:032x}"
+    buffer = BytesIO()
+    Image.new("RGB", (16, 16), "red").save(buffer, format="PNG")
+    deps_value.store.stage(identity, buffer.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": session, "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            screen = app.screen
+            assert "superres" in screen.names
+            assert screen.entries["superres"]["group"] == "模型恢复"
+            screen.table.move_cursor(row=screen.names.index("superres"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "LocalModelScreen"
+            assert calls == []  # nothing runs before the question is answered
+            table = app.screen.query_one("#local-model-table", DataTable)
+            rows = [
+                [str(cell) for cell in table.get_row_at(index)]
+                for index in range(table.row_count)
+            ]
+            assert [row[0] for row in rows] == [m["model"] for m in superres.catalog()["models"]]
+            assert ("已下载" in rows[0][-1]) is superres.catalog()["models"][0]["downloaded"]
+            index = next(i for i, row in enumerate(rows) if row[0] == "realesr-animevideov3")
+            table.move_cursor(row=index)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(calls) == 1
+            assert calls[0][1] == [
+                {"op": "superres", "params": {"model": "realesr-animevideov3", "accept": True}}
+            ]
+
+    asyncio.run(run())
+
+
+def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatch, tmp_path):
+    """A model that is not on disk is asked about, downloaded, and only then run."""
+    from io import BytesIO
+
+    from textual.widgets import DataTable, Static
+
+    module = _superres_workspace(monkeypatch, tmp_path)
+    from imagen_cli.application.superres import catalog
+
+    deps_value, _ = deps
+    commands = []
+    runs = []
+
+    def execute(command, arguments):
+        commands.append((command, arguments))
+        target = module.weights_path(arguments["model"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"weights")
+        return "succeeded", {}
+
+    deps_value.execute = execute
+    deps_value.transform = lambda artifact, pipeline, session: (
+        runs.append(pipeline), {"artifact": {"id": "art_" + "f" * 32}}
+    )[1]
+    identity = "art_" + "f" * 32
+    buffer = BytesIO()
+    Image.new("RGB", (16, 16), "blue").save(buffer, format="PNG")
+    deps_value.store.stage(identity, buffer.getvalue())
+    deps_value.store.publish(identity)
+    deps_value.repositories.insert("artifact_links", {
+        "session_id": f"ses_{0:032x}", "artifact_id": identity, "role": "output",
+        "created_at": "2026-10-24T00:00:00Z",
+    })
+    model = "realesr-animevideov3"
+    assert catalog()["models"][[r["model"] for r in catalog()["models"]].index(model)][
+        "downloaded"
+    ] is False
+
+    async def run():
+        app = WorkbenchApp(deps_value)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            app.screen.table.move_cursor(row=app.screen.names.index("superres"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            chooser = app.screen
+            table = chooser.query_one("#local-model-table", DataTable)
+            names = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+            table.move_cursor(row=names.index(model))
+            await pilot.pause()
+            assert "未下载" in str(chooser.query_one("#local-model-status", Static).render())
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"  # asked before fetching
+            assert commands == [] and runs == []
+            await pilot.press("y")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert commands == [("superres fetch", {"model": model, "accept": True})]
+            assert runs == []  # downloading is not running
+            table = app.screen.query_one("#local-model-table", DataTable)
+            row = next(
+                table.get_row_at(i)
+                for i in range(table.row_count)
+                if str(table.get_row_at(i)[0]) == model
+            )
+            assert "已下载" in str(row[-1])
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runs == [
+                [{"op": "superres", "params": {"model": model, "accept": True}}]
+            ]
+
+    asyncio.run(run())
+
+
+def _route_session(deps_value, provider, family, model, base_url, identity):
+    deps_value.repositories.insert("profiles", {
+        "id": identity, "name": identity, "provider": provider, "family": family,
+        "base_url": base_url, "model_default": model,
+        "credential_ref": "env:KEY", "trust_policy": {}, "revision": 1,
+    })
+    session = "ses_" + identity.rjust(32, "0")
+    deps_value.repositories.insert("sessions", {
+        "id": session, "name": identity, "version": 0, "created_at": "2026-10-24T00:00:00Z",
+        "default_profile_id": identity, "default_model": model,
+    })
+    return session
+
+
+def test_generate_keeps_the_pixel_prefill_only_where_the_route_takes_a_size(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "openai", "images", "gpt-image-2.5-sunburst",
+        "https://api.openai.com/v1", "p-openai",
+    )
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app_screen = None
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            app_screen = app.screen
+            assert app_screen.values()["size"] == "1024x1024"
+
+    asyncio.run(run())
+
+
+def test_generate_leaves_gemini_geometry_empty_and_offers_the_documented_tiers(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "gemini", "generate_content", "gemini-3.1-flash-image",
+        "https://generativelanguage.googleapis.com/v1beta", "p-gemini",
+    )
+    calls = []
+
+    def execute(command, arguments):
+        calls.append((command, arguments))
+        return "approval_required", {"plan": {"id": "pln_" + "1" * 32,
+                                             "plan_digest": "a" * 64,
+                                             "operation": "generate", "model": "m"}}
+
+    deps_value.execute = execute
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            form = app.screen
+            assert form.values()["size"] == ""
+            form.query_one("#aspect_ratio", Input).value = "16:9"
+            form.query_one("#image_size-choice", Select).value = "2K"
+            await pilot.pause()
+            # Selecting a documented tier is what proves the candidate exists.
+            assert form.values()["image_size"] == "2K"
+            await pilot.press(*"a cat")
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+
+    asyncio.run(run())
+    assert calls[0][1]["aspect_ratio"] == "16:9"
+    assert calls[0][1]["image_size"] == "2K"
+    assert "size" not in calls[0][1]
+
+
+def test_switching_to_a_route_without_pixels_clears_the_pixel_field(deps):
+    deps_value, _ = deps
+    session = _route_session(
+        deps_value, "openai", "images", "gpt-image-2.5-sunburst",
+        "https://api.openai.com/v1", "p-openai",
+    )
+    _route_session(
+        deps_value, "gemini", "generate_content", "gemini-3.1-flash-image",
+        "https://generativelanguage.googleapis.com/v1beta", "p-gemini",
+    )
+    deps_value.execute = lambda command, arguments: ("succeeded", {})
+
+    async def run():
+        async with WorkbenchApp(deps_value).run_test(size=(100, 30)) as pilot:
+            app = pilot.app
+            app.current = session
+            await pilot.press("g")
+            await pilot.pause()
+            form = app.screen
+            assert form.values()["size"] == "1024x1024"
+            form.query_one("#profile", Select).value = "p-gemini"
+            await pilot.pause()
+            assert form.values()["size"] == ""
+
+    asyncio.run(run())

@@ -459,6 +459,14 @@ def catalog() -> dict[str, Any]:
     return {**backend_report(), "models": models}
 
 
+def fetch_choices() -> list[tuple[str, str]]:
+    """Weights catalog as picker rows, shared by the CLI prompt and the TUI form."""
+    return [
+        (f"{name}: {entry['scale']}x | {entry['license']} | {entry['source']}", name)
+        for name, entry in MANIFEST.items()
+    ]
+
+
 def fetch(model: str, *, accept: bool = False) -> dict[str, Any]:
     path = ensure_weights(model, accept=accept)
     return {

@@ -18,15 +18,10 @@ from imagen_cli.providers.base import (
     ProviderFailure,
     ValidatedRequest,
 )
+from imagen_cli.providers.vocabulary import check, serves
 from imagen_cli.storage.private_state import PrivateStateStore
 
 __all__ = ["GeminiAdapter", "ProviderFailure", "ValidatedRequest"]
-
-# Declared image-model suffixes; a gateway may prefix its own routing segment.
-_MODELS = {
-    "gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image",
-    "nano-banana-2",
-}
 
 
 def _trusted_endpoint(base_url: str) -> bool:
@@ -93,7 +88,7 @@ class GeminiAdapter:
         if (
             self.profile.provider != "gemini"
             or self.profile.family != "generate_content"
-            or request.model.split("/")[-1] not in _MODELS
+            or not serves("gemini", "generate_content", request.model)
         ):
             raise ProviderFailure("unsupported_capability")
         if (
@@ -108,14 +103,7 @@ class GeminiAdapter:
         ):
             raise ProviderFailure("validation_error")
         parameters = request.normalized_parameters
-        if set(parameters) - {"count", "aspect_ratio"}:
-            raise ProviderFailure("validation_error")
-        count = parameters.get("count", 1)
-        if type(count) is not int or count != 1:
-            raise ProviderFailure("validation_error")
-        if "aspect_ratio" in parameters and parameters["aspect_ratio"] not in {
-            "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
-        }:
+        if check("gemini", "generate_content", request.model, request.operation, parameters):
             raise ProviderFailure("validation_error")
         if request.operation == "generate" and (request.inputs or request.native_context):
             raise ProviderFailure("validation_error")
@@ -177,8 +165,13 @@ class GeminiAdapter:
         }} for image in request.inputs)
         contents = [*contents, {"role": "user", "parts": parts}]
         config: dict[str, Any] = {"responseModalities": ["TEXT", "IMAGE"]}
-        if "aspect_ratio" in request.normalized_parameters:
-            config["imageConfig"] = {"aspectRatio": request.normalized_parameters["aspect_ratio"]}
+        image_config = {
+            key: request.normalized_parameters[name]
+            for name, key in (("aspect_ratio", "aspectRatio"), ("image_size", "imageSize"))
+            if name in request.normalized_parameters
+        }
+        if image_config:
+            config["imageConfig"] = image_config
         body = {"contents": contents, "generationConfig": config}
         if request.job_id in self._attempted:
             raise ProviderFailure("outcome_unknown", accepted_maybe=True)

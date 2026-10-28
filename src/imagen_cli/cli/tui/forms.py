@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Select, Static
+from textual.widgets import Button, Input, Select, SelectionList, Static
+from textual.widgets.selection_list import Selection
 
 from imagen_cli.i18n import t
+from imagen_cli.providers.vocabulary import specs
+
+from .modal import Modal
+
+GEOMETRY = ("aspect_ratio", "image_size")
 
 
-class ChoiceForm(ModalScreen[dict[str, str] | None]):
+class ChoiceForm(Modal[dict[str, str] | None]):
     DEFAULT_CSS = """
     ChoiceForm { align: center middle; }
     ChoiceForm #choice-form { width: 90%; max-width: 100; height: 90%; padding: 1 2;
@@ -31,6 +37,8 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
         fields: list[tuple[str, str, str]],
         *,
         choices: dict[str, list[tuple[str, str]]] | None = None,
+        multiple: dict[str, list[str]] | None = None,
+        custom: set[str] | None = None,
         optional: set[str] | None = None,
         secrets: set[str] | None = None,
     ) -> None:
@@ -38,6 +46,8 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
         self.heading = title
         self.fields = fields
         self.choices = choices or {}
+        self.multiple = multiple or {}
+        self.custom = custom or set()
         self.optional = optional or set()
         self.secrets = secrets or set()
 
@@ -47,7 +57,35 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
             for name, placeholder, default in self.fields:
                 yield from self.field_choices(name, default)
                 yield Static(name, id=f"label-{name}")
-                if name in self.choices:
+                if name in self.multiple:
+                    ticked = set(self.multiple[name])
+                    # Textual draws the same toggle glyph on every row, so the tick lives in
+                    # the label: colour alone is not a state signal.
+                    yield SelectionList[str](
+                        *(
+                            Selection(
+                                Text(f"[{'x' if value in ticked else ' '}] {label}"),
+                                value,
+                                value in ticked,
+                            )
+                            for label, value in self.choices[name]
+                        ),
+                        id=name,
+                    )
+                elif name in self.custom:
+                    # The list is what the workspace knows; the text input stays because the
+                    # CLI also takes identities this workspace has never seen.
+                    yield Select[str](
+                        [
+                            *self.choices[name],
+                            (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+                        ],
+                        value=default if default else "custom",
+                        id=f"{name}-choice",
+                        allow_blank=False,
+                    )
+                    yield Input(value=default, placeholder=placeholder, id=name)
+                elif name in self.choices:
                     options = list(self.choices[name])
                     if default and default not in {value for _, value in options}:
                         options.append((default, default))
@@ -74,14 +112,50 @@ class ChoiceForm(ModalScreen[dict[str, str] | None]):
         yield from ()
 
     def on_mount(self) -> None:
+        for name in self.custom:
+            selector = self.query_one(f"#{name}-choice", Select)
+            self.custom_input(name, selector.value == "custom")
         if self.fields:
             self.query_one("#" + self.fields[0][0]).focus()
+
+    def field_value(self, name: str) -> str:
+        """The field's value carrier, whichever widget currently holds it."""
+        widget = self.query_one("#" + name)
+        return str(widget.value or "") if isinstance(widget, (Input, Select)) else ""
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        selector_id = str(event.select.id or "")
+        name = selector_id.removesuffix("-choice")
+        if name not in self.custom or not isinstance(event.value, str):
+            return
+        self.custom_input(name, event.value == "custom")
+        if event.value != "custom":
+            self.query_one("#" + name, Input).value = event.value
+
+    def on_selection_list_selected_changed(
+        self, event: SelectionList.SelectedChanged[str]
+    ) -> None:
+        """Keep the written tick honest: Textual draws one glyph for both states."""
+        lister = event.selection_list
+        ticked = set(lister.selected)
+        for index, option in enumerate(lister.options):
+            label = str(option.prompt)
+            label = label[4:] if label[:3] in {"[x]", "[ ]"} else label
+            value = cast("Selection[str]", option).value
+            lister.replace_option_prompt_at_index(
+                index, Text(f"[{'x' if value in ticked else ' '}] {label}")
+            )
 
     def values(self) -> dict[str, str]:
         result = {}
         for name, _, _ in self.fields:
             widget = self.query_one("#" + name)
-            value = widget.value if isinstance(widget, (Input, Select)) else ""
+            if isinstance(widget, SelectionList):
+                value: Any = ",".join(str(item) for item in widget.selected)
+            elif isinstance(widget, (Input, Select)):
+                value = widget.value
+            else:
+                value = ""
             result[name] = value.strip() if isinstance(value, str) else ""
         return result
 
@@ -348,6 +422,94 @@ class ProviderForm(ChoiceForm):
         self.dismiss({k: v for k, v in values.items() if v})
 
 
+class ModelUseForm(ChoiceForm):
+    """`models use`: the ids on offer are the models declared for the chosen profile."""
+
+    def __init__(
+        self,
+        title: str,
+        fields: list[tuple[str, str, str]],
+        *,
+        choices: dict[str, list[tuple[str, str]]],
+        custom: set[str],
+        models: dict[str, list[str]],
+        optional: set[str] | None = None,
+    ) -> None:
+        super().__init__(title, fields, choices=choices, custom=custom, optional=optional)
+        self.models = models
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        self._offer(self.query_one("#profile", Select).value)
+
+    def _offer(self, identity: Any) -> None:
+        """One profile's ids at a time; a stale list would name another endpoint's models."""
+        known = [str(model) for model in self.models.get(str(identity), [])]
+        current = self.query_one("#id", Input).value
+        selector = self.query_one("#id-choice", Select)
+        selector.set_options(
+            [(model, model) for model in known]
+            + [
+                (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+            ]
+        )
+        selector.value = current if current in known else "custom"
+        self.custom_input("id", selector.value == "custom")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "profile":
+            self._offer(event.value)
+            return
+        super().on_select_changed(event)
+
+
+class SheetForm(ChoiceForm):
+    """`sheet --artifacts`: one session's outputs, following the session field."""
+
+    def __init__(
+        self,
+        title: str,
+        fields: list[tuple[str, str, str]],
+        *,
+        choices: dict[str, list[tuple[str, str]]],
+        multiple: dict[str, list[str]],
+        custom: set[str],
+        artifacts_for: Callable[[str], list[tuple[str, str]]],
+        optional: set[str] | None = None,
+    ) -> None:
+        super().__init__(
+            title, fields, choices=choices, multiple=multiple, custom=custom, optional=optional
+        )
+        self.artifacts_for = artifacts_for
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        self._refill()
+
+    def _refill(self) -> None:
+        """Everything ticked: a sheet is normally of every output the session has.
+
+        A sheet's sources must belong to one session, so the list is replaced rather than
+        merged when the session field names another one.
+        """
+        lister = self.query_one("#artifacts", SelectionList)
+        # set_options keeps the previous ticks, which would name another session's artifacts.
+        lister.clear_options()
+        lister.add_options([
+            Selection(Text(f"[x] {label}"), value, True)
+            for label, value in self.artifacts_for(self.field_value("session"))
+        ])
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        super().on_select_changed(event)
+        if str(event.select.id or "") == "session-choice":
+            self._refill()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "session":
+            self._refill()
+
+
 class CreationForm(ChoiceForm):
     """Choose a saved endpoint and its model without changing saved defaults."""
 
@@ -367,6 +529,10 @@ class CreationForm(ChoiceForm):
         self.request_version = 0
         self.profiles = {str(row["id"]): row for row in profiles}
         self.models = models
+        self.initial_profile = dict((name, value) for name, _, value in fields).get("profile", "")
+        present = {field for field, _, _ in fields}
+        self.geometry_fields = [name for name in GEOMETRY if name in present]
+        self.geometry = self._geometry_values(self.initial_profile)
         super().__init__(
             title,
             fields,
@@ -380,9 +546,14 @@ class CreationForm(ChoiceForm):
                     for identity, row in self.profiles.items()
                 ],
                 "async": [(t("Yes", "是"), "true"), (t("No", "否"), "false")],
+                **{
+                    name: [(value, value) for value in values]
+                    for name, values in self.geometry.items()
+                    if name in self.geometry_fields
+                },
             },
+            custom=set(self.geometry_fields),
         )
-        self.initial_profile = dict((name, value) for name, _, value in fields).get("profile", "")
 
     def field_choices(self, name: str, default: str) -> ComposeResult:
         if name == "model":
@@ -428,16 +599,47 @@ class CreationForm(ChoiceForm):
         selector.value = current if current and current in choices else "custom"
         self.custom_input("model", selector.value == "custom")
 
+    def _geometry_values(self, identity: str) -> dict[str, tuple[str, ...]]:
+        """Documented values the selected route takes, as Select candidates only."""
+        row = self.profiles.get(identity) or {}
+        table = specs(
+            str(row.get("provider", "")),
+            str(row.get("family", "")),
+            str(row.get("model_default", "")),
+        ) or ()
+        return {
+            name: next((spec.values for spec in table if spec.name == name), ())
+            for name in (*GEOMETRY, "size")
+        }
+
+    def _refresh_geometry(self, identity: str) -> None:
+        self.geometry = self._geometry_values(identity)
+        for name in self.geometry_fields:
+            selector = self.query_one(f"#{name}-choice", Select)
+            selector.set_options(
+                [
+                    *((value, value) for value in self.geometry[name]),
+                    (t("Custom / manual input", "自定义 / 手动输入"), "custom"),
+                ]
+            )
+            selector.value = "custom"
+        if "size" in {field for field, _, _ in self.fields} and not self.geometry["size"]:
+            # A pixel size the new route cannot send would only fail at plan time.
+            self.query_one("#size", Input).value = ""
+
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "profile":
             identity = event.value if isinstance(event.value, str) else ""
             if identity != self.initial_profile:
                 self.initial_profile = identity
                 self._models(identity, reset=True)
+                self._refresh_geometry(identity)
         elif event.select.id == "model-choice" and isinstance(event.value, str):
             self.custom_input("model", event.value == "custom")
             if event.value != "custom":
                 self.query_one("#model", Input).value = event.value
+        else:
+            super().on_select_changed(event)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add-profile" and self.add_profile:

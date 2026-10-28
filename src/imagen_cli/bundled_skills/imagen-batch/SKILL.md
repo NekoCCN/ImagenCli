@@ -1,6 +1,6 @@
 ---
 name: imagen-batch
-version: 1.1.0
+version: 1.2.0
 description: Use when submitting multiple Imagen image requests, choosing provider concurrency, inspecting batch child jobs, or handling partial batch failures.
 ---
 
@@ -47,6 +47,19 @@ imagen batch submit --input-json requests.json --agent
 Read `data.batch.id` and each child's result. `--input-json -` reads stdin. All children are validated offline before submission; invalid input rejects the batch. Effective concurrency is bounded by the requested value, 8, and declared provider limits. A `null` cost is unknown, not free.
 
 For cost preview only, create individual unapproved `generate` / `edit` plans using the `imagen` workflow; do not call `batch submit`, approve, or execute them. Available costs may remain unknown.
+
+## Per-child parameters
+
+Use the selected profile's route for each child; a mixed-provider batch has no shared geometry default. This build dispatches only `openai/images` and `gemini/generate_content`; a catalog entry on another route does not make it executable.
+
+| Child route | Top-level fields | `count` |
+|---|---|---|
+| `openai/images` | `size`, e.g. `1536x864` on `gpt-image-2*`, or `auto`; `provider_params: {"quality": "xhigh"}` on `gpt-image-2.5*` | 1–10 |
+| `gemini/generate_content` | `aspect_ratio`, e.g. `16:9`; `image_size`, e.g. `2K` for `gemini-3.1-flash-image`; omit `size` | 1 |
+
+Keep geometry and count at the top level; put OpenAI quality inside `provider_params`. Omit unspecified fields, not empty strings or `null`. Gemini `2k` is invalid (uppercase `K`); never silently reduce count or change requested parameters. **REQUIRED SUB-SKILL:** Use `imagen` and its linked workflows for model-specific size/tier limits, retired IDs, and planning.
+
+For preview, write each child object to its own JSON file and run `imagen generate --input-json child.json --dry-run --agent` (use `edit` for edit children). Check the exit code and `status=planned`, then present `data.plan.normalized_parameters`, target, and available costs. A refused child has no executable plan. This sends no creation request; neither `batch submit` nor `--async` is a preview command.
 
 ## Inspect and wait
 

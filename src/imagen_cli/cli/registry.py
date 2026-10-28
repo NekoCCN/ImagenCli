@@ -6,6 +6,7 @@ from typing import Any
 
 from imagen_cli import i18n
 from imagen_cli.domain.contracts import CreationInput, InvocationEvent, Result
+from imagen_cli.providers import vocabulary
 
 from .options import OPTION_METADATA
 
@@ -220,12 +221,49 @@ def _object(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[
     }
 
 
+def _geometry_descriptions() -> dict[str, str]:
+    """Help text for the geometry fields, built from the shared vocabulary."""
+    gemini = {
+        spec.name: spec.values
+        for spec in vocabulary.specs(
+            "gemini", "generate_content", "gemini-3.1-flash-image", "generate"
+        ) or ()
+    }
+    openai = {
+        spec.name: spec.values
+        for spec in vocabulary.specs("openai", "images", "gpt-image-2.5-sunburst", "generate")
+        or ()
+    }
+    return {
+        "size": (
+            "Pixel size for OpenAI image routes: "
+            + ", ".join(openai["size"])
+            + ", or WIDTHxHEIGHT on gpt-image-2 models (both edges divisible by 16, "
+            "aspect ratio 1:3-3:1, no edge above 3840). Gemini routes reject size; "
+            "use aspect_ratio and image_size."
+        ),
+        "aspect_ratio": (
+            "Aspect ratio for Gemini image routes: " + ", ".join(gemini["aspect_ratio"]) + "."
+        ),
+        "image_size": (
+            "Output tier for Gemini image routes: "
+            + ", ".join(gemini["image_size"])
+            + " (uppercase K; each model supports a subset, default 1K)."
+        ),
+    }
+
+
 def _creation_schema(operation: str | None = None) -> dict[str, Any]:
     schema = CreationInput.model_json_schema()
     properties = schema["properties"]
     # Pydantic's runtime validators are not represented in its generated schema.
-    for field in ("profile", "model", "mask", "size", "retry_of_job_id", "ack_duplicate_cost"):
+    for field in (
+        "profile", "model", "mask", "size", "aspect_ratio", "image_size",
+        "retry_of_job_id", "ack_duplicate_cost",
+    ):
         properties[field] = properties[field]["anyOf"][0]
+    for field, description in _geometry_descriptions().items():
+        properties[field]["description"] = description
     schema["allOf"] = [
         {
             "if": {"properties": {"operation": {"const": "edit"}}},

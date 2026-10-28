@@ -77,23 +77,20 @@ _ERROR = {
 
 
 def test_a_terminal_is_enough_for_styling_without_a_term_variable(tmp_path, monkeypatch):
-    """Windows consoles never set TERM, so Rich — not an env check — decides styling."""
-    import fcntl
-    import os
-    import pty
-    import struct
-    import termios
+    """Exercise our stream contract without platform-specific PTY buffering."""
+    import io
 
     from imagen_cli.cli.renderers import Renderer
 
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
     for name in ("TERM", "NO_COLOR", "FORCE_COLOR", "WT_SESSION"):
         monkeypatch.delenv(name, raising=False)
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
-    with os.fdopen(slave, "w", encoding="utf-8") as stream:
-        code = Renderer("human", stdout=stream).finish(_ERROR)
-    output = os.read(master, 65536).decode("utf-8", "replace")
-    os.close(master)
+    stream = Terminal()
+    code = Renderer("human", stdout=stream).finish(_ERROR)
+    output = stream.getvalue()
     assert code == 2
     assert "\x1b[" in output
     assert "失败" in output

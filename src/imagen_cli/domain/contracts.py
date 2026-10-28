@@ -92,6 +92,8 @@ class CreationInput(StrictModel):
     references: Annotated[list[AssetInput], Field(max_length=100)] = Field(default_factory=list)
     count: Annotated[int, Field(strict=True, ge=1, le=100)] = 1
     size: NonEmptyString | None = None
+    aspect_ratio: NonEmptyString | None = None
+    image_size: NonEmptyString | None = None
     provider_params: JsonObject = Field(default_factory=dict)
     retry_of_job_id: ContractJobId | None = None
     ack_duplicate_cost: bool | None = None
@@ -105,6 +107,8 @@ class CreationInput(StrictModel):
                 "model",
                 "mask",
                 "size",
+                "aspect_ratio",
+                "image_size",
                 "retry_of_job_id",
                 "ack_duplicate_cost",
             ):

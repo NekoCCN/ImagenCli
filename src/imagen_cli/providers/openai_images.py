@@ -15,6 +15,7 @@ from imagen_cli.storage.download import fetch as fetch_url
 
 from .base import ArtifactDescriptor, ImmediateResult, ProviderFailure, ValidatedRequest
 from .common import validate_image_bytes
+from .vocabulary import check, retired, serves
 
 
 class OpenAIImagesAdapter:
@@ -48,7 +49,11 @@ class OpenAIImagesAdapter:
         ):
             raise ProviderFailure("validation_error")
         if (
-            request.model not in {"gpt-image-1", self.profile.model_default}
+            retired("openai", "images", request.model)
+            or (
+                not serves("openai", "images", request.model)
+                and request.model != self.profile.model_default
+            )
             or request.native_context is not None
         ):
             raise ProviderFailure("unsupported_capability")
@@ -61,38 +66,7 @@ class OpenAIImagesAdapter:
             or sum(map(len, images)) > 256 * 1024 * 1024
         ):
             raise ProviderFailure("validation_error")
-        if params.get("background", "auto") not in {"auto", "opaque", "transparent"}:
-            raise ProviderFailure("validation_error")
-        if params.get("moderation", "auto") not in {"auto", "low"}:
-            raise ProviderFailure("validation_error")
-        compression = params.get("output_compression", 100)
-        if type(compression) is not int or not 0 <= compression <= 100:
-            raise ProviderFailure("validation_error")
-        allowed = {
-            "count",
-            "size",
-            "quality",
-            "background",
-            "output_format",
-            "output_compression",
-            "moderation",
-            "input_fidelity",
-        }
-        if set(params) - allowed or params.get("quality", "auto") not in {
-            "auto",
-            "low",
-            "medium",
-            "high",
-        }:
-            raise ProviderFailure("validation_error")
-        if "model" in params or any(isinstance(params.get(k), bool) for k in ("count",)):
-            raise ProviderFailure("validation_error")
-        count = params.get("count", 1)
-        if not isinstance(count, int) or not 1 <= count <= 10:
-            raise ProviderFailure("validation_error")
-        if params.get("size", "1024x1024") not in {"1024x1024", "1536x1024", "1024x1536", "auto"}:
-            raise ProviderFailure("validation_error")
-        if params.get("output_format", "png") not in {"png", "jpeg", "webp"}:
+        if check("openai", "images", request.model, request.operation, params):
             raise ProviderFailure("validation_error")
         if (
             params.get("background") == "transparent"
