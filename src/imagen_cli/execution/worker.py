@@ -392,6 +392,12 @@ def _execute_pending(container: Any, worker: Worker) -> None:
         except LeaseError:
             continue
         try:
+            turn = repositories.get("turns", job["turn_id"]) or {}
+            if turn.get("operation") in {"transform", "superres"}:
+                from imagen_cli.application.local_processing import run
+
+                run(repositories, container.artifact_store, job["id"], worker=worker)
+                continue
             run_queued(
                 repositories, container.artifact_store,
                 container.private_state_store, adapter, job["id"],

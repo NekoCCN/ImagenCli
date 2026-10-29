@@ -2174,30 +2174,23 @@ def test_transform_panel_asks_before_running_a_local_model(deps):
             await pilot.pause()
             screen = app.screen
             assert type(screen).__name__ == "ModelProcessScreen"
-            assert "superres" in screen.names
-            assert screen.entries["superres"]["group"] == "模型处理"
-            screen.table.move_cursor(row=screen.names.index("superres"))
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            assert type(app.screen).__name__ == "LocalModelScreen"
-            assert calls == []  # nothing runs before the question is answered
-            table = app.screen.query_one("#local-model-table", DataTable)
-            rows = [
-                [str(cell) for cell in table.get_row_at(index)]
-                for index in range(table.row_count)
-            ]
-            assert [row[0] for row in rows] == [m["model"] for m in superres.catalog()["models"]]
-            assert ("已下载" in rows[0][-1]) is superres.catalog()["models"][0]["downloaded"]
-            index = next(i for i, row in enumerate(rows) if row[0] == "realesr-animevideov3")
+            table = screen.query_one("#processing-models", DataTable)
+            rows = [table.get_row_at(index) for index in range(table.row_count)]
+            expected_models = [m["model"] for m in superres.catalog()["models"]]
+            assert [str(row[0]) for row in rows] == expected_models
+            index = next(i for i, row in enumerate(rows) if str(row[0]) == "realesr-animevideov3")
             table.move_cursor(row=index)
             await pilot.pause()
-            await pilot.press("enter")
+            screen.action_apply()
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            assert calls == []
+            app.screen.dismiss(True)
             await pilot.pause()
             assert len(calls) == 1
-            assert calls[0][1] == [
-                {"op": "superres", "params": {"model": "realesr-animevideov3", "accept": True}}
-            ]
+            assert calls[0][1] == [{"op": "superres", "params": {
+                "model": "realesr-animevideov3", "accept": True, "tile": 256, "overlap": 16,
+            }}]
 
     asyncio.run(run())
 
@@ -2206,7 +2199,7 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
     """A model that is not on disk is asked about, downloaded, and only then run."""
     from io import BytesIO
 
-    from textual.widgets import DataTable, Static
+    from textual.widgets import DataTable
 
     module = _superres_workspace(monkeypatch, tmp_path)
     from imagen_cli.application.superres import catalog
@@ -2246,38 +2239,32 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
             await pilot.pause()
             await pilot.press("u")
             await pilot.pause()
-            app.screen.table.move_cursor(row=app.screen.names.index("superres"))
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
             chooser = app.screen
-            table = chooser.query_one("#local-model-table", DataTable)
+            table = chooser.query_one("#processing-models", DataTable)
             names = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
             table.move_cursor(row=names.index(model))
             await pilot.pause()
-            assert "未下载" in str(chooser.query_one("#local-model-status", Static).render())
-            await pilot.press("enter")
+            assert "未下载" in str(table.get_row_at(names.index(model))[-1])
+            chooser.action_fetch()
             await pilot.pause()
-            assert type(app.screen).__name__ == "ConfirmScreen"  # asked before fetching
+            assert type(app.screen).__name__ == "ConfirmScreen"
             assert commands == [] and runs == []
-            await pilot.press("y")
-            await pilot.pause()
+            app.screen.dismiss(True)
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert commands == [("superres fetch", {"model": model, "accept": True})]
-            assert runs == []  # downloading is not running
-            table = app.screen.query_one("#local-model-table", DataTable)
-            row = next(
-                table.get_row_at(i)
-                for i in range(table.row_count)
-                if str(table.get_row_at(i)[0]) == model
-            )
+            assert runs == []
+            row = next(table.get_row_at(i) for i in range(table.row_count)
+                       if str(table.get_row_at(i)[0]) == model)
             assert "已下载" in str(row[-1])
-            await pilot.press("enter")
+            chooser.action_apply()
             await pilot.pause()
-            assert runs == [
-                [{"op": "superres", "params": {"model": model, "accept": True}}]
-            ]
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            app.screen.dismiss(True)
+            await pilot.pause()
+            assert runs == [[{"op": "superres", "params": {
+                "model": model, "accept": True, "tile": 256, "overlap": 16,
+            }}]]
 
     asyncio.run(run())
 

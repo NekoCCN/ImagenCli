@@ -8,7 +8,6 @@ import re
 from typing import Any, cast
 
 from imagen_cli import i18n
-from imagen_cli.application.postprocess_service import apply
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.repositories import Repositories
 
@@ -82,6 +81,8 @@ def transform_(
     timeout: float | None = None,
     budget_approval: str | None = None,
     model_params: dict[str, Any] | None = None,
+    asynchronous: bool = False,
+    progress: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     steps: list[dict[str, Any]]
     if model_params is not None:
@@ -125,12 +126,27 @@ def transform_(
         steps = match
     else:
         raise ValueError("pipeline, op or preset is required")
+    from imagen_cli.application.local_processing import run, submit
     from imagen_cli.application.postprocess_service import BudgetApprovalRequired
 
+    if asynchronous:
+        from imagen_cli.execution.worker import status
+
+        if not any(row["alive"] for row in status(repositories)[1]["workers"]):
+            return "conflict", {"next_actions": [
+                {"command": "worker start", "creates_paid_request": False},
+            ], "error": {"type": "conflict", "detail": i18n.t(
+                "Start a worker before using --async: imagen worker start",
+                "使用 --async 前请先启动 worker：imagen worker start",
+            )}}
     try:
-        row = apply(repositories, store, artifact, steps, session_id=session, timeout=timeout,
-                    budget_approval=budget_approval)
+        job = submit(repositories, store, artifact, steps, session_id=session, timeout=timeout,
+                     budget_approval=budget_approval, asynchronous=asynchronous)
     except BudgetApprovalRequired as error:
         return "approval_required", {"budget": error.report,
                                     "error": {"type": "approval_required", "detail": str(error)}}
-    return "succeeded", {"artifact": row, "source": artifact}
+    if asynchronous:
+        return "accepted", {"job": job, "source": artifact, "next_actions": [
+            {"command": "job wait " + job["id"], "creates_paid_request": False},
+        ]}
+    return run(repositories, store, job["id"], progress=progress)

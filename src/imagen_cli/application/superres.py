@@ -371,7 +371,7 @@ def _round_up(value: int, multiple: int) -> int:
 
 
 def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
-                  overlap: int = 16) -> Any:
+                  overlap: int = 16, progress: Any = None) -> Any:
     """Run overlapping tiles and write their disjoint cores into one output buffer."""
     numpy = _numpy()
     if tile < 4 or not 0 <= overlap < tile:
@@ -379,6 +379,11 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
     height, width = array.shape[:2]
     # uint8 is the exact output range after the clip below, and a quarter of float32.
     output = numpy.empty((height * scale, width * scale, 3), dtype=numpy.uint8)
+    from imagen_cli.application.progress import report
+
+    total = ((height + tile - 1) // tile) * ((width + tile - 1) // tile)
+    completed = 0
+    report(progress, "processing", total=total, unit="tiles", operation="superres")
     for top in range(0, height, tile):
         for left in range(0, width, tile):
             bottom = min(height, top + tile)
@@ -400,13 +405,20 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
                 slice(left * scale, right * scale),
             )
             output[destination] = numpy.clip(piece[area], 0, 255).astype(numpy.uint8)
+            completed += 1
+            report(progress, "processing", completed=completed, total=total,
+                   unit="tiles", operation="superres")
     return output
 
 
 def upscale(image: Image.Image, *, model: str = "realesrgan-x4plus",
             backend: str | None = None, device: str | None = None,
             tile: int = 256, overlap: int = 16, accept: bool = False,
-            runner: Runner | None = None) -> tuple[Image.Image, dict[str, Any]]:
+            runner: Runner | None = None,
+            progress: Any = None) -> tuple[Image.Image, dict[str, Any]]:
+    from imagen_cli.application.progress import current_progress, report
+
+    progress = progress if progress is not None else current_progress.get()
     numpy = _numpy()
     if model not in MANIFEST:
         raise ValueError("unknown super-resolution model")
@@ -417,10 +429,12 @@ def upscale(image: Image.Image, *, model: str = "realesrgan-x4plus",
         tile, overlap = int(fixed_input), 0
     engine: dict[str, Any] = {}
     if runner is None:
+        report(progress, "loading_model", operation=model)
         runner, engine = _make_runner(model, backend=backend, device=device, accept=accept)
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     array = numpy.asarray(image.convert("RGB"), dtype=numpy.uint8)
-    result = tiled_upscale(array, runner, scale=scale, tile=tile, overlap=overlap)
+    result = tiled_upscale(array, runner, scale=scale, tile=tile, overlap=overlap,
+                          progress=progress)
     converted = Image.fromarray(result, "RGB")
     if alpha is not None:
         converted = converted.convert("RGBA")

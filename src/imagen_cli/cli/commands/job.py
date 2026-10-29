@@ -1,6 +1,7 @@
 """Local job observation handlers; no provider or creation dependency."""
 
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from imagen_cli.application.artifact_service import ArtifactService
@@ -78,10 +79,16 @@ def cancel_(
     if scope not in {"wait", "local", "remote"}:
         raise ValueError("invalid cancellation scope")
     try:
-        job, _ = _data(service, job_id)
+        job, turn = _data(service, job_id)
     except KeyError:
         return "not_found", {}
     if scope == "local":
+        if turn.get("operation") in {"transform", "superres"}:
+            from imagen_cli.application.local_processing import cancel
+
+            status = cancel(service.repositories, job_id)
+            current, _ = _data(service, job_id)
+            return status, _result(current, _artifacts(service, job_id))
         from imagen_cli.application.cancel_service import cancel_local
 
         status = cancel_local(service.repositories, job_id)
@@ -94,7 +101,7 @@ def cancel_(
 
 
 def wait_(
-    service: ArtifactService, job_id: str, *, timeout: int = 300
+    service: ArtifactService, job_id: str, *, timeout: int = 300, progress: Any = None
 ) -> tuple[str, dict[str, Any]]:
     if type(timeout) is not int or not 1 <= timeout <= 86400:
         raise ValueError("invalid timeout")
@@ -107,7 +114,12 @@ def wait_(
     observed_seq = connection.execute(
         "SELECT COALESCE(MAX(job_seq),0) FROM events WHERE job_id=?", (job_id,),
     ).fetchone()[0]
+    last_progress: Any = None
     while job["state"] in {"queued", "running"}:
+        value = job.get("progress") or {"stage": job["state"], "total": None}
+        if progress is not None and value != last_progress:
+            progress({**value, "job_id": job_id})
+            last_progress = value
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
@@ -150,7 +162,36 @@ def reconcile_(service: ArtifactService, job_id: str) -> tuple[str, dict[str, An
         job, _ = _data(service, job_id)
     except KeyError:
         return "not_found", {}
+    _, turn = _data(service, job_id)
+    if turn.get("operation") in {"transform", "superres"}:
+        if job.get("cancel_intent") or job["state"] == "canceled":
+            return "canceled", _result(job, _artifacts(service, job_id))
+        private = service.repositories.get("jobs", job_id, include_private=True)
+        executor = private.get("executor_id") or {}
+        worker_id = executor.get("worker_id") if isinstance(executor, dict) else None
+        worker = service.repositories.get("workers", worker_id) if worker_id else None
+        from imagen_cli.application.cancel_service import process_start
+        from imagen_cli.execution.worker import _alive, _expired
+
+        foreground_alive = (not worker_id and isinstance(executor, dict)
+                            and type(executor.get("pid")) is int
+                            and process_start(executor["pid"]) == executor.get("start"))
+        if (job["state"] == "running" and (foreground_alive or (_alive(worker)
+                and not _expired(private.get("lease_expires_at"), datetime.now(UTC))))):
+            return "conflict", _result(job, _artifacts(service, job_id))
     artifacts = _artifacts(service, job_id, reconcile=True)
+    if turn.get("operation") in {"transform", "superres"} and len(artifacts) == 1:
+        from imagen_cli.application.session_service import _now
+
+        with service.repositories.transaction():
+            job = service.repositories.update("jobs", job_id, {
+                "state": "succeeded", "actual_count": 1, "local_save_state": "saved",
+                "error": None, "updated_at": _now(),
+                "progress": {"stage": "completed", "completed": 1, "total": 1,
+                             "unit": "artifacts", "operation": turn["operation"]},
+            })
+            service.repositories.update("turns", turn["id"],
+                                        {"creation_state": "succeeded", "finished_at": _now()})
     local_rows = service.repositories.list("artifacts", producer_job_id=job_id)
     if len(artifacts) < max(len(local_rows), job.get("actual_count", 0)) and artifacts:
         return "partial_success", _result(job, artifacts)

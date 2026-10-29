@@ -417,7 +417,7 @@ imagen ops --op guided_smooth               # 单个算子
 imagen ops --preset '去AI塑料感' --verbose    # 配方详情
 imagen transform ARTIFACT_ID --preset '像素化'
 imagen transform ARTIFACT_ID --op 'guided_smooth:radius=4,epsilon=0.001,strength=0.5'
-imagen compare art_a art_b
+imagen compare --first art_a --second art_b
 imagen sheet --artifacts art_a,art_b,art_c --columns 3
 ```
 
@@ -430,7 +430,27 @@ imagen sheet --artifacts art_a,art_b,art_c --columns 3
 - 频率抑制可能删除有意的网点。
 - 差异指标只给出数值，结论请打开图片对照。
 
-TUI：`t` 打开普通图像处理页，`p` 调参，`enter` 应用；`u` 打开独立模型处理页，`s` 管理本地权重与运行时。应用会生成新产物，源文件保持不变。
+TUI：`t` 打开普通图像处理页，`p` 调参，`enter` 应用。`u` 打开模型工作台，直接选择真实模型，按 ACG／修复筛选，查看原图和预计输出尺寸，调节后端、分块、重叠与超时。支持前台／后台执行，下载权重和每次运行确认分开操作。`s` 管理本地权重与运行时。应用会生成新产物，源文件保持不变。
+
+### 阻塞、后台任务与进度
+
+`transform` 和 `superres run` 默认等待处理结束，`--wait` 显式选择相同行为。使用 `--async` 前先启动 worker；命令返回任务 ID 后，处理继续在后台运行。
+
+```bash
+imagen transform ARTIFACT_ID --op 'resize:scale=2' --wait
+imagen worker start
+imagen transform ARTIFACT_ID --op 'invert' --async
+imagen superres run ARTIFACT_ID --model realesrgan-x4plus --accept --async
+imagen job get JOB_ID
+imagen job wait JOB_ID --timeout 900
+imagen job cancel JOB_ID --scope local
+```
+
+启动 worker 也会执行已经排队的生成请求，请先检查队列。本地任务记录输入、目标会话、参数和结果；`session show` 同时列出生成与本地处理产物，包括历史处理结果。
+
+CLI 在交互终端的 stderr 显示进度条。JSON 只返回最终结果，JSONL 包含进度事件。TUI 显示相同处理阶段：普通管线计数已完成步骤，模型推理计数已完成分块，加载、编码和保存显示活动指示。远程生成显示可观察的阶段。后台处理完成后，TUI 自动载入新产物。
+
+处理超时会停止本次计算；`job wait` 超时只停止等待，任务继续运行。本地取消可以停止排队或执行中的处理，不保存半成品图片。
 
 超过默认像素或工作缓冲预算时，Imagen 显示尺寸和内存风险，询问是否继续，默认取消。非交互 CLI 返回 `approval_required`；用户明确接受风险后，用响应中的摘要加 `--budget-approval DIGEST` 重跑同一请求。确认绑定原图内容与处理参数，修改任一项都需要重新确认。内存不足或超时仍会让请求失败。
 

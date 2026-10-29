@@ -19,6 +19,7 @@ from PIL import Image
 
 from imagen_cli import i18n
 from imagen_cli.application import media_ops
+from imagen_cli.application.progress import ProgressCallback, current_progress, report
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.storage import queries
 from imagen_cli.storage.artifacts import ArtifactStore, image_limits
@@ -423,7 +424,8 @@ def _owner(repositories: Repositories, source: str) -> str:
     raise ValueError("source artifact belongs to several sessions; pass --session")
 
 
-def render(path: Any, pipeline: Any, *, allow_large: bool = False) -> tuple[bytes, dict[str, Any]]:
+def render(path: Any, pipeline: Any, *, allow_large: bool = False,
+           progress: ProgressCallback | None = None) -> tuple[bytes, dict[str, Any]]:
     """Compute bytes and provenance without touching storage or session state."""
     steps = validate(pipeline)
     with image_limits(allow_large), Image.open(path) as opened:
@@ -436,6 +438,7 @@ def render(path: Any, pipeline: Any, *, allow_large: bool = False) -> tuple[byte
         options = steps.pop()["params"]
     references: list[dict[str, Any]] = []
     detections: list[dict[str, Any]] = []
+    report(progress, "processing", total=len(steps), unit="steps")
     for index, step in enumerate(steps):
         operation = media_ops.OPS[step["op"]]
         params = dict(step["params"])
@@ -451,6 +454,7 @@ def render(path: Any, pipeline: Any, *, allow_large: bool = False) -> tuple[byte
                                "sha256": hashlib.sha256(reference_bytes).hexdigest(),
                                "color": reference_color})
             params["reference"] = normalized_reference
+        token = current_progress.set(progress)
         try:
             current = operation(current, **params)
             detection = current.info.pop("postprocess_detection", None)
@@ -458,6 +462,11 @@ def render(path: Any, pipeline: Any, *, allow_large: bool = False) -> tuple[byte
                 detections.append({"step": index, **detection})
         except TypeError as error:
             raise ValueError(f"invalid parameters for {step['op']}") from error
+        finally:
+            current_progress.reset(token)
+        report(progress, "processing", completed=index + 1, total=len(steps),
+               unit="steps", operation=step["op"])
+    report(progress, "encoding")
     if output_profile:
         current.info["icc_profile"] = output_profile
     try:
@@ -507,7 +516,8 @@ def apply(
 
 def publish_result(repositories: Repositories, store: ArtifactStore, source: str,
                    pipeline: Any, data: bytes, metadata: dict[str, Any], *,
-                   session_id: str | None = None) -> dict[str, Any]:
+                   session_id: str | None = None, job_id: str | None = None,
+                   defer_publish: bool = False) -> dict[str, Any]:
     """Publish completed local computation on the storage-owning thread."""
     steps = validate(pipeline)
     row = repositories.get("artifacts", source)
@@ -533,9 +543,22 @@ def publish_result(repositories: Repositories, store: ArtifactStore, source: str
     if metadata.get("budget_approval"):
         manifest.update({"budget_approval": metadata["budget_approval"],
                          "budget": metadata["budget"]})
+    job = repositories.get("jobs", job_id) if job_id else None
+    turn = repositories.get("turns", job["turn_id"]) if job else None
+    if job_id and (not turn or turn["session_id"] != session):
+        raise ValueError("local job belongs to another session")
+    if job:
+        manifest["output_index"] = 0
     store.stage(identity, data, origin_manifest=manifest,
+                producer_job_id=job_id, producer_turn_id=turn["id"] if turn else None,
                 allow_large=bool(metadata.get("budget_approval")))
-    store.publish(identity)
+    if not defer_publish:
+        store.publish(identity)
+    if turn:
+        repositories.insert("artifact_references", {
+            "session_id": session, "turn_id": turn["id"], "artifact_id": identity,
+            "role": "output", "index": 0,
+        })
     repositories.insert(
         "artifact_links",
         {

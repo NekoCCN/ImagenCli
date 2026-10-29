@@ -21,7 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
-from textual.widgets import Button, DataTable, Input, Select, Static
+from textual.widgets import Button, DataTable, Input, ProgressBar, Select, Static
 
 from imagen_cli.application import cache_service, media_ops, superres
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
@@ -40,6 +40,7 @@ from imagen_cli.storage.repositories import Repositories
 from . import preview
 from .forms import ChoiceForm, CreationForm, ModelUseForm, ProviderForm, SheetForm
 from .modal import Modal
+from .model_process import ModelProcessScreen
 
 
 @dataclass
@@ -204,7 +205,7 @@ def _sanitize(value: object) -> str:
 
 
 def _executor(
-    deps: Deps, options: SharedOptions | None = None
+    deps: Deps, options: SharedOptions | None = None, progress: Any = None
 ) -> Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]]:
     """Workers get their own connection; the app's connection stays on the UI thread."""
     assert deps.execute is not None
@@ -216,7 +217,7 @@ def _executor(
     def run(command: str, arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         from imagen_cli.application.container import Container
 
-        with Container(workspace=root, options=options) as container:
+        with Container(workspace=root, options=options, progress=progress) as container:
             return container.execute(command, arguments)
 
     return run
@@ -869,6 +870,7 @@ class TransformScreen(Modal[bool]):
                     yield self.intro_view
                     yield self.params_view
                     yield self.status
+                    yield ProgressBar(total=None, show_eta=False, id="processing-progress")
             yield Horizontal(
                 Button(t("Parameters", "参数"), id="transform-params"),
                 Button(t("Apply", "应用"), id="transform-apply", variant="primary"),
@@ -884,6 +886,7 @@ class TransformScreen(Modal[bool]):
             )
 
     def on_mount(self) -> None:
+        self.query_one("#processing-progress", ProgressBar).display = False
         self.category_table.cursor_type = "row"
         self.category_table.add_columns(t("Category", "分类"))
         for cat in self.categories:
@@ -1173,6 +1176,16 @@ class TransformScreen(Modal[bool]):
             return
         self.dismiss(bool(result))
 
+    def _processing_progress(self, value: dict[str, Any]) -> None:
+        from imagen_cli.cli.progress import label
+
+        if not self.is_mounted:
+            return
+        bar = self.query_one("#processing-progress", ProgressBar)
+        bar.display = True
+        bar.update(total=value.get("total"), progress=value.get("completed", 0))
+        self.status.update(label(value))
+
     async def _apply_isolated(
         self, pipeline: list[dict[str, Any]], budget_approval: str | None = None,
     ) -> None:
@@ -1182,7 +1195,43 @@ class TransformScreen(Modal[bool]):
         try:
             # Only file computation leaves the UI thread; SQLite publication stays here.
             steps = postprocess_service.validate(pipeline)
-            execution_options: dict[str, Any] = {"cancelled": self.cancelled}
+            loop = asyncio.get_running_loop()
+            if self.deps.workspace_root is not None:
+                from imagen_cli.application import local_processing
+
+                job = local_processing.submit(
+                    self.deps.repositories, self.deps.store, self.artifact, steps,
+                    session_id=self.session, budget_approval=budget_approval,
+                )
+                root = str(self.deps.workspace_root)
+
+                def progress(value: dict[str, Any]) -> None:
+                    loop.call_soon_threadsafe(self._processing_progress, value)
+
+                def process() -> tuple[str, dict[str, Any]]:
+                    from imagen_cli.application.container import Container
+
+                    with Container(workspace=root) as container:
+                        return local_processing.run(
+                            container.repositories, container.artifact_store, job["id"],
+                            cancelled=self.cancelled,
+                            progress=progress,
+                        )
+
+                status, result = await asyncio.to_thread(process)
+                if status == "succeeded":
+                    self.dismiss(True)
+                elif status == "canceled":
+                    self.status.update(t("Processing canceled", "处理已取消"))
+                else:
+                    self.status.update(error_message(data_error(result)) or status)
+                return
+            execution_options: dict[str, Any] = {
+                "cancelled": self.cancelled,
+                "progress": lambda value: loop.call_soon_threadsafe(
+                    self._processing_progress, value,
+                ),
+            }
             if budget_approval:
                 execution_options["budget_approval"] = budget_approval
             data, metadata = await asyncio.to_thread(
@@ -1218,21 +1267,6 @@ class TransformScreen(Modal[bool]):
             self.status.update(t("Canceling processing…", "正在取消处理…"))
             return
         self.dismiss(False)
-
-
-class ModelProcessScreen(TransformScreen):
-    """Separate model-processing page; execution and budget confirmation stay shared."""
-
-    def __init__(self, deps: Deps, artifact: str, session: str, path: Path) -> None:
-        super().__init__(deps, artifact, session, path)
-        label = t("Model processing", "模型处理")
-        self.entries = {"superres": {"key": "superres", "name": label, "group": label}}
-        self.pipelines = {"superres": [{"op": "superres", "params": {}}]}
-        self.categories = [label]
-        self.all_names = ["superres"]
-        self.filtered_names = list(self.all_names)
-        self.names = self.filtered_names
-        self.header_title.update(label)
 
 
 class ModelPickerScreen(Modal[str | None]):
@@ -1901,6 +1935,7 @@ class PlanScreen(Modal[bool]):
                 classes="panel-hint",
             ),
             self.status,
+            ProgressBar(total=None, show_eta=False, id="plan-progress"),
             Horizontal(
                 Button(t("Approve", "批准"), id="plan-approve"),
                 Button(t("Execute", "执行"), id="plan-execute", variant="primary", disabled=True),
@@ -1920,7 +1955,17 @@ class PlanScreen(Modal[bool]):
         )
 
     def on_mount(self) -> None:
+        self.query_one("#plan-progress", ProgressBar).display = False
         self._say(t("Not approved yet", "尚未批准"), "muted")
+
+    def _plan_progress(self, value: dict[str, Any]) -> None:
+        from imagen_cli.cli.progress import label
+
+        if self.is_mounted:
+            bar = self.query_one("#plan-progress", ProgressBar)
+            bar.display = True
+            bar.update(total=value.get("total"), progress=value.get("completed", 0))
+            self._say(label(value), "info")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
@@ -1995,6 +2040,7 @@ class PlanScreen(Modal[bool]):
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
         self.running = True
+        self.query_one("#plan-progress", ProgressBar).display = True
         self._say(
             t(
                 "Executing… the first request may take 20–60 seconds; returns automatically",
@@ -2007,7 +2053,12 @@ class PlanScreen(Modal[bool]):
 
     def _execute_job(self) -> None:
         try:
-            status, data = _executor(self.deps)("plan execute", {"plan_id": self.plan["id"]})
+            def progress(value: dict[str, Any]) -> None:
+                self.app.call_from_thread(self._plan_progress, value)
+
+            status, data = _executor(self.deps, progress=progress)(
+                "plan execute", {"plan_id": self.plan["id"]},
+            )
         except Exception as error:  # noqa: BLE001 - surfaced in the panel
             self.app.call_from_thread(self._finish, None, _sanitize(error))
             return
@@ -2089,6 +2140,8 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
             continue
         if kind == "integer":
             arguments[name] = int(raw)
+        elif kind == "number":
+            arguments[name] = float(raw)
         elif kind == "boolean":
             arguments[name] = _boolean(raw)
         elif kind == "array":
@@ -2284,7 +2337,9 @@ def _control_fields(command: str) -> list[tuple[str, str, str]]:
         if attribute not in allowed:
             continue
         # `asset gc` reads dry_run as an argument; the schema field already asks for it.
-        if name == "dry_run" and name in taken:
+        if name in taken and name != "timeout":
+            continue
+        if name == "timeout" and command in {"transform", "superres run"}:
             continue
         fields.append((name, "seconds" if name == "timeout" else "true | false", ""))
     return fields
@@ -2348,6 +2403,7 @@ _BINDING_TEXT = {
     "cache": ("Cache", "缓存"),
     "providers": ("Providers", "端点"),
     "superres": ("Local models", "本地模型"),
+    "model_process": ("Model processing", "模型处理"),
     "new_session": ("New session", "新建会话"),
     "generate": ("Generate", "生成"),
     "edit": ("Edit", "编辑"),
@@ -2502,6 +2558,10 @@ class WorkbenchApp(App[None]):
     }
     #providers DataTable, #palette DataTable, #model-picker DataTable,
     #superres DataTable, #local-model DataTable { height: 1fr; width: 1fr; }
+    #model-process { width: 94%; max-width: 160; }
+    #model-process > .panel-title { height: 1; padding: 0; }
+    #model-process #model-list { min-width: 44; }
+    .compact #model-process #model-list { min-width: 0; }
     #transform { width: 92%; max-width: 200; height: 90%; overflow: hidden; }
     #transform-cat-col { width: 18%; min-width: 16; height: 1fr; border-right: solid $line; }
     #transform-preset-col { width: 33%; min-width: 26; height: 1fr; margin-left: 1; }
@@ -2626,6 +2686,8 @@ class WorkbenchApp(App[None]):
         self.preview = Static(id="preview")
         self.film = Static(id="film")
         self.status = Static(id="status")
+        self.job_progress = ProgressBar(total=None, show_eta=False, id="job-progress")
+        self._job_signature: Any = None
         self.current: str | None = None
         self.film_items: list[dict[str, Any]] = []
         self.film_index = -1
@@ -2667,6 +2729,7 @@ class WorkbenchApp(App[None]):
                     id="action-bar",
                 )
                 yield self.film
+                yield self.job_progress
                 yield self.status
         yield Static(id="keybar")
 
@@ -2728,6 +2791,47 @@ class WorkbenchApp(App[None]):
         self._add_session_columns()
         self.refresh_rows()
         self._render_keybar()
+        self.job_progress.display = False
+        self.set_interval(0.5, self._poll_jobs)
+
+    def _job_progress(self, value: dict[str, Any]) -> None:
+        from imagen_cli.cli.progress import label
+
+        self.job_progress.display = value.get("stage") != "completed"
+        self.job_progress.update(total=value.get("total"), progress=value.get("completed", 0))
+        self._say(label(value), "info")
+
+    def _poll_jobs(self) -> None:
+        if self.current is None:
+            return
+        turns = queries.iter_all(self.deps.repositories, "turns", session_id=self.current)
+        jobs = [self.deps.repositories.get("jobs", turn["job_id"]) for turn in turns]
+        jobs = [job for job in jobs if job is not None]
+        signature = [(job["id"], job["state"], job.get("progress")) for job in jobs]
+        outputs = queries.session_outputs(self.deps.repositories, self.current)
+        fingerprints = []
+        from imagen_cli.storage.safety import safe_path
+
+        for output in outputs:
+            path = safe_path(self.deps.store.root, output["managed_relpath"])
+            try:
+                stat = path.stat()
+                fingerprint = (stat.st_size, stat.st_mtime_ns)
+            except OSError:
+                fingerprint = None
+            fingerprints.append((output["id"], output.get("sha256"), fingerprint))
+        changed = (self.current, fingerprints)
+        if changed != getattr(self, "_artifact_signature", None):
+            self._artifact_signature = changed
+            self.show_detail()
+        if signature != self._job_signature:
+            self._job_signature = signature
+            running = next((job for job in reversed(jobs)
+                            if job["state"] in {"queued", "running"}), None)
+            if running:
+                self._job_progress(running.get("progress") or {"stage": running["state"]})
+            else:
+                self.job_progress.display = False
 
     def _add_session_columns(self) -> None:
         """Narrow fixed columns: the last header stays visible and long names truncate.
@@ -2846,39 +2950,18 @@ class WorkbenchApp(App[None]):
         }
 
     def _load_artifacts(self, session: str | None = None) -> list[dict[str, Any]]:
-        """One entry per published output, oldest turn first."""
-        identity = session or self.current
-        if identity is None:
+        """One entry per available output, including historical local processing."""
+        session_id = session or self.current
+        if session_id is None:
             return []
-        items: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        turns = sorted(
-            queries.iter_all(self.deps.repositories, "turns", session_id=identity),
-            key=lambda row: (row.get("created_at", ""), row["id"]),
-        )
-        for turn in turns:
-            references = sorted(
-                queries.iter_all(self.deps.repositories, "artifact_references", turn_id=turn["id"]),
-                key=lambda row: int(row.get("index") or 0),
-            )
-            for reference in references:
-                if reference.get("role") != "output":
-                    continue
-                identity = str(reference["artifact_id"])
-                item = self._artifact_item(identity, turn)
-                if item is not None and identity not in seen:
-                    seen.add(identity)
-                    items.append(item)
-        for link in queries.iter_all(
-            self.deps.repositories, "artifact_links", session_id=identity
-        ):
-            identity = str(link["artifact_id"])
-            if identity in seen:
+        items = []
+        for artifact in queries.session_outputs(self.deps.repositories, session_id):
+            try:
+                path = self.deps.store.get(artifact["id"])
+            except (OSError, ValueError):
                 continue
-            item = self._artifact_item(identity, None)
-            if item is not None:
-                seen.add(identity)
-                items.append(item)
+            if path is not None:
+                items.append({**artifact, "path": path})
         return items
 
     def _current_artifact(self) -> tuple[str, Path] | None:
@@ -3121,7 +3204,9 @@ class WorkbenchApp(App[None]):
                     command, {key: value for key, value in values.items()
                               if key not in control_names}
                 )
-                options = _control_options(self.deps.options, _convert_controls(values))
+                options = _control_options(self.deps.options, _convert_controls(
+                    {key: value for key, value in values.items() if key in control_names}
+                ))
             except (ValueError, TypeError) as error:
                 self._say(t("Parameter error: ", "参数错误：") + _sanitize(error), "error")
                 return
@@ -3282,7 +3367,10 @@ class WorkbenchApp(App[None]):
         options: SharedOptions | None = None,
     ) -> None:
         try:
-            status, data = _executor(self.deps, options)(command, arguments)
+            def progress(value: dict[str, Any]) -> None:
+                self.call_from_thread(self._job_progress, value)
+
+            status, data = _executor(self.deps, options, progress)(command, arguments)
         except Exception as error:  # noqa: BLE001 - surfaced in the panel
             self.call_from_thread(self._command_failed, command, _sanitize(error))
             return
@@ -3306,7 +3394,9 @@ class WorkbenchApp(App[None]):
             "ok" if status in {"succeeded", "accepted"} else "error",
         )
         self.push_screen(ResultScreen(command, status, data))
-        if command.startswith(("session ", "profile ", "plan ")):
+        if command.startswith(("session ", "profile ", "plan ")) or command in {
+            "transform", "superres run", "sheet", "job wait", "job get", "job reconcile",
+        }:
             self.refresh_rows()
             self.show_detail()
 

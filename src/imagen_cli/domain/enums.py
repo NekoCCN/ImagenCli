@@ -14,6 +14,8 @@ class CapabilityStatus(StrEnum):
 class Operation(StrEnum):
     GENERATE = "generate"
     EDIT = "edit"
+    TRANSFORM = "transform"
+    SUPERRES = "superres"
 
 
 class ArtifactRole(StrEnum):

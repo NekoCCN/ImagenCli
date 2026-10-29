@@ -512,6 +512,9 @@ def _data_schema(command: Command) -> dict[str, Any]:
         return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name in {"transform", "superres run"}:
         return _object({"artifact": {"type": "object"}, "source": {"type": "string"},
+                        "job": {"type": "object"},
+                        "artifacts": {"type": "array", "items": {"type": "object"}},
+                        "next_actions": {"type": "array", "items": {"type": "object"}},
                         "budget": {"type": "object"}, "error": {"type": "object"}})
     if command.name == "sheet":
         return _object(
@@ -811,7 +814,7 @@ def _data_schema(command: Command) -> dict[str, Any]:
             )
         properties: dict[str, Any] = {"session": row}
         if command.name in {"session show", "session resume"}:
-            properties.update({"turns": rows, "references": rows})
+            properties.update({"turns": rows, "references": rows, "links": rows, "artifacts": rows})
         required = tuple(properties)
         if command.name == "session resume":
             properties["next_actions"] = rows

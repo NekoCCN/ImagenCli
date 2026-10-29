@@ -135,6 +135,7 @@ class Container:
 
     workspace: str | None = None
     options: SharedOptions = field(default_factory=SharedOptions)
+    progress: Any = None
 
     @cached_property
     def resolved_workspace(self) -> "Workspace":
@@ -301,6 +302,7 @@ class Container:
                 ArtifactService(self.repositories, self.artifact_store),
                 OutcomeService(self.repositories),
                 self.private_state_store,
+                progress=self.progress,
             )
             facts = ExecutionService(
                 self.repositories,
@@ -420,6 +422,8 @@ class Container:
                 session=args.get("session"),
                 timeout=args.get("timeout"),
                 budget_approval=args.get("budget_approval"),
+                asynchronous=self.options.async_,
+                progress=self.progress,
             )
         if command.startswith("superres "):
             from jsonschema import validate
@@ -439,6 +443,8 @@ class Container:
                     model_params=params,
                     session=args.get("session"), timeout=args.get("timeout"),
                     budget_approval=args.get("budget_approval"),
+                    asynchronous=self.options.async_,
+                    progress=self.progress,
                 )
             if command == "superres models":
                 return "succeeded", superres.catalog()
@@ -794,7 +800,8 @@ class Container:
         if command == "job cancel":
             return job.cancel_(artifacts, args["job_id"], scope=args["scope"])
         if command == "job wait":
-            return job.wait_(artifacts, args["job_id"], timeout=self.options.timeout)
+            return job.wait_(artifacts, args["job_id"], timeout=self.options.timeout,
+                             progress=self.progress)
         if command in {"job fetch", "job reconcile"}:
             from imagen_cli.application.reconcile import recover_inline
 

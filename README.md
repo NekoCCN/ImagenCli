@@ -417,7 +417,7 @@ imagen ops --op guided_smooth               # one operator
 imagen ops --preset 'Anti-AI Organic' --verbose  # recipe details
 imagen transform ARTIFACT_ID --preset 'Pixel Art'
 imagen transform ARTIFACT_ID --op 'guided_smooth:radius=4,epsilon=0.001,strength=0.5'
-imagen compare art_a art_b
+imagen compare --first art_a --second art_b
 imagen sheet --artifacts art_a,art_b,art_c --columns 3
 ```
 
@@ -430,7 +430,27 @@ What each transform may change:
 - Frequency suppression can delete intentional halftone patterns.
 - Difference metrics report numbers; open the images to judge the result.
 
-TUI: `t` opens ordinary image processing; `p` edits parameters; `enter` applies. Model processing has its own page under `u`; `s` manages local weights and runtimes. Applying saves a new artifact and leaves the source untouched.
+TUI: `t` opens ordinary image processing; `p` edits parameters; `enter` applies. `u` opens the model workbench with actual model entries, ACG/restoration filters, original preview, expected output dimensions, and backend/tile/overlap/timeout controls. Choose foreground or background execution; download weights and confirm each run separately. `s` manages local weights and runtimes. Applying saves a new artifact and leaves the source untouched.
+
+### Blocking, background jobs, and progress
+
+`transform` and `superres run` wait for completion by default. `--wait` selects the same behavior explicitly. Start the worker before using `--async`; the command then returns a job ID while processing continues in the background.
+
+```bash
+imagen transform ARTIFACT_ID --op 'resize:scale=2' --wait
+imagen worker start
+imagen transform ARTIFACT_ID --op 'invert' --async
+imagen superres run ARTIFACT_ID --model realesrgan-x4plus --accept --async
+imagen job get JOB_ID
+imagen job wait JOB_ID --timeout 900
+imagen job cancel JOB_ID --scope local
+```
+
+Starting a worker also runs any queued generation requests. Review that queue before starting it. Local jobs keep their input, destination session, parameters, and result; `session show` lists both generation and processing outputs, including older results.
+
+CLI progress appears on stderr in an interactive terminal. JSON returns one final result; JSONL includes progress events. The TUI shows the same processing stages: ordinary pipelines count completed steps, model inference counts completed tiles, and loading/encoding/saving use an activity indicator. Remote generation shows observable stages rather than an estimated percentage. Completed background outputs appear in the TUI automatically.
+
+The processing timeout stops that computation. A `job wait` timeout only stops waiting; the job continues. Local cancellation stops queued or running processing without saving a partial image.
 
 If processing exceeds the default pixel or working-buffer budget, Imagen reports the dimensions and memory risk and asks whether to continue; the default is cancel. Non-interactive CLI calls return `approval_required`. After explicitly accepting the risk, repeat the same request with `--budget-approval DIGEST` from that response. Approval is bound to the source contents and processing parameters; changing either requires a new confirmation. Memory or timeout can still fail the request after approval.
 

@@ -1,6 +1,6 @@
 ---
 name: imagen
-version: 1.2.0
+version: 1.3.0
 description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 

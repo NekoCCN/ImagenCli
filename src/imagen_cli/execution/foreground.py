@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from imagen_cli.application.artifact_service import ArtifactService
 from imagen_cli.application.outcome_service import OutcomeService
+from imagen_cli.application.progress import ProgressCallback, report
 from imagen_cli.execution.recovery import OUTCOME_UNKNOWN, record_intent, record_response
 from imagen_cli.providers.base import ImmediateResult, ProviderFailure, ValidatedRequest
 from imagen_cli.storage.private_state import PrivateStateStore
@@ -33,12 +34,14 @@ class ForegroundExecutor:
         artifact_service: ArtifactService,
         outcome_service: OutcomeService,
         private_state_store: PrivateStateStore,
+        *, progress: ProgressCallback | None = None,
     ) -> None:
         self.repositories = repositories
         self.adapter = adapter
         self.artifact_service = artifact_service
         self.outcome_service = outcome_service
         self.private_state_store = private_state_store
+        self.progress = progress
 
     def _intent(self, request: ValidatedRequest, requested_count: int | None) -> None:
         record_intent(self.repositories, request, requested_count)
@@ -54,6 +57,7 @@ class ForegroundExecutor:
     ) -> dict[str, Any]:
         """Persist send intent, create once, durably save response, then outcomes."""
         self._intent(request, requested_count)
+        report(self.progress, "running", operation=request.operation)
         try:
             result = self.adapter.create(replace(request, dispatch_intent_recorded=True))
         except ProviderFailure as error:
@@ -91,6 +95,7 @@ class ForegroundExecutor:
             record_response(self.repositories, request.job_id, result, private_ref)
         except (Exception, KeyboardInterrupt):
             return self.outcome_service.complete(request.job_id, actual_count=result.actual_count)
+        report(self.progress, "saving", operation=request.operation)
         for descriptor in result.artifacts:
             try:
                 self.artifact_service.save(
@@ -103,4 +108,8 @@ class ForegroundExecutor:
                 continue
             except KeyboardInterrupt:
                 break
-        return self.outcome_service.complete(request.job_id, actual_count=result.actual_count)
+        outcome = self.outcome_service.complete(request.job_id, actual_count=result.actual_count)
+        if outcome["status"] == "succeeded":
+            report(self.progress, "completed", completed=result.actual_count,
+                   total=result.actual_count, unit="artifacts")
+        return outcome

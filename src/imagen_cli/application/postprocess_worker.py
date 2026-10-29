@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import subprocess
@@ -9,8 +10,13 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from threading import Event
-from typing import Any
+from typing import Any, Protocol
+
+from imagen_cli.application.progress import ProgressCallback, report
+
+
+class Cancellation(Protocol):
+    def is_set(self) -> bool: ...
 
 MAX_WORKING_BYTES = 2 * 1024**3
 # ONNX inference reserves address space for weights, arenas and float32 feature maps
@@ -56,7 +62,12 @@ def _address_space_extra(pipeline: Any) -> int:
 
 
 def _run(source: str, pipeline_path: str, output: str, response: str,
-         approval: str = "") -> None:
+         approval: str = "", progress_path: str = "") -> None:
+    def update(value: dict[str, Any]) -> None:
+        if progress_path:
+            with Path(progress_path).open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(value) + "\n")
+
     try:
         pipeline = json.loads(Path(pipeline_path).read_text(encoding="utf-8"))
         limits = "unavailable"
@@ -73,7 +84,7 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
         from imagen_cli.application.postprocess_service import budget_preflight, render
 
         consent = budget_preflight(Path(source), pipeline, approval or None)
-        data, metadata = render(source, pipeline, allow_large=bool(consent))
+        data, metadata = render(source, pipeline, allow_large=bool(consent), progress=update)
         metadata.update(consent)
         Path(output).write_bytes(data)
         metadata["execution"] = {"isolation": "spawn_process", "memory_limit": limits}
@@ -84,8 +95,10 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
 
 
 def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
-            cancelled: Event | None = None,
-            budget_approval: str | None = None) -> tuple[bytes, dict[str, Any]]:
+            cancelled: Cancellation | None = None,
+            budget_approval: str | None = None,
+            progress: ProgressCallback | None = None,
+            source_sha256: str | None = None) -> tuple[bytes, dict[str, Any]]:
     if timeout is None:
         timeout = default_timeout(pipeline)
     if not math.isfinite(timeout) or timeout <= 0:
@@ -94,22 +107,44 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
         raise ValueError("postprocess cancelled")
     from imagen_cli.application.postprocess_service import budget_preflight
 
-    consent = budget_preflight(source, pipeline, budget_approval)
+    source_bytes = source.read_bytes()
+    if source_sha256 is not None and hashlib.sha256(source_bytes).hexdigest() != source_sha256:
+        raise ValueError("source artifact bytes changed")
+    report(progress, "preparing")
     with tempfile.TemporaryDirectory(prefix="imagen-postprocess-") as directory:
         root = Path(directory)
+        snapshot = root / "source.image"
+        snapshot.write_bytes(source_bytes)
+        consent = budget_preflight(snapshot, pipeline, budget_approval)
         output, response, specification = (
             root / "result.image", root / "response.json", root / "input.json",
         )
+        progress_file = root / "progress.jsonl"
+        progress_file.touch()
+        position = 0
+
+        def drain_progress() -> None:
+            nonlocal position
+            with progress_file.open(encoding="utf-8") as stream:
+                stream.seek(position)
+                while line := stream.readline():
+                    if not line.endswith("\n"):
+                        break
+                    position = stream.tell()
+                    if progress is not None:
+                        progress(json.loads(line))
+
         specification.write_text(json.dumps(pipeline, allow_nan=False), encoding="utf-8")
         deadline = time.monotonic() + timeout
         process = subprocess.Popen(
             [sys.executable, "-m", "imagen_cli.application.postprocess_worker",
-             str(source), str(specification), str(output), str(response),
-             budget_approval or ""],
+             str(snapshot), str(specification), str(output), str(response),
+             budget_approval or "", str(progress_file)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         try:
             while process.poll() is None:
+                drain_progress()
                 if cancelled is not None and cancelled.is_set():
                     raise ValueError("postprocess cancelled")
                 remaining = deadline - time.monotonic()
@@ -119,6 +154,7 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
                     process.wait(timeout=min(0.02, remaining))
                 except subprocess.TimeoutExpired:
                     pass
+            drain_progress()
             if cancelled is not None and cancelled.is_set():
                 raise ValueError("postprocess cancelled")
             if not response.is_file():

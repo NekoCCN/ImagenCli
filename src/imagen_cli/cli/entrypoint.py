@@ -734,7 +734,11 @@ def main(
         if command == "version":
             status, data = "succeeded", {"version": installed_version()}
         else:
-            with Container(workspace=options.workspace, options=options) as container:
+            from imagen_cli.cli.progress import TerminalProgress
+
+            with TerminalProgress(renderer) as progress, Container(
+                workspace=options.workspace, options=options, progress=progress,
+            ) as container:
                 status, data = container.execute(command, args)
                 if (command in {"transform", "superres run"} and status == "approval_required"
                         and data.get("budget") and isinstance(args, dict)):

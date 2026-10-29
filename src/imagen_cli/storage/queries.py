@@ -26,6 +26,43 @@ def iter_all(
             return rows
 
 
+def session_outputs(repositories: Repositories, session_id: str) -> list[dict[str, Any]]:
+    """Published outputs across turn references and legacy local-result links."""
+    turns = sorted(iter_all(repositories, "turns", session_id=session_id),
+                   key=lambda row: (row.get("created_at", ""), row["id"]))
+    references = iter_all(repositories, "artifact_references", session_id=session_id)
+    candidates = [
+        (reference, turn)
+        for turn in turns
+        for reference in sorted(
+            (ref for ref in references if ref["turn_id"] == turn["id"]),
+            key=lambda ref: int(ref.get("index") or 0),
+        )
+    ]
+    candidates.extend((link, {}) for link in iter_all(
+        repositories, "artifact_links", session_id=session_id,
+    ))
+    seen: set[str] = set()
+    outputs = []
+    for reference, turn in candidates:
+        identity = reference["artifact_id"]
+        if reference.get("role") != "output" or identity in seen:
+            continue
+        artifact = repositories.get("artifacts", identity)
+        if artifact is None or artifact.get("save_state") != "published":
+            continue
+        seen.add(identity)
+        manifest = artifact.get("origin_manifest") or {}
+        operation = turn.get("operation") or (
+            "superres" if any(step.get("op") == "superres"
+                              for step in manifest.get("pipeline", []))
+            else "transform" if manifest.get("kind") == "postprocess" else ""
+        )
+        outputs.append({**artifact, "turn_id": turn.get("id"),
+                        "operation": operation, "state": turn.get("creation_state", "")})
+    return outputs
+
+
 def live_sessions(repositories: Repositories) -> set[str]:
     return {
         row["id"] for row in iter_all(repositories, "sessions")

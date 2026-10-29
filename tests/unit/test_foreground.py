@@ -84,6 +84,25 @@ def test_create_persists_private_response_then_publishes_output(tmp_path, png_by
         assert container.artifact_store.get("art_one").read_bytes() == png_bytes
 
 
+def test_remote_execution_reports_phases_without_fake_percentages(tmp_path, png_bytes):
+    from imagen_cli.execution.foreground import ForegroundExecutor
+
+    with Container(workspace=str(tmp_path)) as container:
+        setup_work(container)
+        events = []
+        adapter = Adapter(ImmediateResult(1, 1, (ArtifactDescriptor('art_one', 0, png_bytes),)))
+        runner = ForegroundExecutor(
+            container.repositories, adapter,
+            ArtifactService(container.repositories, container.artifact_store),
+            OutcomeService(container.repositories), container.private_state_store,
+            progress=events.append,
+        )
+        result = runner.execute(request())
+        assert result['status'] == 'succeeded'
+        assert [event['stage'] for event in events] == ['running', 'saving', 'completed']
+        assert all(event['total'] is None for event in events[:2])
+
+
 def test_existing_intent_never_calls_create_again(tmp_path):
     with Container(workspace=str(tmp_path)) as container:
         setup_work(container)

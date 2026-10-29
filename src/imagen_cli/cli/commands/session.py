@@ -62,11 +62,23 @@ def show(service: SessionService, identity: str) -> tuple[str, dict[str, Any]]:
         row = matches[0] if matches else None
     if row is None or row.get("deleted_at") is not None:
         return "not_found", {}
+    from imagen_cli.storage import queries
+
     snapshot = service.resume(row["id"])
+    artifacts = queries.session_outputs(repositories, row["id"])
+    for artifact in artifacts:
+        try:
+            path = service.artifact_store.get(artifact["id"])
+        except (OSError, ValueError):
+            path = None
+        artifact["path"] = str(path) if path is not None else None
+        artifact["available"] = path is not None
     return "succeeded", {
         "session": snapshot["session"].model_dump(mode="json"),
         "turns": [turn.model_dump(mode="json") for turn in snapshot["turns"]],
         "references": [ref.model_dump(mode="json") for ref in snapshot["references"]],
+        "links": queries.iter_all(repositories, "artifact_links", session_id=row["id"]),
+        "artifacts": artifacts,
     }
 
 

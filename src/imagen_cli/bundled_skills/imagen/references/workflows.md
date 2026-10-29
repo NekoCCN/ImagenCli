@@ -140,6 +140,10 @@ imagen superres fetch --model realesrgan-x4plus --accept --agent
 
 Never choose this example model or append `--accept` automatically. Report missing inference dependencies; do not install them without permission. Downloaded weights do not prove inference works.
 
+For a user-selected downloaded model, use `imagen superres run ARTIFACT_ID --model USER_SELECTED_MODEL --wait --agent`. Local `transform` and `superres run` block by default; `--async` returns `data.job.id` and requires a live worker. Check `worker status`; do not start a worker automatically, because it also executes queued paid requests. Obtain authorization for that queue before `worker start`.
+
+`job get` exposes local progress and outputs. `job wait JOB_ID --timeout 900 --agent` stops waiting when its timeout expires; processing continues. A timeout on `transform` or `superres run` stops computation. Cancel a local task with `job cancel JOB_ID --scope local --agent`. `session show SESSION_ID --agent` includes all output types in `data.artifacts`, with `available` and `path`. For stages, JSONL includes progress events; JSON keeps one final result. See `imagen-assets` for local job recovery and model-workbench controls.
+
 ## Install or update these guides
 
 ```bash
