@@ -620,6 +620,7 @@ class Container:
             "session fork",
             "session export",
             "session import",
+            "session import-image",
             "session delete",
             "session remove-artifact",
             "session remove-image",
@@ -659,6 +660,13 @@ class Container:
                     self.artifact_store,
                     args["archive"],
                 )
+            if command == "session import-image":
+                return history.import_image_(
+                    self.repositories,
+                    self.artifact_store,
+                    args["session"],
+                    args["path"],
+                )
             if command == "session delete":
                 return history.delete_(
                     self.repositories,
@@ -672,12 +680,19 @@ class Container:
                 plan=args.get("plan"),
                 yes=args.get("yes") is True,
             )
-        if command in {"asset show", "asset delete", "asset remove"}:
+        if command in {"asset show", "asset delete", "asset remove", "asset save"}:
             from jsonschema import validate
 
             from imagen_cli.cli.commands import asset
 
             validate(args, discover(command)["input_schema"])
+            if command == "asset save":
+                return asset.save_(
+                    self.repositories,
+                    self.artifact_store,
+                    args["artifact"],
+                    args["path"],
+                )
             if command in {"asset delete", "asset remove"}:
                 return asset.delete_(
                     self.repositories,

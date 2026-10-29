@@ -45,6 +45,26 @@ def show_(
     }
 
 
+def save_(
+    repositories: Repositories,
+    store: ArtifactStore,
+    artifact: str,
+    destination: str,
+) -> tuple[str, dict[str, Any]]:
+    from pathlib import Path
+
+    from imagen_cli.application.transfer_service import save_artifact_copy
+
+    try:
+        return "succeeded", save_artifact_copy(
+            repositories, store, artifact, destination,
+        )
+    except KeyError:
+        return "not_found", {}
+    except FileExistsError:
+        return "conflict", {"path": str(Path(destination).absolute()), "existing": True}
+
+
 def delete_(
     repositories: Repositories, store: ArtifactStore, artifact: str,
 ) -> tuple[str, dict[str, Any]]:

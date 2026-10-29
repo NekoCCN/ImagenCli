@@ -57,4 +57,4 @@ def test_updated_reference_installs_with_job_commands(tmp_path, monkeypatch):
     bundled = skills_service.BUNDLED / 'imagen-assets' / 'SKILL.md'
     assert installed.read_bytes() == bundled.read_bytes()
     row = next(row for row in skills_service.available() if row['name'] == 'imagen-assets')
-    assert row['version'] == '1.3.0'
+    assert row['version'] == '1.4.0'

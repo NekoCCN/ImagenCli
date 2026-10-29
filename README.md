@@ -158,6 +158,7 @@ Dedicated pages cover everyday image work. `:` opens the command palette; CLI-on
 | Ordinary image processing | `t`; `p` edits parameters | `ops`, `transform`, `compare`, `sheet` |
 | Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
 | Open image / folder | `o` / `O` | `asset open [--folder]` |
+| Import image / save a copy | `i` / `S` | `session import-image`, `asset save` |
 | Fork / export / delete session | `f`, `e`, `x` | `session fork`, `session export`, `session delete` |
 | Delete image | `d` | `session remove-artifact`, `asset delete` |
 | Profiles and endpoint models | `v` | `profile ...`, `models ...`, `providers` |
@@ -309,6 +310,7 @@ imagen session resume ses_...
 imagen session fork ses_... --from-turn trn_... --name variant
 imagen session export ses_... --to backup.zip
 imagen session import backup.zip
+imagen session import-image ses_... photo.png
 imagen session delete ses_... --yes
 imagen session remove-artifact ses_... art_...
 ```
@@ -328,6 +330,7 @@ Artifacts can be inspected, opened, or deleted:
 imagen asset show art_...
 imagen asset open art_...
 imagen asset open art_... --folder
+imagen asset save art_... ./copy.png
 imagen asset delete art_...
 imagen session remove-artifact ses_... art_...
 ```
@@ -341,9 +344,9 @@ imagen cache audit
 imagen cache purge --plan DIGEST --yes
 ```
 
-`asset delete` removes the artifact entity and its local file. `session remove-artifact` detaches the image from a session and, by default, reclaims the file when no other session references it. Soft-deleting a session frees its name for reuse; exports and imports remap identities, and exports do not include private credentials.
+`asset delete` removes the artifact entity and its local file. `session remove-artifact` detaches the image from a session and, by default, reclaims the file when no other session references it. `session import-image` copies an external image into a session as a new artifact without changing the source file; `asset save` writes a verified copy to a new path and never replaces an existing file. Soft-deleting a session frees its name for reuse; exports and imports remap identities, and exports do not include private credentials.
 
-TUI equivalents: `n` creates a session, `f` forks the current turn, `e` exports, `x` deletes with typed confirmation, `d` removes the current image, `o` / `O` open the image or folder, and `c` audits and purges cache entries.
+TUI equivalents: `n` creates a session, `f` forks the current turn, `e` exports, `x` deletes with typed confirmation, `d` removes the current image, `o` / `O` open the image or folder, `i` imports an image and `S` saves a copy, and `c` audits and purges cache entries.
 
 ## Jobs
 

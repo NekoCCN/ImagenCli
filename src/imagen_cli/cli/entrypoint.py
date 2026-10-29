@@ -502,6 +502,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         parameters["archive"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
+    if command == "session import-image":
+        if len(words) != 2:
+            raise _need(command, words, 2, "a session id and an image path", "会话标识和图片路径")
+        parameters["session"] = words[0]
+        parameters["path"] = words[1]
+        validate(parameters, schema)
+        return command, parameters, options
     if command == "transform":
         if len(words) != 1:
             raise _need(command, words, 1, "one artifact id", "一个产物标识")
@@ -610,6 +617,15 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         if len(words) != 1:
             raise _need(command, words, 1, "one artifact id", "一个产物标识")
         parameters["artifact_id"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command == "asset save":
+        if len(words) != 2:
+            raise _need(
+                command, words, 2, "an artifact id and a destination path", "产物标识和目标路径"
+            )
+        parameters["artifact"] = words[0]
+        parameters["path"] = words[1]
         validate(parameters, schema)
         return command, parameters, options
     if command == "asset gc":

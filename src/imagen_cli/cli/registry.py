@@ -59,6 +59,7 @@ COMMANDS = {
                 ("session fork", "从指定 turn 与产物分支新会话；不发送请求"),
                 ("session export", "导出不含秘密的可移植 ZIP；不发送请求"),
                 ("session import", "校验 ZIP 并事务导入，重映射全部标识"),
+                ("session import-image", "把本地图片导入会话并生成新产物；不覆盖原图"),
                 ("session delete", "逻辑删除 session；需显式 --yes"),
                 ("session remove-artifact", "从会话中移除指定的产物图片"),
                 ("session remove-image", "从会话中移除指定的产物图片（同 remove-artifact）"),
@@ -78,6 +79,7 @@ COMMANDS = {
                 ("asset delete", "永久删除指定产物实体并清理本地文件"),
                 ("asset remove", "永久删除指定产物实体（同 asset delete）"),
                 ("asset open", "用系统默认程序打开产物图片，或 --folder 打开所在目录"),
+                ("asset save", "把产物另存到指定路径；不覆盖已有文件"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
                 ("skills list", "列出可安装的 agent skill"),
@@ -133,6 +135,8 @@ _SUMMARY_EN = {
     "session fork": "Branch a new session from a turn and artifact; sends no request",
     "session export": "Export a portable ZIP without secrets; sends no request",
     "session import": "Validate a ZIP and import it transactionally with remapped identities",
+    "session import-image": "Import a local image into a session as a new artifact; "
+    "never overwrites the source file",
     "session delete": "Soft-delete a session; requires explicit --yes",
     "session remove-artifact": "Remove the given artifact image from a session",
     "session remove-image": "Remove the given artifact image from a session "
@@ -160,6 +164,7 @@ _SUMMARY_EN = {
     "asset remove": "Permanently delete the given artifact (same as asset delete)",
     "asset open": "Open the artifact with the system default application, or its folder "
     "with --folder",
+    "asset save": "Save the artifact to a chosen path; never replaces an existing file",
     "cache audit": "List reclaimable entries and bytes; deletes nothing",
     "cache purge": "Reclaim after confirming the inventory digest; dry-run by default",
     "skills list": "List installable agent skills",
@@ -356,6 +361,9 @@ def _input_schema(name: str) -> dict[str, Any]:
             properties["artifact"] = {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}
             properties["purge"] = {"type": "boolean", "default": True}
             required += ("artifact",)
+        elif name == "session import-image":
+            properties["path"] = text
+            required += ("path",)
     elif name == "session import":
         properties, required = {"archive": text}, ("archive",)
     elif name.startswith("cache "):
@@ -472,6 +480,12 @@ def _input_schema(name: str) -> dict[str, Any]:
             "folder": {"type": "boolean", "default": False},
         }
         required = ("artifact_id",)
+    elif name == "asset save":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "path": text,
+        }
+        required = ("artifact", "path")
     elif name == "asset gc":
         properties = {
             "dry_run": {"type": "boolean", "default": False},
@@ -803,6 +817,25 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "deleted": {"type": "boolean"},
             },
             ("artifact_id", "deleted"),
+        )
+    if command.name == "asset save":
+        return _object(
+            {
+                "artifact": {"type": "string"},
+                "path": {"type": "string"},
+                "bytes": {"type": "integer"},
+                "sha256": {"type": "string"},
+            },
+            ("artifact", "path", "bytes", "sha256"),
+        )
+    if command.name == "session import-image":
+        return _object(
+            {
+                "session": {"type": "string"},
+                "artifact": {"type": "object"},
+                "path": {"type": "string"},
+            },
+            ("session", "artifact", "path"),
         )
     if command.name.startswith("session "):
         row = {"type": "object"}

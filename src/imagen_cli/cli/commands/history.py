@@ -85,6 +85,22 @@ def import_(
     return "succeeded", data
 
 
+def import_image_(
+    repositories: Repositories,
+    store: ArtifactStore,
+    session_id: str,
+    path: str,
+) -> tuple[str, dict[str, Any]]:
+    from imagen_cli.application.transfer_service import import_image
+
+    try:
+        return "succeeded", import_image(
+            repositories, store, _identity(repositories, session_id), path,
+        )
+    except (KeyError, FileNotFoundError):
+        return "not_found", {}
+
+
 def delete_(
     repositories: Repositories, session_id: str, *, yes: bool,
 ) -> tuple[str, dict[str, Any]]:

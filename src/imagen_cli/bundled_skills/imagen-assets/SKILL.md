@@ -1,7 +1,7 @@
 ---
 name: imagen-assets
-version: 1.3.0
-description: Use when browsing or resuming Imagen sessions, opening or exporting artifacts, applying local transforms, comparing images, upscaling, or reclaiming workspace disk space.
+version: 1.4.0
+description: Use when browsing or resuming Imagen sessions, importing or saving artifacts, applying local transforms, comparing images, upscaling, or reclaiming workspace disk space.
 ---
 
 # Imagen sessions and artifacts
@@ -19,9 +19,13 @@ imagen session resume ses_... --agent
 imagen session fork ses_... --from-turn trn_... --name branch --agent
 imagen session export ses_... --to backup.zip --agent
 imagen session import backup.zip --agent
+imagen session import-image ses_... photo.png --agent
 imagen asset show art_... --agent
 imagen asset open art_... --agent
+imagen asset save art_... ./copy.png --agent
 ```
+
+`session import-image` copies an external image into the session as a new artifact without changing the source file, so transforms, edits, and model runs can use it. `asset save` writes a verified copy to a new path and refuses to replace an existing file; choose another name instead.
 
 Choose the user's session and artifact, not a similar-looking one. `session show` returns `data.artifacts` for generated images, local transforms, model results, and contact sheets, including historical outputs. Check each artifact's `available` and `path`; unavailable files retain their records. `data.references` lists turn references and `data.links` lists legacy session ownership. Import remaps IDs and resolves duplicate session names. Session deletion is logical and frees its name. Exports omit credentials and private storage. Open the actual output for the user; a successful command alone does not display it.
 

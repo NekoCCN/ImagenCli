@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import math
+import mimetypes
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -58,6 +59,8 @@ class Deps:
     models_add: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     models_use: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     open_artifact: Callable[[str, bool], tuple[str, dict[str, Any]]] | None = None
+    import_image: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
+    save_artifact: Callable[[str, str], tuple[str, dict[str, Any]]] | None = None
     create_session: Callable[..., dict[str, Any]] | None = None
     execute: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None = None
     secret_ref: Callable[[str, str], str] | None = None
@@ -86,6 +89,10 @@ class Deps:
             self.models_use = self._models_use
         if self.open_artifact is None:
             self.open_artifact = self._open_artifact
+        if self.import_image is None:
+            self.import_image = self._import_image
+        if self.save_artifact is None:
+            self.save_artifact = self._save_artifact
         if self.create_session is None:
             self.create_session = self._create_session
         if self.secret_ref is None:
@@ -113,6 +120,16 @@ class Deps:
         from imagen_cli.cli.commands import history
 
         return history.export_(self.repositories, self.store, session_id, destination)
+
+    def _import_image(self, session: str, path: str) -> tuple[str, dict[str, Any]]:
+        from imagen_cli.cli.commands.history import import_image_
+
+        return import_image_(self.repositories, self.store, session, path)
+
+    def _save_artifact(self, artifact: str, destination: str) -> tuple[str, dict[str, Any]]:
+        from imagen_cli.cli.commands.asset import save_
+
+        return save_(self.repositories, self.store, artifact, destination)
 
     def _transform(
         self,
@@ -295,6 +312,8 @@ _KEYBAR_KEYS: list[tuple[str, tuple[str, str]]] = [
     ("f", ("Fork", "分支")),
     ("r", ("Refresh", "刷新")),
     ("l", ("Language", "语言")),
+    ("i", ("Import", "导入")),
+    ("S", ("Save as", "另存")),
     ("q", ("Quit", "退出")),
 ]
 _KEYBAR_TAIL = [(":", ("Commands", "命令")), ("?", ("Help", "帮助"))]
@@ -480,6 +499,187 @@ class FormScreen(Modal[dict[str, str] | None]):
             )
             return
         self.dismiss({name: value for name, value in values.items() if value})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"})
+
+
+class FilePickerScreen(Modal[Path | None]):
+    """Browse folders and images here; no native dialog, so every platform behaves the same."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", t("Cancel", "取消")),
+        Binding("backspace", "parent", t("Up one level", "上一级")),
+    ]
+
+    def __init__(self, *, start: Path, mode: str = "open", filename: str = "") -> None:
+        super().__init__()
+        self.mode = mode
+        self.directory = Path(start).expanduser()
+        self.items: list[Path] = []
+        self.table: DataTable[Any] = DataTable(id="picker-list")
+        self.table.add_column(t("name", "名称"), key="name")
+        self.path_input = Input(value=str(self.directory), id="picker-path")
+        self.name_input = (
+            Input(value=filename, placeholder=t("file name", "文件名"), id="picker-name")
+            if mode == "save"
+            else None
+        )
+        self.status = Static("", id="picker-status")
+
+    def compose(self) -> ComposeResult:
+        rows = [
+            Horizontal(
+                Static(t("folder", "目录"), classes="field-label"), self.path_input,
+                classes="field",
+            )
+        ]
+        if self.name_input is not None:
+            rows.append(
+                Horizontal(
+                    Static(t("name", "文件名"), classes="field-label"), self.name_input,
+                    classes="field",
+                )
+            )
+        yield Vertical(
+            Static(
+                t("Import image", "导入图片") if self.mode == "open"
+                else t("Save image as", "图片另存为"),
+                classes="panel-title",
+            ),
+            *rows,
+            self.table,
+            self.status,
+            Static(
+                t(
+                    "enter open · backspace up · esc cancel",
+                    "enter 打开 · backspace 上一级 · esc 取消",
+                )
+                if self.mode == "open"
+                else t(
+                    "enter save · backspace up · esc cancel",
+                    "enter 保存 · backspace 上一级 · esc 取消",
+                ),
+                classes="panel-hint",
+            ),
+            Horizontal(
+                Button(t("Up", "上一级"), id="picker-up"),
+                Button(
+                    t("Open", "打开") if self.mode == "open" else t("Save", "保存"),
+                    id="picker-confirm",
+                    variant="primary",
+                ),
+                Button(t("Cancel", "取消"), id="picker-cancel"),
+                classes="dialog-actions",
+            ),
+            classes="panel",
+            id="picker",
+        )
+
+    def on_mount(self) -> None:
+        self._load(self.directory)
+        self.table.focus()
+
+    def entries(self) -> list[Path]:
+        return list(self.items)
+
+    def _load(self, path: Path) -> None:
+        try:
+            resolved = path.expanduser().resolve()
+            children = list(resolved.iterdir())
+            folders = sorted(
+                (child for child in children if self._is_dir(child)),
+                key=lambda child: child.name.casefold(),
+            )
+            images = sorted(
+                (
+                    child for child in children
+                    if child.is_file() and child.suffix.casefold() in _IMAGE_SUFFIXES
+                ),
+                key=lambda child: child.name.casefold(),
+            )
+        except OSError as error:
+            self.status.update(
+                t(f"Cannot open {path}: {error}", f"无法打开 {path}：{error}")
+            )
+            return
+        self.directory = resolved
+        self.path_input.value = str(resolved)
+        self.items = [*folders, *images]
+        self.table.clear()
+        for item in self.items:
+            self.table.add_row(item.name + ("/" if item.is_dir() else ""), key=str(item))
+        self.status.update(
+            t(
+                f"{len(images)} images · {len(folders)} folders",
+                f"{len(images)} 张图片 · {len(folders)} 个目录",
+            )
+        )
+        if self.table.row_count:
+            self.table.move_cursor(row=0)
+
+    @staticmethod
+    def _is_dir(path: Path) -> bool:
+        try:
+            return path.is_dir()
+        except OSError:
+            return False
+
+    def _selected(self) -> Path | None:
+        if not 0 <= self.table.cursor_row < len(self.items):
+            return None
+        return self.items[self.table.cursor_row]
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        path = Path(str(event.row_key.value))
+        if self._is_dir(path):
+            self._load(path)
+        elif self.name_input is not None:
+            self.name_input.value = path.name
+        else:
+            self.dismiss(path)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        if event.input.id == "picker-path":
+            self._load(Path(event.value))
+        else:
+            self.action_confirm()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "picker-up":
+            self.action_parent()
+        elif event.button.id == "picker-confirm":
+            self.action_confirm()
+        elif event.button.id == "picker-cancel":
+            self.action_cancel()
+
+    def action_parent(self) -> None:
+        from imagen_cli.application.transfer_service import parent_of
+
+        parent = parent_of(self.directory)
+        if parent is not None:
+            self._load(Path(parent))
+
+    def action_confirm(self) -> None:
+        if self.name_input is not None:
+            name = self.name_input.value.strip()
+            if not name:
+                self.status.update(t("Enter a file name", "请输入文件名"))
+                return
+            self.dismiss(self.directory / name)
+            return
+        selected = self._selected()
+        if selected is None:
+            return
+        if self._is_dir(selected):
+            self._load(selected)
+        else:
+            self.dismiss(selected)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -2404,6 +2604,8 @@ _BINDING_TEXT = {
     "providers": ("Providers", "端点"),
     "superres": ("Local models", "本地模型"),
     "model_process": ("Model processing", "模型处理"),
+    "import_image": ("Import image", "导入图片"),
+    "save_artifact": ("Save image as", "图片另存为"),
     "new_session": ("New session", "新建会话"),
     "generate": ("Generate", "生成"),
     "edit": ("Edit", "编辑"),
@@ -2548,6 +2750,9 @@ class WorkbenchApp(App[None]):
         width: 80%; max-width: 96; height: auto; max-height: 94%; overflow-y: auto;
     }
     .panel-title { color: $ink; text-style: bold; padding-bottom: 1; }
+    #picker { height: 78%; }
+    #picker #picker-list { height: 1fr; }
+    .compact #picker { height: 88%; }
     .panel-hint { color: $ink-muted; }
     .field { height: auto; }
     .field-label { width: 16; color: $ink-soft; content-align: left middle; }
@@ -2657,6 +2862,8 @@ class WorkbenchApp(App[None]):
         Binding("f", "fork", t("Fork session", "分支会话")),
         Binding("e", "export", t("Export session", "导出会话")),
         Binding("u", "model_process", t("Model processing", "模型处理")),
+        Binding("i", "import_image", t("Import image", "导入图片")),
+        Binding("S", "save_artifact", t("Save image as", "图片另存为")),
         Binding("t", "transform", t("Transform", "变换")),
         Binding("o", "open_image", t("Open image", "打开图片")),
         Binding("O", "open_folder", t("Open folder", "打开目录")),
@@ -3651,6 +3858,73 @@ class WorkbenchApp(App[None]):
 
     def action_open_folder(self) -> None:
         self._open_current(True)
+
+    def action_import_image(self) -> None:
+        if self.current is None or self.deps.import_image is None:
+            self._say(t("No session to import into", "没有可导入的会话"), "info")
+            return
+        self.push_screen(FilePickerScreen(start=Path.home(), mode="open"), self._import_chosen)
+
+    def _import_chosen(self, chosen: Path | None) -> None:
+        if chosen is None or self.current is None or self.deps.import_image is None:
+            return
+        session = self.current
+        try:
+            status, data = self.deps.import_image(session, str(chosen))
+        except (OSError, ValueError) as error:
+            self._say(t("Import failed: ", "导入失败：") + _sanitize(error), "error")
+            return
+        if status != "succeeded":
+            self._say(t(f"Import result: {status}", f"导入结果：{status}"), "error")
+            return
+        if self.current == session and self.is_running:
+            self.refresh_rows()
+        self._say(
+            t(
+                f"Imported {data['artifact']['id']} from {chosen.name}",
+                f"已导入 {data['artifact']['id']}：{chosen.name}",
+            ),
+            "ok",
+        )
+
+    def action_save_artifact(self) -> None:
+        found = self._current_artifact()
+        if found is None or self.deps.save_artifact is None:
+            self._say(t("No image to save", "没有可另存的图片"), "info")
+            return
+        identity, _ = found
+        row = self.deps.repositories.get("artifacts", identity) or {}
+        extension = mimetypes.guess_extension(str(row.get("media_type") or "")) or ".png"
+        root = self.deps.workspace_root or self.deps.store.root.parent
+        directory = root / "exports"
+        if not directory.is_dir():
+            directory = Path.home()
+        self.push_screen(
+            FilePickerScreen(
+                start=directory, mode="save", filename=f"{identity}{extension}",
+            ),
+            self._save_chosen,
+        )
+
+    def _save_chosen(self, destination: Path | None) -> None:
+        found = self._current_artifact()
+        if destination is None or found is None or self.deps.save_artifact is None:
+            return
+        try:
+            status, data = self.deps.save_artifact(found[0], str(destination))
+        except (OSError, ValueError) as error:
+            self._say(t("Save failed: ", "另存失败：") + _sanitize(error), "error")
+            return
+        if status != "succeeded":
+            self._say(
+                t(
+                    f"Save failed: {data.get('path', status)} already exists",
+                    f"另存失败：{data.get('path', status)} 已存在",
+                ),
+                "error",
+            )
+            return
+        self._say(t(f"Saved {data['path']}", f"已另存：{data['path']}"), "ok")
 
     def action_help(self) -> None:
         self.push_screen(

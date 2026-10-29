@@ -158,6 +158,7 @@ request ──► plan (review) ──► approve ──► execute ──► jo
 | 普通图像处理 | `t`；`p` 调参 | `ops`、`transform`、`compare`、`sheet` |
 | 模型恢复／超分 | `u`；`s` 管理运行时与权重 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark` |
 | 打开图片／目录 | `o` / `O` | `asset open [--folder]` |
+| 导入图片／另存副本 | `i` / `S` | `session import-image`、`asset save` |
 | 分支／导出／删除会话 | `f`、`e`、`x` | `session fork`、`session export`、`session delete` |
 | 删除图片 | `d` | `session remove-artifact`、`asset delete` |
 | Profile 与端点模型 | `v` | `profile ...`、`models ...`、`providers` |
@@ -309,6 +310,7 @@ imagen session resume ses_...
 imagen session fork ses_... --from-turn trn_... --name variant
 imagen session export ses_... --to backup.zip
 imagen session import backup.zip
+imagen session import-image ses_... photo.png
 imagen session delete ses_... --yes
 imagen session remove-artifact ses_... art_...
 ```
@@ -328,6 +330,7 @@ imagen session remove-artifact ses_... art_...
 imagen asset show art_...
 imagen asset open art_...
 imagen asset open art_... --folder
+imagen asset save art_... ./copy.png
 imagen asset delete art_...
 imagen session remove-artifact ses_... art_...
 ```
@@ -341,9 +344,9 @@ imagen cache audit
 imagen cache purge --plan DIGEST --yes
 ```
 
-`asset delete` 删除产物实体及本地文件；`session remove-artifact` 从会话移除图片，并在没有其他会话引用时默认回收文件。逻辑删除会话会释放名称以便复用；导出与导入会重映射标识，导出不包含私有凭据。
+`asset delete` 删除产物实体及本地文件；`session remove-artifact` 从会话移除图片，并在没有其他会话引用时默认回收文件。`session import-image` 把外部图片复制进会话成为新产物，不修改原文件；`asset save` 把经过校验的副本另存到新路径，不覆盖已有文件。逻辑删除会话会释放名称以便复用；导出与导入会重映射标识，导出不包含私有凭据。
 
-TUI 对应操作：`n` 新建会话，`f` 从当前轮次分支，`e` 导出，`x` 输入名称确认删除，`d` 删除当前图片，`o` / `O` 打开图片或目录，`c` 审计并回收缓存。
+TUI 对应操作：`n` 新建会话，`f` 从当前轮次分支，`e` 导出，`x` 输入名称确认删除，`d` 删除当前图片，`o` / `O` 打开图片或目录，`i` 导入图片、`S` 另存副本，`c` 审计并回收缓存。
 
 ## 任务
 
