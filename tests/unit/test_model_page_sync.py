@@ -172,6 +172,39 @@ def test_processing_progress_ignores_popped_screen(tmp_path, monkeypatch, screen
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize('screen_type', ['model', 'transform'])
+def test_processing_callbacks_stop_before_partial_shutdown(tmp_path, monkeypatch, screen_type):
+    from textual.app import App
+
+    from imagen_cli.cli.tui.app import TransformScreen
+
+    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    path = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(path)
+
+    class ShutdownHarness(App):
+        async def _close_all(self):
+            assert not self.is_running
+            screen = self.screen
+            await screen.query_one('#processing-progress').remove()
+            assert screen.status.is_attached
+            screen._processing_progress({'stage': 'processing', 'completed': 1, 'total': 2})
+            if isinstance(screen, ModelProcessScreen):
+                await screen.query_one('#model-run').remove()
+                screen._set_running(False)
+                await screen.query_one('#model-close').remove()
+                screen._downloaded('succeeded')
+            await super()._close_all()
+
+    async def exercise():
+        app = ShutdownHarness()
+        async with app.run_test():
+            cls = ModelProcessScreen if screen_type == 'model' else TransformScreen
+            await app.push_screen(cls(Deps(None, None), 'art', 'ses', path))
+
+    asyncio.run(exercise())
+
+
 def test_model_worker_cancel_does_not_touch_removed_controls(tmp_path, monkeypatch):
     from threading import Event
 

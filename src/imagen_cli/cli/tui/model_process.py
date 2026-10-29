@@ -275,7 +275,7 @@ class ModelProcessScreen(Modal[bool]):
 
     def _set_running(self, running: bool) -> None:
         self.running = running
-        if not self.status.is_attached:
+        if not self.app.is_running or not self.status.is_attached:
             return
         for widget in (self.filter, self.backend, self.mode, self.tile, self.overlap, self.timeout):
             widget.disabled = running
@@ -289,7 +289,7 @@ class ModelProcessScreen(Modal[bool]):
             self._describe()
 
     def _processing_progress(self, value: dict[str, Any]) -> None:
-        if self.status.is_attached:
+        if self.app.is_running and self.status.is_attached:
             self.query_one("#processing-progress", ProgressBar).update(
                 total=value.get("total"), progress=value.get("completed", 0),
             )
@@ -412,7 +412,7 @@ class ModelProcessScreen(Modal[bool]):
             pass  # The app may exit before the download thread finishes.
 
     def _downloaded(self, message: str) -> None:
-        if self.is_mounted and self in self.app.screen_stack:
+        if self.app.is_running and self.status.is_attached and self in self.app.screen_stack:
             self.downloading = False
             self.query_one("#model-close", Button).disabled = False
             self._set_running(False)

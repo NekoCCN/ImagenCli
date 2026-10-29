@@ -125,6 +125,30 @@ def test_tui_poll_ignores_removed_workbench(tmp_path):
     asyncio.run(exercise())
 
 
+def test_tui_poll_stops_before_partial_shutdown(tmp_path):
+    import asyncio
+
+    from imagen_cli.cli.tui.app import Deps, WorkbenchApp
+
+    root, _ = seed(tmp_path)
+
+    class ShutdownHarness(WorkbenchApp):
+        async def _close_all(self):
+            assert not self.is_running
+            await self.query_one('#action-delete').remove()
+            assert self.sessions.is_attached
+            self._poll_jobs()
+            await super()._close_all()
+
+    async def exercise():
+        with Container(workspace=str(root)) as container:
+            app = ShutdownHarness(Deps(container.repositories, container.artifact_store))
+            async with app.run_test(size=(100, 35)):
+                pass
+
+    asyncio.run(exercise())
+
+
 def test_idle_tui_poll_never_decodes_images_again(tmp_path, monkeypatch):
     import asyncio
 
