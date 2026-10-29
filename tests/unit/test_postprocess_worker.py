@@ -64,3 +64,35 @@ def test_operation_error_message_is_plain(tmp_path):
         postprocess_worker.execute(source, [{"op": "guided_smooth", "params": {"radius": 0}}])
     assert "ValueError:" not in str(raised.value)
     assert "radius" in str(raised.value)
+
+
+@pytest.mark.parametrize(("pipeline", "expected"), [
+    ([{"op": "superres", "params": {"model": "realesrgan-x4plus"}}],
+     postprocess_worker.MODEL_RUNTIME_BYTES),
+    ([{"op": "guided_smooth", "params": {}}], postprocess_worker.MAX_WORKING_BYTES),
+    ([], postprocess_worker.MAX_WORKING_BYTES),
+])
+def test_model_pipelines_get_room_for_the_runtime(pipeline, expected):
+    assert postprocess_worker._address_space_extra(pipeline) == expected
+
+
+def test_allocation_failure_is_reported_in_plain_words():
+    error = RuntimeError(
+        "Fail: : 1 : FAIL : Non-zero status code returned while running Upsample node. "
+        "Status Message: bfc_arena.cc: Failed to allocate memory for requested buffer "
+        "of size 151519232"
+    )
+    message = postprocess_worker._error_message(error)
+    assert message.startswith("not enough memory")
+    assert "bfc_arena" not in message
+
+
+def test_unexpected_error_keeps_its_class_name():
+    assert postprocess_worker._error_message(RuntimeError("boom")).startswith("RuntimeError:")
+
+
+def test_model_runs_get_a_longer_default_timeout():
+    plain = [{"op": "guided_smooth", "params": {"radius": 4}}]
+    model = [{"op": "superres", "params": {"model": "realesrgan-x4plus"}}]
+    assert postprocess_worker.default_timeout(plain) == postprocess_worker.TRANSFORM_TIMEOUT
+    assert postprocess_worker.default_timeout(model) == postprocess_worker.MODEL_TIMEOUT

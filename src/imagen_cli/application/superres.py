@@ -377,7 +377,8 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
     if tile < 4 or not 0 <= overlap < tile:
         raise ValueError("invalid tile geometry")
     height, width = array.shape[:2]
-    output = numpy.empty((height * scale, width * scale, 3), dtype=numpy.float32)
+    # uint8 is the exact output range after the clip below, and a quarter of float32.
+    output = numpy.empty((height * scale, width * scale, 3), dtype=numpy.uint8)
     for top in range(0, height, tile):
         for left in range(0, width, tile):
             bottom = min(height, top + tile)
@@ -398,7 +399,7 @@ def tiled_upscale(array: Any, runner: Runner, *, scale: int, tile: int = 256,
                 slice(top * scale, bottom * scale),
                 slice(left * scale, right * scale),
             )
-            output[destination] = numpy.clip(piece[area], 0, 255)
+            output[destination] = numpy.clip(piece[area], 0, 255).astype(numpy.uint8)
     return output
 
 
@@ -420,7 +421,7 @@ def upscale(image: Image.Image, *, model: str = "realesrgan-x4plus",
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     array = numpy.asarray(image.convert("RGB"), dtype=numpy.uint8)
     result = tiled_upscale(array, runner, scale=scale, tile=tile, overlap=overlap)
-    converted = Image.fromarray(result.astype(numpy.uint8), "RGB")
+    converted = Image.fromarray(result, "RGB")
     if alpha is not None:
         converted = converted.convert("RGBA")
         enlarged = alpha.resize(

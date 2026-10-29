@@ -475,7 +475,7 @@ def apply(
     pipeline: Any,
     *,
     session_id: str | None = None,
-    timeout: float = 120,
+    timeout: float | None = None,
     cancelled: Event | None = None,
     budget_approval: str | None = None,
 ) -> dict[str, Any]:

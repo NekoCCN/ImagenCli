@@ -79,7 +79,7 @@ def transform_(
     op: str | None = None,
     preset: str | None = None,
     session: str | None = None,
-    timeout: float = 120,
+    timeout: float | None = None,
     budget_approval: str | None = None,
     model_params: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:

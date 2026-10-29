@@ -28,23 +28,24 @@ def test_tiled_upscale_matches_a_single_tile():
     assert np.array_equal(result, expected)
 
 
-def test_tiled_upscale_avoids_full_image_double_precision_buffers():
+def test_tiled_upscale_avoids_full_image_float_py_buffers():
     source = np.full((9, 7, 3), 123, dtype=np.uint8)
     result = superres.tiled_upscale(source, nearest_runner, scale=2, tile=4, overlap=1)
-    assert result.dtype == np.float32
-    assert result.nbytes == 18 * 14 * 3 * 4
+    # uint8 is the final output range and a quarter of the float32 buffer.
+    assert result.dtype == np.uint8
+    assert result.nbytes == 18 * 14 * 3
     assert np.array_equal(result, np.full((18, 14, 3), 123, dtype=np.uint8))
 
 
-def test_overlapping_tiles_are_averaged():
+def test_overlapping_tiles_leave_no_seam():
     array = np.full((16, 16, 3), 10, dtype=np.uint8)
 
     def noisy(tile):
-        return np.repeat(np.repeat(tile, 2, axis=0), 2, axis=1) + tile.mean() / 100
+        return np.repeat(np.repeat(tile, 2, axis=0), 2, axis=1) + 5
 
     result = superres.tiled_upscale(array, noisy, scale=2, tile=8, overlap=2)
     assert result.shape == (32, 32, 3)
-    assert np.allclose(result, 10.1, atol=0.01)
+    assert np.array_equal(result, np.full((32, 32, 3), 15, dtype=np.uint8))
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])

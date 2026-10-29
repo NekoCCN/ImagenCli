@@ -432,7 +432,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "overlap": {"type": "integer", "minimum": 0, "default": 16},
             "accept": {"type": "boolean", "default": False},
             "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 120},
+            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 900},
         }
         required = ("artifact", "model")
     elif name == "superres models":
