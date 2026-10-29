@@ -275,6 +275,8 @@ class ModelProcessScreen(Modal[bool]):
 
     def _set_running(self, running: bool) -> None:
         self.running = running
+        if not self.status.is_attached:
+            return
         for widget in (self.filter, self.backend, self.mode, self.tile, self.overlap, self.timeout):
             widget.disabled = running
         self.table.disabled = running
@@ -287,7 +289,7 @@ class ModelProcessScreen(Modal[bool]):
             self._describe()
 
     def _processing_progress(self, value: dict[str, Any]) -> None:
-        if self.is_mounted:
+        if self.status.is_attached:
             self.query_one("#processing-progress", ProgressBar).update(
                 total=value.get("total"), progress=value.get("completed", 0),
             )

@@ -1179,7 +1179,7 @@ class TransformScreen(Modal[bool]):
     def _processing_progress(self, value: dict[str, Any]) -> None:
         from imagen_cli.cli.progress import label
 
-        if not self.is_mounted:
+        if not self.status.is_attached:
             return
         bar = self.query_one("#processing-progress", ProgressBar)
         bar.display = True
@@ -2802,7 +2802,7 @@ class WorkbenchApp(App[None]):
         self._say(label(value), "info")
 
     def _poll_jobs(self) -> None:
-        if self.current is None:
+        if self.current is None or not self.sessions.is_attached:
             return
         turns = queries.iter_all(self.deps.repositories, "turns", session_id=self.current)
         jobs = [self.deps.repositories.get("jobs", turn["job_id"]) for turn in turns]

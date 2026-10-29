@@ -108,6 +108,23 @@ def test_tui_observes_new_external_artifacts(tmp_path):
     asyncio.run(exercise())
 
 
+def test_tui_poll_ignores_removed_workbench(tmp_path):
+    import asyncio
+
+    from imagen_cli.cli.tui.app import Deps, WorkbenchApp
+
+    root, _ = seed(tmp_path)
+
+    async def exercise():
+        with Container(workspace=str(root)) as container:
+            app = WorkbenchApp(Deps(container.repositories, container.artifact_store))
+            async with app.run_test(size=(100, 35)):
+                await app.default_screen.remove_children()
+                app._poll_jobs()
+
+    asyncio.run(exercise())
+
+
 def test_idle_tui_poll_never_decodes_images_again(tmp_path, monkeypatch):
     import asyncio
 

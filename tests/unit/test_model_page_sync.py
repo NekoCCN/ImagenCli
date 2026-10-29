@@ -138,12 +138,89 @@ def test_model_parameters_survive_foreground_execution(tmp_path, monkeypatch):
                 screen.timeout.value, screen.backend.value = '17.5', 'cpu'
                 screen.action_apply()
                 await pilot.pause()
-                app.screen.dismiss(True)
+                await app.screen.dismiss(True)
+                await pilot.pause()
                 await app.workers.wait_for_complete()
                 await pilot.pause()
                 jobs = container.repositories.list('jobs')
                 assert len(jobs) == 1 and jobs[0]['state'] == 'succeeded'
                 assert container.artifact_store.get(source).read_bytes() == buffer.getvalue()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize('screen_type', ['model', 'transform'])
+def test_processing_progress_ignores_popped_screen(tmp_path, monkeypatch, screen_type):
+    from textual.app import App
+
+    from imagen_cli.cli.tui.app import TransformScreen
+
+    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    path = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(path)
+
+    async def exercise():
+        app = App()
+        async with app.run_test() as pilot:
+            cls = ModelProcessScreen if screen_type == 'model' else TransformScreen
+            screen = cls(Deps(None, None), 'art', 'ses', path)
+            await app.push_screen(screen)
+            await screen.dismiss(False)
+            await pilot.pause()
+            screen._processing_progress({'stage': 'processing', 'completed': 1, 'total': 2})
+
+    asyncio.run(exercise())
+
+
+def test_model_worker_cancel_does_not_touch_removed_controls(tmp_path, monkeypatch):
+    from threading import Event
+
+    from imagen_cli.application import postprocess_worker
+
+    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    entered, release, finished = Event(), Event(), Event()
+
+    def compute(path, pipeline, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(5)
+            raise ValueError('postprocess cancelled')
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(postprocess_worker, 'execute', compute)
+
+    async def exercise():
+        with Container(workspace=str(tmp_path / 'workspace')) as container:
+            service = SessionService(container.repositories, container.artifact_store)
+            session = service.create_session('a')
+            buffer = io.BytesIO()
+            Image.new('RGB', (8, 8)).save(buffer, format='PNG')
+            source = 'art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa'
+            container.artifact_store.stage(source, buffer.getvalue())
+            container.artifact_store.publish(source)
+            deps = Deps(container.repositories, container.artifact_store,
+                        execute=container.execute, workspace_root=container.resolved_workspace.root)
+            from textual.app import App
+            app = App()
+            async with app.run_test() as pilot:
+                screen = ModelProcessScreen(deps, source, session.id,
+                                            container.artifact_store.get(source))
+                await app.push_screen(screen)
+                screen._start({'artifact': source, 'session': session.id,
+                               'model': 'film-degrainer', 'tile': 256, 'overlap': 16,
+                               'accept': True, 'timeout': 900})
+                try:
+                    assert await asyncio.to_thread(entered.wait, 2)
+                    await screen.remove_children()
+                    for worker in list(app.workers):
+                        worker.cancel()
+                    await pilot.pause()
+                finally:
+                    release.set()
+                    assert await asyncio.to_thread(finished.wait, 2)
+                    await app.workers.wait_for_complete()
+                assert not screen.running
 
     asyncio.run(exercise())
 
