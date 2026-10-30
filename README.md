@@ -150,6 +150,8 @@ A **session** groups creation attempts (**turns**) and saved images (**artifacts
 
 Dedicated pages cover everyday image work. `:` opens the command palette; CLI-only workflows can also be reached there where supported, rather than through their own page.
 
+The workbench has Import and Save as buttons. More (or `F10`) opens the remaining actions, including cache cleanup, export, image deletion and help; narrower terminals move editing and processing buttons into this menu. In forms, Tab / Shift+Tab move between fields and Enter operates the focused control. Use the submit button or Ctrl+Enter to submit the whole form. Confirmations default to No.
+
 | Task | TUI | CLI |
 | --- | --- | --- |
 | Browse sessions and images | session list, preview, `[` / `]` | `session list`, `session show`, `asset show` |
@@ -346,7 +348,7 @@ imagen cache purge --plan DIGEST --yes
 
 `asset delete` removes the artifact entity and its local file. `session remove-artifact` detaches the image from a session and, by default, reclaims the file when no other session references it. `session import-image` copies an external image into a session as a new artifact without changing the source file; `asset save` writes a verified copy to a new path and never replaces an existing file. Soft-deleting a session frees its name for reuse; exports and imports remap identities, and exports do not include private credentials.
 
-TUI equivalents: `n` creates a session, `f` forks the current turn, `e` exports, `x` deletes with typed confirmation, `d` removes the current image, `o` / `O` open the image or folder, `i` imports an image and `S` saves a copy, and `c` audits and purges cache entries.
+TUI equivalents: `n` creates a session, `f` forks the current turn, `e` exports, `x` deletes with Yes/No confirmation, `d` removes the current image, `o` / `O` open the image or folder, `i` imports an image and `S` saves a copy, and `c` opens cache cleanup. In the cache page, review the list and click Purge (or press `p`), then answer Yes/No. The app checks the confirmed list before deleting; if the list changes, it refreshes and asks you to confirm again. Cleanup results and any failed items remain visible. CLI cleanup still uses `--plan ... --yes`.
 
 ## Jobs
 
@@ -432,6 +434,8 @@ What each transform may change:
 - Sharpening can amplify noise.
 - Frequency suppression can delete intentional halftone patterns.
 - Difference metrics report numbers; open the images to judge the result.
+
+`Metadata Cleanup` (`--preset 'Metadata Cleanup'` or `--op strip_metadata`) applies EXIF orientation, re-encodes, and drops EXIF, XMP, IPTC, C2PA and PNG text chunks; the ICC color profile is kept. PNG-to-PNG output keeps the exact pixels. It does not remove pixel-level watermarks such as SynthID. The result is a new artifact and the source stays untouched.
 
 TUI: `t` opens ordinary image processing; `p` edits parameters; `enter` applies. `u` opens the model workbench with actual model entries, ACG/restoration filters, original preview, expected output dimensions, and backend/tile/overlap/timeout controls. Choose foreground or background execution; download weights and confirm each run separately. `s` manages local weights and runtimes. Applying saves a new artifact and leaves the source untouched.
 

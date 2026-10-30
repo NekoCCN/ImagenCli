@@ -14,6 +14,7 @@ CATEGORY_LABELS = {
     "art": "Style and optics",
     "superres": "Model restoration",
     "geometry": "Size and geometry",
+    "utility": "Utility",
 }
 
 OPERATORS: dict[str, dict[str, str]] = {
@@ -173,6 +174,11 @@ OPERATORS: dict[str, dict[str, str]] = {
         "name": "Cel Banding Reduce",
         "description": "Adds a deterministic ordered dither only in low-contrast gradients to "
         "break up banding in cel-style shading.",
+    },
+    "strip_metadata": {
+        "name": "Metadata Cleanup",
+        "description": "Applies EXIF orientation, then re-encodes and drops EXIF, XMP, IPTC, "
+        "C2PA and PNG text chunks; the ICC color profile is kept.",
     },
     "guided_smooth": {
         "name": "Guided edge-preserving smoothing",
@@ -795,6 +801,7 @@ PRESET_NAMES = {
     "桑原二次元平涂": "Kuwahara Filter",
     "剧场版宽银幕眩光": "Anamorphic Flare",
     "日系晴空色彩迁移": "Color Transfer",
+    "元数据提纯": "Metadata Cleanup",
 }
 
 INTROS: dict[str, dict[str, str]] = {
@@ -1693,6 +1700,34 @@ INTROS: dict[str, dict[str, str]] = {
         "quality guarantee.",
         "benefit": "Replaces local variation with large color blocks.",
         "loss": "Spatial detail cannot be recovered.",
+    },
+    "strip_metadata": {
+        "title": "Metadata cleanup",
+        "summary": "Applies EXIF orientation, then re-encodes and drops EXIF, XMP, IPTC, C2PA "
+        "and PNG text chunks.",
+        "principle": "The pixels are decoded and encoded again; only the ICC color profile is "
+        "written, so provenance manifests and text chunks are not copied.",
+        "scenarios": "For images returned with AI provenance metadata; it does not change the "
+        "picture or remove pixel-level watermarks.",
+        "benefit": "Removes provider AI markers, hidden prompts and text chunks; PNG to PNG "
+        "keeps the exact pixels.",
+        "loss": "The output format comes from the encode step, so JPEG or WebP output is "
+        "compressed again; pixel-level watermarks are unaffected.",
+        "use_case": "Clean provider-written provenance metadata into a fresh artifact",
+    },
+    "元数据提纯": {
+        "title": "Metadata Cleanup",
+        "summary": "Applies EXIF orientation, then re-encodes and drops EXIF, XMP, IPTC, C2PA "
+        "and PNG text chunks.",
+        "principle": "The pixels are decoded and encoded again; only the ICC color profile is "
+        "written, so provenance manifests and text chunks are not copied.",
+        "scenarios": "For images returned with AI provenance metadata; it does not change the "
+        "picture or remove pixel-level watermarks.",
+        "benefit": "Removes provider AI markers, hidden prompts and text chunks; PNG to PNG "
+        "keeps the exact pixels.",
+        "loss": "The output format comes from the encode step, so JPEG or WebP output is "
+        "compressed again; pixel-level watermarks are unaffected.",
+        "use_case": "Clean provider-written provenance metadata into a fresh artifact",
     },
 }
 

@@ -219,7 +219,7 @@ def test_cache_panel_writes_nothing_before_confirmation(deps):
     assert recorder.purges == []
 
 
-def test_typed_purge_confirmation_runs_purge(deps):
+def test_yes_no_confirmation_runs_purge(deps):
     deps_value, recorder = deps
 
     async def run():
@@ -228,8 +228,7 @@ def test_typed_purge_confirmation_runs_purge(deps):
             await pilot.pause()
             await pilot.press("p")
             await pilot.pause()
-            await pilot.press(*"purge")
-            await pilot.press("enter")
+            await pilot.press("y")
             await pilot.pause()
 
     asyncio.run(run())
@@ -312,7 +311,7 @@ def test_new_session_reports_a_duplicate_name(deps):
             await pilot.press("n")
             await pilot.pause()
             await pilot.press(*"session-0")
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
             await pilot.pause()
             assert "已存在" in str(app.status.render())
 
@@ -503,7 +502,7 @@ def test_transform_param_tuning(deps):
             await pilot.pause()
             assert isinstance(app.screen, ParamEditScreen)
             await pilot.press("backspace", "8")
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
             await pilot.pause()
             assert not isinstance(app.screen, ParamEditScreen)
             await pilot.press("enter")
@@ -908,7 +907,7 @@ def test_export_asks_for_a_destination(deps):
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.press("e")
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
             await pilot.pause()
 
     asyncio.run(run())
@@ -930,7 +929,7 @@ def test_new_session_form_creates_and_selects(deps):
             await pilot.press("n")
             await pilot.pause()
             await pilot.press(*"new-session")
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
             await pilot.pause()
 
     asyncio.run(run())
@@ -982,7 +981,8 @@ def test_generate_plan_requires_approval_before_execution(deps):
             await pilot.press("g")
             await pilot.pause()
             await pilot.press(*"a cat")
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
+            await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert [call[0] for call in calls] == ["generate"]
@@ -1077,7 +1077,8 @@ def test_command_palette_shows_a_form_even_when_nothing_is_required(deps):
             await pilot.pause()
             app._open_command("ops")
             await pilot.pause()
-            await pilot.press("enter")  # submit the all-optional form
+            await pilot.press("ctrl+enter")  # submit the all-optional form
+            await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
 
@@ -1106,7 +1107,7 @@ def test_update_form_prefills_the_selected_profile(deps):
             await pilot.pause()
             await pilot.press("u")
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
             await pilot.pause()
 
     asyncio.run(run())
@@ -1220,7 +1221,8 @@ def test_command_palette_filters_by_name(deps):
             assert any(name == "ops" for name in screen.matches)
             await pilot.press("enter")
             await pilot.pause()
-            await pilot.press("enter")  # the palette now opens a form; submit it
+            await pilot.press("ctrl+enter")  # the palette now opens a form; submit it
+            await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
 
@@ -2336,7 +2338,8 @@ def test_generate_leaves_gemini_geometry_empty_and_offers_the_documented_tiers(d
             assert form.values()["image_size"] == "2K"
             await pilot.press(*"a cat")
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("ctrl+enter")
+            await pilot.pause()
             await app.workers.wait_for_complete()
 
     asyncio.run(run())

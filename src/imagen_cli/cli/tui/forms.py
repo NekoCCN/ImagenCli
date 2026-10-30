@@ -29,7 +29,10 @@ class ChoiceForm(Modal[dict[str, str] | None]):
     ChoiceForm Static { height: auto; }
     ChoiceForm Input, ChoiceForm Select { margin-bottom: 1; }
     """
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+enter", "submit", "Save"),
+    ]
 
     def __init__(
         self,
@@ -115,8 +118,12 @@ class ChoiceForm(Modal[dict[str, str] | None]):
         for name in self.custom:
             selector = self.query_one(f"#{name}-choice", Select)
             self.custom_input(name, selector.value == "custom")
-        if self.fields:
-            self.query_one("#" + self.fields[0][0]).focus()
+        # Subclasses finish hiding and disabling their fields after super().on_mount().
+        self.call_after_refresh(self._focus_first_field)
+
+    def _focus_first_field(self) -> None:
+        self.set_focus(None)
+        self.focus_next("Input, Select, SelectionList, Button")
 
     def field_value(self, name: str) -> str:
         """The field's value carrier, whichever widget currently holds it."""
@@ -167,6 +174,10 @@ class ChoiceForm(Modal[dict[str, str] | None]):
             self.action_cancel()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.focus_next()
+
+    def action_submit(self) -> None:
         self.submit()
 
     def submit(self) -> None:

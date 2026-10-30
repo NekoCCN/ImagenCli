@@ -161,32 +161,42 @@ def test_choice_form_mouse_cancel_does_not_submit():
     asyncio.run(exercise())
 
 
-def test_cache_mouse_purge_requires_digest_and_typed_confirmation():
-    from imagen_cli.cli.tui.app import CacheScreen, Deps
+def test_cache_mouse_purge_requires_yes_confirmation(tmp_path):
+    import io
 
-    calls = []
-    deps = Deps(None, None, audit=lambda *args, **kwargs: [],
-                purge=lambda *args, **kwargs: calls.append(args) or {"deleted_bytes": 0})
+    from PIL import Image
+
+    from imagen_cli.application.container import Container
+    from imagen_cli.cli.tui.app import CacheScreen, ConfirmScreen, Deps
+
+    data = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(data, format="PNG")
 
     class Harness(App):
         CSS = WorkbenchApp.CSS
 
     async def exercise():
-        app = Harness()
-        async with app.run_test(size=(80, 24)) as pilot:
-            screen = CacheScreen(deps)
-            await app.push_screen(screen)
-            await pilot.click("#cache-purge")
-            assert calls == []
-            await pilot.click("#cache-plan")
-            await pilot.pause(0.4)
-            await pilot.click("#cache-purge")
-            assert calls == []
-            screen.field.value = "purge"
-            await pilot.pause(0.4)
-            await pilot.click("#cache-purge")
-            await pilot.pause()
-            assert len(calls) == 1
+        with Container(workspace=str(tmp_path / "workspace")) as container:
+            identity = "art_" + "a" * 32
+            container.artifact_store.stage(identity, data.getvalue())
+            container.artifact_store.publish(identity)
+            path = container.artifact_store.get(identity)
+            app = Harness()
+            async with app.run_test(size=(80, 24)) as pilot:
+                screen = CacheScreen(Deps(container.repositories, container.artifact_store))
+                await app.push_screen(screen)
+                await pilot.pause()
+                await pilot.click("#cache-purge")
+                await pilot.pause()
+                assert isinstance(app.screen, ConfirmScreen) and path.exists()
+                await pilot.click("#confirm-no")
+                await pilot.pause()
+                assert app.screen is screen and path.exists()
+                await pilot.click("#cache-purge")
+                await pilot.pause()
+                await pilot.click("#confirm-yes")
+                await pilot.pause()
+                assert app.screen is screen and not path.exists()
 
     asyncio.run(exercise())
 

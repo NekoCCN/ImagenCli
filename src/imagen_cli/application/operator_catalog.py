@@ -81,6 +81,7 @@ CATEGORIES: dict[str, str] = {
     "art": "风格光学",
     "superres": "模型恢复",
     "geometry": "尺寸几何",
+    "utility": "实用工具",
 }
 _CATEGORY_LABELS_EN = {
     label: operator_catalog_en.CATEGORY_LABELS[key] for key, label in CATEGORIES.items()
@@ -252,6 +253,10 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
 
 
 PRESETS = PRESET_PIPELINES
+
+# The operator itself has no options; a single-step recipe keeps the TUI
+# entry in the utility category instead of the combined-recipe group.
+PRESET_PIPELINES["元数据提纯"] = [{"op": "strip_metadata", "params": {}}]
 
 OPERATORS: list[OperatorItem] = [
     # --- Anti-AI ---
@@ -1907,6 +1912,21 @@ OPERATORS.append(
     )
 )
 
+OPERATORS.append(
+    OperatorItem(
+        key="strip_metadata",
+        name="元数据提纯 (Metadata Cleanup)",
+        category="utility",
+        category_label=CATEGORIES["utility"],
+        description=(
+            "应用 EXIF 方向后重新编码，丢弃 EXIF、XMP、IPTC、C2PA 与 PNG 文本块；"
+            "ICC 色彩配置保留。"
+        ),
+        default_op="strip_metadata",
+        default_params={},
+    )
+)
+
 # New recipes share the displayed defaults; historical recipes above stay unchanged.
 _NEW_OPERATORS = (
     "local_laplacian_sampled",
@@ -2669,6 +2689,7 @@ PRESET_CATEGORIES: dict[str, str] = {
     "ACG 赛璐璐轻修复": "线条与色块",
     "ACG 压缩截图修复": "线条与色块",
     "动漫线条增强": "线条与色块",
+    "元数据提纯": "实用工具",
     "anime_line_enhance": "线条与色块",
     "日系通透空气感": "线条与色块",
     "热血集中线": "线条与色块",
@@ -2960,6 +2981,13 @@ _OPERATION_EFFECTS = {
         "分别改变不同明暗区域的色偏。",
         "原有颜色关系会改变，过强偏移可能裁切通道。",
     ),
+    "strip_metadata": (
+        "元数据清理",
+        "应用 EXIF 方向后重新编码，丢弃 EXIF、XMP、IPTC、C2PA 与 PNG 文本块，保留 ICC。",
+        "去掉来源清单、隐藏提示词和文本块，PNG 到 PNG 像素不变。",
+        "输出格式由 encode 步骤决定，改存 JPEG/WebP 会重新压缩；"
+        "像素级不可见水印不受影响。",
+    ),
 }
 for _op, (_title, _method, _benefit, _loss) in _OPERATION_EFFECTS.items():
     INTROS[_op] = {
@@ -2990,6 +3018,25 @@ for _key, _pipeline in PRESET_PIPELINES.items():
     }
     INTROS[_key] = _intro
     INTROS[_key.split(" (", 1)[0]] = _intro
+
+INTROS["元数据提纯"] = {
+    "title": "元数据提纯",
+    "summary": "应用 EXIF 方向后重新编码，丢弃 EXIF、XMP、IPTC、C2PA 与 PNG 文本块。",
+    "principle": (
+        "先按 EXIF 方向转正，再解码像素并重新编码；"
+        "编码只保留 ICC 色彩配置，来源清单和文本块不会被复制。"
+    ),
+    "benefit": "去掉端点的 AI 来源标记、隐藏提示词和文本块，PNG 到 PNG 像素不变。",
+    "loss": (
+        "输出格式由 encode 步骤决定，改存 JPEG/WebP 会重新压缩；"
+        "像素级不可见水印不受影响。"
+    ),
+    "use_case": "清理端点写入的来源元数据，另存为干净副本",
+    "scenarios": (
+        "适用于端点返回图片带有 C2PA、XMP、EXIF 或 PNG 文本块的情况；"
+        "不改变画面内容，也不处理像素级水印。"
+    ),
+}
 
 
 # Practical "may be useful for" notes, kept separate from the technical intros.
@@ -3079,6 +3126,7 @@ _USE_CASES = {
     "pixelate": "做块状像素化",
     "赛璐璐手绘": "做手绘赛璐璐风格",
     "像素复古风": "做复古像素风",
+    "strip_metadata": "清理端点写入的来源元数据，另存为干净副本",
 }
 _NOTES = {
     "local_laplacian_sampled": ["跨尺度整理细节，幅度可控", "不能承诺无光晕或保色相"],

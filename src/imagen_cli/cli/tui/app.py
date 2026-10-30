@@ -16,11 +16,12 @@ from typing import Any, cast
 
 from PIL import Image
 from rich.cells import cell_len
+from rich.filesize import decimal
 from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
 from textual.widgets import Button, DataTable, Input, ProgressBar, Select, Static
 
@@ -376,13 +377,10 @@ class ConfirmScreen(Modal[bool]):
     def __init__(self, prompt: str) -> None:
         super().__init__()
         self.prompt = prompt
-        self.yes = False
-        self.choice = Static("")
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(self.prompt, classes="panel-title"),
-            self.choice,
             Horizontal(
                 Button(t("No", "否"), id="confirm-no"),
                 Button(t("Yes", "是"), id="confirm-yes", variant="error"),
@@ -390,8 +388,8 @@ class ConfirmScreen(Modal[bool]):
             ),
             Static(
                 t(
-                    "←/→ choose · enter confirm · esc cancels",
-                    "←/→ 选择 · enter 确认 · esc 取消",
+                    "←/→ or Tab choose · Enter confirm · Esc cancel",
+                    "←/→ 或 Tab 选择 · Enter 确认 · Esc 取消",
                 ),
                 classes="panel-hint",
             ),
@@ -400,28 +398,20 @@ class ConfirmScreen(Modal[bool]):
         )
 
     def on_mount(self) -> None:
-        self._render_choice()
-
-    def _render_choice(self) -> None:
-        no = Text(t("No", "否"), style="reverse" if not self.yes else "")
-        yes = Text(t("Yes", "是"), style="reverse" if self.yes else "")
-        self.choice.update(Text.assemble(no, "    ", yes))
-        self.query_one("#confirm-yes" if self.yes else "#confirm-no", Button).focus()
+        self.action_select_no()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         self.dismiss(event.button.id == "confirm-yes")
 
     def action_select_no(self) -> None:
-        self.yes = False
-        self._render_choice()
+        self.query_one("#confirm-no", Button).focus()
 
     def action_select_yes(self) -> None:
-        self.yes = True
-        self._render_choice()
+        self.query_one("#confirm-yes", Button).focus()
 
     def action_confirm(self) -> None:
-        self.dismiss(self.yes)
+        self.dismiss(self.focused is self.query_one("#confirm-yes", Button))
 
     def action_answer_no(self) -> None:
         self.dismiss(False)
@@ -436,7 +426,10 @@ class ConfirmScreen(Modal[bool]):
 class FormScreen(Modal[dict[str, str] | None]):
     """Small labelled form; Enter submits, Escape cancels."""
 
-    BINDINGS = [Binding("escape", "cancel", t("Cancel", "取消"))]
+    BINDINGS = [
+        Binding("escape", "cancel", t("Cancel", "取消")),
+        Binding("ctrl+enter", "submit", t("Submit", "提交")),
+    ]
 
     def __init__(
         self,
@@ -462,7 +455,11 @@ class FormScreen(Modal[dict[str, str] | None]):
                 Horizontal(Static(_label(name), classes="field-label"), field, classes="field")
                 for (name, _, _), field in zip(self.fields, self.inputs, strict=True)
             ),
-            Static(t("enter submit · esc cancel", "enter 提交 · esc 取消"), classes="panel-hint"),
+            Static(
+                t("Tab next · Ctrl+Enter submit · Esc cancel",
+                  "Tab 下一项 · Ctrl+Enter 提交 · Esc 取消"),
+                classes="panel-hint",
+            ),
             Horizontal(
                 Button(t("Submit", "提交"), id="form-submit", variant="primary"),
                 Button(t("Cancel", "取消"), id="form-cancel"),
@@ -477,6 +474,10 @@ class FormScreen(Modal[dict[str, str] | None]):
             self.inputs[0].focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.focus_next()
+
+    def action_submit(self) -> None:
         self._submit()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -580,6 +581,7 @@ class FilePickerScreen(Modal[Path | None]):
         )
 
     def on_mount(self) -> None:
+        self.table.cursor_type = "row"
         self._load(self.directory)
         self.table.focus()
 
@@ -687,7 +689,8 @@ class FilePickerScreen(Modal[Path | None]):
 
 class CacheScreen(Modal[bool]):
     BINDINGS = [
-        Binding("p", "plan", t("Build digest", "生成摘要")),
+        Binding("p", "purge", t("Purge", "清理")),
+        Binding("r", "refresh", t("Refresh", "刷新")),
         Binding("escape", "dismiss_screen", t("Close", "关闭")),
     ]
 
@@ -695,19 +698,18 @@ class CacheScreen(Modal[bool]):
         super().__init__()
         self.deps = deps
         self.entries: list[cache_service.Entry] = []
-        self.digest = ""
         self.table: DataTable[Any] = DataTable()
-        self.status = Static("")
-        self.field = Input(placeholder=t("type purge to confirm", "输入 purge 确认"))
+        self.status = Static("", markup=False)
+        self.confirming = False
+        self.cleaned = False
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(t("Reclaimable space", "可回收空间"), classes="panel-title"),
             self.table,
             self.status,
-            self.field,
             Horizontal(
-                Button(t("Build digest", "生成摘要"), id="cache-plan"),
+                Button(t("Refresh", "刷新"), id="cache-refresh"),
                 Button(t("Purge", "清理"), id="cache-purge", variant="error"),
                 Button(t("Close", "关闭"), id="cache-close"),
                 classes="dialog-actions",
@@ -718,57 +720,100 @@ class CacheScreen(Modal[bool]):
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
-        self.table.add_columns(t("Kind", "类型"), t("Entry", "条目"), t("Bytes", "字节"))
+        self.table.add_columns(t("Kind", "类型"), t("Entry", "条目"), t("Size", "大小"))
+        self.action_refresh()
+        self.table.focus()
+
+    def action_refresh(self) -> None:
         extra = (
             {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
         )
-        self.entries = self.deps.audit(self.deps.repositories, self.deps.store, **extra)
+        try:
+            self.entries = self.deps.audit(self.deps.repositories, self.deps.store, **extra)
+        except (OSError, ValueError) as error:
+            self.query_one("#cache-purge", Button).disabled = True
+            self.status.update(t("Cannot inspect cache: ", "无法检查缓存：") + _sanitize(error))
+            return
+        self.table.clear()
+        kinds = {
+            "unreferenced_artifact": t("Unused image", "未引用图片"),
+            "staging_artifact": t("Old staging file", "旧暂存文件"),
+            "deleted_session_artifact": t("Deleted session image", "已删除会话图片"),
+            "expired_plan": t("Expired plan", "过期计划"),
+            "expired_approval": t("Expired approval", "过期批准"),
+            "expired_native_context": t("Expired context", "过期上下文"),
+            "orphan_job_payload": t("Unused job data", "未引用任务数据"),
+        }
         for entry in self.entries:
-            self.table.add_row(_sanitize(entry.kind), _sanitize(entry.identity), str(entry.bytes))
-        self.status.update(
-            t(
-                f"{len(self.entries)} items, {sum(e.bytes for e in self.entries)} bytes in total",
-                f"{len(self.entries)} 项，共 {sum(e.bytes for e in self.entries)} 字节",
+            self.table.add_row(
+                kinds.get(entry.kind, _sanitize(entry.kind)),
+                _sanitize(entry.identity), decimal(entry.bytes),
             )
-        )
-
-    def action_plan(self) -> None:
-        self.digest = cache_service.digest(self.entries)
-        self.status.update(
-            t(
-                f"Digest {self.digest[:16]}…, type purge to confirm",
-                f"摘要 {self.digest[:16]}…，输入 purge 确认",
-            )
-        )
-        self.field.focus()
+        self.query_one("#cache-purge", Button).disabled = self.confirming or not self.entries
+        total = decimal(sum(entry.bytes for entry in self.entries))
+        self.status.update(t(
+            f"{len(self.entries)} items · {total}", f"{len(self.entries)} 项 · {total}",
+        ))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        if event.button.id == "cache-plan":
-            self.action_plan()
+        if event.button.id == "cache-refresh":
+            self.action_refresh()
         elif event.button.id == "cache-purge":
-            self._purge()
+            self.action_purge()
         elif event.button.id == "cache-close":
             self.action_dismiss_screen()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self._purge()
-
-    def _purge(self) -> None:
-        if self.field.value != "purge" or not self.digest:
-            self.status.update(t("Not confirmed", "未确认"))
+    def action_purge(self) -> None:
+        if self.confirming or not self.entries:
             return
-        extra = (
-            {} if self.deps.private_store is None else {"private_store": self.deps.private_store}
-        )
-        result = self.deps.purge(self.deps.repositories, self.deps.store, self.digest, **extra)
-        self.status.update(
-            t(f"Deleted {result['deleted_bytes']} bytes", f"已删除 {result['deleted_bytes']} 字节")
-        )
-        self.dismiss(True)
+        digest = cache_service.digest(self.entries)
+        origin = self.focused
+        count, total = len(self.entries), decimal(sum(entry.bytes for entry in self.entries))
+        self.confirming = True
+        self.query_one("#cache-purge", Button).disabled = True
+
+        def confirmed(answer: bool | None) -> None:
+            self.confirming = False
+            if not self.app.is_running or not self.status.is_attached:
+                return
+            if not answer:
+                self.query_one("#cache-purge", Button).disabled = not self.entries
+                if origin is not None and origin.is_attached and not origin.disabled:
+                    origin.focus()
+                return
+            extra = {} if self.deps.private_store is None else {
+                "private_store": self.deps.private_store,
+            }
+            try:
+                result = self.deps.purge(self.deps.repositories, self.deps.store, digest, **extra)
+            except ValueError:
+                self.action_refresh()
+                self.status.update(t(
+                    "Cleanup list changed or is no longer valid. Review it and confirm again.",
+                    "清理清单已变化或不再有效，请查看更新后的清单并重新确认。",
+                ))
+                return
+            except OSError as error:
+                self.action_refresh()
+                self.status.update(t("Cleanup failed: ", "清理失败：") + _sanitize(error))
+                return
+            self.cleaned = True
+            self.action_refresh()
+            remaining = result.get("remaining", 0)
+            freed = decimal(result["deleted_bytes"])
+            message = t(f"Freed {freed}", f"已释放 {freed}")
+            if remaining:
+                message += t(f" · {remaining} items failed", f" · {remaining} 项失败")
+            self.status.update(message)
+
+        self.app.push_screen(ConfirmScreen(t(
+            f"Purge the listed {count} items ({total})?\nThis cannot be undone.",
+            f"清理列出的 {count} 项（{total}）？\n此操作不可撤销。",
+        )), confirmed)
 
     def action_dismiss_screen(self) -> None:
-        self.dismiss(False)
+        self.dismiss(self.cleaned)
 
 
 class ParamEditScreen(Modal[list[dict[str, Any]] | None]):
@@ -977,7 +1022,8 @@ class ParamEditScreen(Modal[list[dict[str, Any]] | None]):
         self.dismiss(new_pipeline)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.action_confirm()
+        event.stop()
+        self.focus_next()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1015,6 +1061,7 @@ class TransformScreen(Modal[bool]):
                 "Color and tone",
                 "Style and optics",
                 "Size and geometry",
+                "Utility",
             ]
             if not is_chinese()
             else [
@@ -1025,6 +1072,7 @@ class TransformScreen(Modal[bool]):
                 "颜色明暗",
                 "风格光学",
                 "尺寸几何",
+                "实用工具",
             ]
         )
         self.all_names = list(self.entries)
@@ -2620,6 +2668,7 @@ _BINDING_TEXT = {
     "next_artifact": ("Next artifact", "下一张产物"),
     "refresh": ("Refresh", "刷新"),
     "commands": ("All commands", "全部命令"),
+    "more": ("More actions", "更多操作"),
     "help": ("Help", "帮助"),
     "toggle_language": ("Switch language", "切换语言"),
 }
@@ -2672,6 +2721,45 @@ class HelpScreen(Modal[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         self.action_close()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ActionsScreen(Modal[str | None]):
+    """The same workbench actions, reachable by mouse, Tab or arrow keys."""
+
+    BINDINGS = [
+        Binding("escape", "close", t("Close", "关闭")),
+        Binding("up", "previous", "", show=False, priority=True),
+        Binding("down", "next", "", show=False, priority=True),
+    ]
+
+    def __init__(self, choices: list[tuple[str, str, bool]]) -> None:
+        super().__init__()
+        self.choices = choices
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel", id="more"):
+            yield Static(t("More actions", "更多操作"), classes="panel-title")
+            with VerticalScroll(id="more-actions"):
+                for action, label, disabled in self.choices:
+                    yield Button(label, id=f"more-{action}", disabled=disabled)
+            yield Button(t("Close", "关闭"), id="more-close")
+
+    def on_mount(self) -> None:
+        self.focus_next("Button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        identity = str(event.button.id)
+        self.dismiss(None if identity == "more-close" else identity.removeprefix("more-"))
+
+    def action_previous(self) -> None:
+        self.focus_previous("Button")
+
+    def action_next(self) -> None:
+        self.focus_next("Button")
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -2742,6 +2830,13 @@ class WorkbenchApp(App[None]):
     #action-bar #action-prev, #action-bar #action-next {
         width: 3; min-width: 3; margin-right: 0; padding: 0;
     }
+    .narrow-actions #action-edit, .narrow-actions #action-model-process,
+    .narrow-actions #action-transform, .narrow-actions #action-open { display: none; }
+    #more, #cache { height: 85%; }
+    #more { max-width: 64; }
+    #more-actions, #cache DataTable { height: 1fr; }
+    #more-actions Button { width: 100%; content-align: left middle; text-align: left; }
+    #cache > Static { height: auto; }
     #status { height: 1; overflow: hidden; color: $ink-muted; }
     #keybar { height: 2; background: $surface; padding: 0 1; border-top: solid $line; }
     ModalScreen { align: center middle; background: $canvas 85%; }
@@ -2871,6 +2966,7 @@ class WorkbenchApp(App[None]):
         Binding("]", "next_artifact", t("Next artifact", "下一张产物")),
         Binding("r", "refresh", t("Refresh", "刷新")),
         Binding("colon", "commands", t("All commands", "全部命令")),
+        Binding("f10", "more", t("More actions", "更多操作")),
         Binding("?", "help", t("Help", "帮助")),
         Binding("l", "toggle_language", t("Switch language", "切换语言")),
     ]
@@ -2930,6 +3026,9 @@ class WorkbenchApp(App[None]):
                     Button(t("Models", "模型"), id="action-model-process"),
                     Button(t("Transform", "变换"), id="action-transform"),
                     Button(t("Open", "打开"), id="action-open"),
+                    Button(t("Import", "导入"), id="action-import"),
+                    Button(t("Save as", "另存"), id="action-save"),
+                    Button(t("More", "更多"), id="action-more"),
                     Static(id="action-gap"),
                     Button(t("‹", "‹"), id="action-prev", tooltip=t("Previous image", "上一张")),
                     Button(t("›", "›"), id="action-next", tooltip=t("Next image", "下一张")),
@@ -2950,6 +3049,9 @@ class WorkbenchApp(App[None]):
             "action-model-process": self.action_model_process,
             "action-transform": self.action_transform,
             "action-open": self.action_open_image,
+            "action-import": self.action_import_image,
+            "action-save": self.action_save_artifact,
+            "action-more": self.action_more,
             "action-prev": self.action_previous_artifact,
             "action-next": self.action_next_artifact,
         }
@@ -2986,6 +3088,8 @@ class WorkbenchApp(App[None]):
             "generate": t("Generate", "生成"), "edit": t("Edit", "编辑"),
             "model-process": t("Models", "模型"),
             "transform": t("Transform", "变换"), "open": t("Open", "打开"),
+            "import": t("Import", "导入"), "save": t("Save as", "另存"),
+            "more": t("More", "更多"),
         }
         for identity, label in labels.items():
             self.query_one(f"#action-{identity}", Button).label = label
@@ -3117,6 +3221,7 @@ class WorkbenchApp(App[None]):
         self.show_detail()
 
     def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 140, "narrow-actions")
         compact = event.size.width < 110
         if compact != self.has_class("compact"):
             # The column set changes with the sidebar width, so the rows are rebuilt too.
@@ -3129,8 +3234,9 @@ class WorkbenchApp(App[None]):
         self.show_detail()
 
     def _sync_actions(self) -> None:
-        for identity in ("edit", "transform", "model-process", "open"):
+        for identity in ("edit", "transform", "model-process", "open", "save"):
             self.query_one(f"#action-{identity}", Button).disabled = not self.film_items
+        self.query_one("#action-import", Button).disabled = self.current is None
         self.query_one("#action-prev", Button).disabled = self.film_index <= 0
         self.query_one("#action-next", Button).disabled = (
             self.film_index < 0 or self.film_index >= len(self.film_items) - 1
@@ -3363,6 +3469,36 @@ class WorkbenchApp(App[None]):
                 )
 
         self.push_screen(PlanScreen(self.deps, plan), finished)
+
+    def action_more(self) -> None:
+        no_image = self._current_artifact() is None
+        no_session = self.current is None
+        rows = [
+            ("edit", t("Edit image", "编辑图片"), "m", no_image),
+            ("model_process", t("Model processing", "模型处理"), "u", no_image),
+            ("transform", t("Transform", "变换"), "t", no_image),
+            ("open_image", t("Open image", "打开图片"), "o", no_image),
+            ("open_folder", t("Open folder", "打开目录"), "O", no_image),
+            ("delete_artifact", t("Delete image", "删除图片"), "d", no_image),
+            ("fork", t("Fork session", "分支会话"), "f", no_image),
+            ("export", t("Export session", "导出会话"), "e", no_session),
+            ("cache", t("Reclaim space", "清理缓存"), "c", False),
+            ("providers", t("Providers", "端点"), "v", False),
+            ("superres", t("Local models", "本地模型"), "s", False),
+            ("commands", t("All commands", "全部命令"), ":", False),
+            ("help", t("Keyboard shortcuts", "快捷键"), "?", False),
+            ("toggle_language", t("Switch language", "切换语言"), "l", False),
+            ("refresh", t("Refresh", "刷新"), "r", False),
+            ("quit", t("Quit", "退出"), "q", False),
+        ]
+        choices = [(action, f"{label}  ·  {key}", disabled)
+                   for action, label, key, disabled in rows]
+
+        def selected(action: str | None) -> None:
+            if action is not None and any(row[0] == action and not row[2] for row in choices):
+                getattr(self, f"action_{action}")()
+
+        self.push_screen(ActionsScreen(choices), selected)
 
     def action_commands(self) -> None:
         def chosen(command: str | None) -> None:
@@ -3863,12 +3999,16 @@ class WorkbenchApp(App[None]):
         if self.current is None or self.deps.import_image is None:
             self._say(t("No session to import into", "没有可导入的会话"), "info")
             return
-        self.push_screen(FilePickerScreen(start=Path.home(), mode="open"), self._import_chosen)
-
-    def _import_chosen(self, chosen: Path | None) -> None:
-        if chosen is None or self.current is None or self.deps.import_image is None:
-            return
         session = self.current
+        self.push_screen(
+            FilePickerScreen(start=Path.home(), mode="open"),
+            lambda chosen: self._import_chosen(chosen, session),
+        )
+
+    def _import_chosen(self, chosen: Path | None, session: str | None = None) -> None:
+        session = session or self.current
+        if chosen is None or session is None or self.deps.import_image is None:
+            return
         try:
             status, data = self.deps.import_image(session, str(chosen))
         except (OSError, ValueError) as error:
@@ -3903,15 +4043,17 @@ class WorkbenchApp(App[None]):
             FilePickerScreen(
                 start=directory, mode="save", filename=f"{identity}{extension}",
             ),
-            self._save_chosen,
+            lambda destination: self._save_chosen(destination, identity),
         )
 
-    def _save_chosen(self, destination: Path | None) -> None:
-        found = self._current_artifact()
-        if destination is None or found is None or self.deps.save_artifact is None:
+    def _save_chosen(self, destination: Path | None, identity: str | None = None) -> None:
+        if identity is None:
+            found = self._current_artifact()
+            identity = found[0] if found else None
+        if destination is None or identity is None or self.deps.save_artifact is None:
             return
         try:
-            status, data = self.deps.save_artifact(found[0], str(destination))
+            status, data = self.deps.save_artifact(identity, str(destination))
         except (OSError, ValueError) as error:
             self._say(t("Save failed: ", "另存失败：") + _sanitize(error), "error")
             return
@@ -3953,13 +4095,14 @@ class WorkbenchApp(App[None]):
         if row is None:
             self._say(t("Session does not exist", "会话不存在"), "error")
             return
+        session = self.current
         name = _sanitize(row["name"])
 
         def finished(confirmed: bool | None) -> None:
-            if not confirmed or self.current is None or self.deps.delete_session is None:
+            if not confirmed or self.deps.delete_session is None:
                 return
             try:
-                self.deps.delete_session(self.deps.repositories, self.current)
+                self.deps.delete_session(self.deps.repositories, session)
             except Exception as error:
                 self._say(t("Delete failed: ", "删除失败：") + _sanitize(error), "error")
                 return
@@ -3979,17 +4122,18 @@ class WorkbenchApp(App[None]):
             )
             return
         art_id, _ = target
+        session = self.current
         num = self.film_index + 1
         total = len(self.film_items)
 
         def finished(confirmed: bool | None) -> None:
-            if not confirmed or self.current is None:
+            if not confirmed:
                 return
             try:
                 from imagen_cli.application.cleanup_service import remove_session_artifact
 
                 remove_session_artifact(
-                    self.deps.repositories, self.deps.store, self.current, art_id, purge=True
+                    self.deps.repositories, self.deps.store, session, art_id, purge=True
                 )
             except Exception as error:
                 self._say(
@@ -4064,7 +4208,7 @@ class WorkbenchApp(App[None]):
                 return
             destination = Path(values["destination"]).expanduser()
             destination.parent.mkdir(parents=True, exist_ok=True)
-            status, data = self.deps.export(self.current or "", str(destination))
+            status, data = self.deps.export(session["id"], str(destination))
             self._say(
                 t(
                     f"Export {status}: {_sanitize(data.get('artifacts', 0))} artifacts",

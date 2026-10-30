@@ -230,6 +230,10 @@ class ModelProcessScreen(Modal[bool]):
         elif event.button.id == "model-close":
             self.action_cancel()
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.focus_next()
+
     def _arguments(self) -> dict[str, Any]:
         row = self._selected()
         if row is None:

@@ -702,6 +702,17 @@ def orient(image: Image.Image, **_: Any) -> Image.Image:
     return ImageOps.exif_transpose(image)
 
 
+def strip_metadata(image: Image.Image, **_: Any) -> Image.Image:
+    """Apply EXIF orientation and drop EXIF/XMP/text metadata on the next encode."""
+    cleaned = ImageOps.exif_transpose(image)
+    profile = cleaned.info.get("icc_profile")
+    cleaned.info.clear()
+    cleaned.getexif().clear()
+    if profile:
+        cleaned.info["icc_profile"] = profile
+    return cleaned
+
+
 def perspective(
     image: Image.Image, *, quad: str, width: int | None = None, height: int | None = None
 ) -> Image.Image:
@@ -2088,6 +2099,7 @@ OPS: dict[str, Callable[..., Image.Image]] = {
     "pad": pad,
     "seamless": seamless,
     "orient": orient,
+    "strip_metadata": strip_metadata,
     "perspective": perspective,
     "chroma_key": chroma_key,
     "background_blur": background_blur,
