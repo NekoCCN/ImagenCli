@@ -2249,7 +2249,8 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
             assert commands == [] and runs == []
-            app.screen.dismiss(True)
+            await app.screen.dismiss(True)
+            await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert commands == [("superres fetch", {"model": model, "accept": True})]
@@ -2260,7 +2261,7 @@ def test_local_model_chooser_offers_to_download_a_missing_model(deps, monkeypatc
             chooser.action_apply()
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            app.screen.dismiss(True)
+            await app.screen.dismiss(True)
             await pilot.pause()
             assert runs == [[{"op": "superres", "params": {
                 "model": model, "accept": True, "tile": 256, "overlap": 16,
