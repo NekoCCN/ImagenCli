@@ -80,7 +80,7 @@ def test_more_menu_provides_mouse_cache_and_returns_to_trigger(workspace):
             await pilot.click("#action-more")
             await pilot.pause()
             cache = app.screen.query_one("#more-cache", Button)
-            cache.scroll_visible(animate=False)
+            cache.scroll_visible(animate=False, top=True, immediate=True)
             await pilot.pause()
             assert await pilot.click("#more-cache")
             await pilot.pause()
