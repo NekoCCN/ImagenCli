@@ -1,6 +1,6 @@
 ---
 name: imagen
-version: 1.3.0
+version: 1.3.1
 description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 
@@ -61,4 +61,4 @@ For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and in
 
 ## Related tasks
 
-Use `imagen-assets` for sessions, artifacts, transforms, exports, and upscaling; use `imagen-batch` for batches. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval. Local processing deadlines and memory caps are user settings (`IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`); do not raise them to make a run pass.
+Use `imagen-assets` for sessions, artifacts, transforms, exports, and upscaling; use `imagen-batch` for batches. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval. Local processing exposes the same controls to agents and users (`--timeout`, `IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`); use them when a run needs more time or memory.

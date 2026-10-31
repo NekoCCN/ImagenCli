@@ -1,6 +1,6 @@
 ---
 name: imagen-assets
-version: 1.4.0
+version: 1.4.1
 description: Use when browsing or resuming Imagen sessions, importing or saving artifacts, applying local transforms, comparing images, upscaling, or reclaiming workspace disk space.
 ---
 
@@ -39,7 +39,7 @@ imagen compare --first art_a --second art_b --agent
 imagen sheet --artifacts art_a,art_b,art_c --columns 3 --agent
 ```
 
-`transform` requires `--op`, `--pipeline`, or `--preset`. `compare` reports PSNR/SSIM without creating an artifact. A contact sheet infers a common source session; use `--session` for inputs from different sessions. Postprocessing is experimental: metric changes do not establish better perceptual quality.
+`transform` requires `--op`, `--pipeline`, or `--preset`. `--op` names one operator with inline parameters (`pixelate:scale=4`); `--preset` names a catalog recipe. Confirm the exact name and its parameters with `imagen ops --agent` and `imagen ops --op NAME --agent` instead of guessing. `compare` reports PSNR/SSIM without creating an artifact. A contact sheet infers a common source session; use `--session` for inputs from different sessions. Postprocessing is experimental: metric changes do not establish better perceptual quality.
 
 ## Model restoration and runtime installation
 
@@ -59,7 +59,7 @@ Do not download weights or install inference dependencies automatically. `superr
 
 ## Local jobs, progress, and cancellation
 
-`transform` and `superres run` block by default; `--wait` makes that choice explicit. The processing deadline scales with image size and the selected operators, and model pipelines get a longer one; `--timeout` fixes it for that run and `--timeout 0` disables it. The deadline and the working-memory cap are user settings (`IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`, or the keys `postprocess_timeout_seconds` and `postprocess_memory_mb` in `config.json`); raise them only when the user asks. A run estimated above the memory cap asks for confirmation and carries a `budget_approval` digest. Choose the user's model and artifact before using the command below.
+`transform` and `superres run` block by default; `--wait` makes that choice explicit. The processing deadline scales with image size and the selected operators, and model pipelines get a longer one; `--timeout` fixes it for that run and `--timeout 0` disables it. Agents have the same controls as users: `--timeout`, `--budget-approval DIGEST`, `IMAGEN_POSTPROCESS_TIMEOUT`, and `IMAGEN_POSTPROCESS_MEMORY_MB` (MiB, `0` removes the cap), with the same values storable in `config.json` as `postprocess_timeout_seconds` and `postprocess_memory_mb`. A run estimated above the memory cap returns `approval_required` with `data.budget.digest`; rerun the same command with `--budget-approval DIGEST`, or answer `y` to the interactive prompt. Choose the user's model and artifact before using the command below.
 
 ```bash
 imagen superres run ARTIFACT_ID --model USER_SELECTED_MODEL --async --agent
