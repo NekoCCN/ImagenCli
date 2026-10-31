@@ -120,6 +120,8 @@ class ModelProcessScreen(Modal[bool]):
                                  Static(t("Overlap", "重叠")), self.overlap,
                                  Static(t("Timeout", "超时")), self.timeout,
                                  classes="model-setting-row")
+                yield Static(t("Timeout 0 runs without a deadline",
+                               "超时 0 表示不设截止"), classes="panel-hint")
             yield ProgressBar(total=None, show_eta=False, id="processing-progress")
             yield self.status
             yield Horizontal(

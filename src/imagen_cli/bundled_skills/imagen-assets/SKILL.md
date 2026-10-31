@@ -59,7 +59,7 @@ Do not download weights or install inference dependencies automatically. `superr
 
 ## Local jobs, progress, and cancellation
 
-`transform` and `superres run` block by default; `--wait` makes that choice explicit. Processing timeouts default to 120 seconds for ordinary transforms and 900 seconds for model pipelines. `--timeout` stops that computation. Choose the user's model and artifact before using the command below.
+`transform` and `superres run` block by default; `--wait` makes that choice explicit. The processing deadline scales with image size and the selected operators, and model pipelines get a longer one; `--timeout` fixes it for that run and `--timeout 0` disables it. The deadline and the working-memory cap are user settings (`IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`, or the keys `postprocess_timeout_seconds` and `postprocess_memory_mb` in `config.json`); raise them only when the user asks. A run estimated above the memory cap asks for confirmation and carries a `budget_approval` digest. Choose the user's model and artifact before using the command below.
 
 ```bash
 imagen superres run ARTIFACT_ID --model USER_SELECTED_MODEL --async --agent
@@ -75,7 +75,7 @@ Human terminal output shows a progress bar on stderr. `--output json` returns on
 
 After a disk-publication failure or a crashed executor, inspect `job get`, then use `job reconcile JOB_ID --agent` to recover existing staging bytes. It does not recompute or retry inference. Canceled tasks remain canceled. A live executor must finish or stop before reconciliation; a crash before any result was staged has no recoverable output.
 
-The human TUI uses `u` for the model workbench and `s` for runtime/weight management. The model workbench lists real catalog entries, previews only the original, and provides backend, tile, overlap, timeout, and foreground/background controls. Downloads and per-run license confirmation are separate user actions. Closing the model page during a download does not cancel it; local processing has its own cancellation action. Agents use the CLI, not simulated TUI keys.
+The human TUI uses `u` for the model workbench and `s` for runtime/weight management. The model workbench lists real catalog entries, previews only the original, and provides backend, tile, overlap, timeout (0 disables the deadline), and foreground/background controls. Downloads and per-run license confirmation are separate user actions. Closing the model page during a download does not cancel it; local processing has its own cancellation action. Agents use the CLI, not simulated TUI keys.
 
 ## Reclaim disk space
 

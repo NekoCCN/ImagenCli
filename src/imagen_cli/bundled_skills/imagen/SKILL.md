@@ -61,4 +61,4 @@ For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and in
 
 ## Related tasks
 
-Use `imagen-assets` for sessions, artifacts, transforms, exports, and upscaling; use `imagen-batch` for batches. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval.
+Use `imagen-assets` for sessions, artifacts, transforms, exports, and upscaling; use `imagen-batch` for batches. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval. Local processing deadlines and memory caps are user settings (`IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`); do not raise them to make a run pass.
