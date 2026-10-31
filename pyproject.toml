@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "imagen-cli"
-version = "0.1.14"
+version = "0.1.15"
 description = "Terminal image workbench for people and coding agents: shared CLI/TUI sessions, reviewable generation plans, local post-processing. Multi-provider, such as OpenAI-compatible Images."
 requires-python = ">=3.12"
 license = "MIT"
