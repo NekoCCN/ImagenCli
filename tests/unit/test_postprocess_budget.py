@@ -80,6 +80,16 @@ def test_global_fft_working_buffers_are_not_just_input_bytes():
         postprocess_service.check_budget((5000, 5000), [{"op": "l0_smooth"}])
 
 
+def test_l0_smoothing_fits_the_default_budget_up_to_sixteen_megapixels():
+    postprocess_service.check_budget((4000, 4000), [{"op": "l0_smooth", "params": {}}])
+
+
+@pytest.mark.parametrize("operation", ["kuwahara", "guided", "bilateral", "nl_means", "dehaze"])
+def test_numpy_filters_carry_a_working_memory_estimate(operation):
+    with pytest.raises(ValueError, match="working memory budget"):
+        postprocess_service.check_budget((4000, 4000), [{"op": operation, "params": {}}])
+
+
 def test_linear_resize_output_buffers_are_included():
     with pytest.raises(ValueError, match="working memory budget"):
         postprocess_service.check_budget((10, 10), [

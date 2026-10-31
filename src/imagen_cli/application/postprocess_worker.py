@@ -25,6 +25,15 @@ MODEL_RUNTIME_BYTES = 6 * 1024**3
 TRANSFORM_TIMEOUT = 120.0
 # A 4x model needs minutes on CPU well before images reach the pixel budget.
 MODEL_TIMEOUT = 900.0
+# Seconds per megapixel measured with the shipped CPU solvers. The fixed 120 s
+# deadline killed 4K jobs that were still making progress.
+SECONDS_PER_MEGAPIXEL = {
+    "rtv_smooth": 40.0, "nl_means": 35.0, "wls_smooth": 25.0,
+    "weighted_median": 5.0, "l0_smooth": 4.0,
+    "bilateral": 3.0, "guided": 3.0, "kuwahara": 2.0,
+    "domain_transform": 1.0,
+}
+DEFAULT_SECONDS_PER_MEGAPIXEL = 4.0
 
 
 def _has_model_steps(pipeline: Any) -> bool:
@@ -32,8 +41,25 @@ def _has_model_steps(pipeline: Any) -> bool:
     return any(isinstance(step, dict) and step.get("op") == "superres" for step in steps)
 
 
-def default_timeout(pipeline: Any) -> float:
-    return MODEL_TIMEOUT if _has_model_steps(pipeline) else TRANSFORM_TIMEOUT
+def default_timeout(pipeline: Any, pixels: int = 0) -> float:
+    if _has_model_steps(pipeline):
+        return MODEL_TIMEOUT
+    steps = pipeline if isinstance(pipeline, list) else []
+    cost = sum(
+        SECONDS_PER_MEGAPIXEL.get(step.get("op", ""), DEFAULT_SECONDS_PER_MEGAPIXEL)
+        for step in steps if isinstance(step, dict)
+    )
+    return TRANSFORM_TIMEOUT + cost * max(0, pixels) / 1_000_000
+
+
+def source_pixels(source: Path) -> int:
+    """Header-only pixel count, used to size the deadline."""
+    from PIL import Image
+
+    from imagen_cli.storage.artifacts import image_limits
+
+    with image_limits(True), Image.open(source) as opened:
+        return opened.width * opened.height
 
 
 def _allocation_failure(error: BaseException) -> bool:
@@ -57,8 +83,12 @@ def _error_message(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def _address_space_extra(pipeline: Any) -> int:
-    return MODEL_RUNTIME_BYTES if _has_model_steps(pipeline) else MAX_WORKING_BYTES
+def _address_space_extra(pipeline: Any, consent: dict[str, Any] | None = None) -> int:
+    if _has_model_steps(pipeline):
+        return MODEL_RUNTIME_BYTES
+    # Consent must buy the run: the fixed ceiling would kill an approved job.
+    estimated = int((consent or {}).get("budget", {}).get("estimated_working_bytes", 0))
+    return max(MAX_WORKING_BYTES, int(estimated * 1.5))
 
 
 def _run(source: str, pipeline_path: str, output: str, response: str,
@@ -70,6 +100,9 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
 
     try:
         pipeline = json.loads(Path(pipeline_path).read_text(encoding="utf-8"))
+        from imagen_cli.application.postprocess_service import budget_preflight, render
+
+        consent = budget_preflight(Path(source), pipeline, approval or None)
         limits = "unavailable"
         if sys.platform == "linux":
             import os
@@ -77,13 +110,10 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
 
             # Bound additional virtual allocation, not already mapped shared libraries.
             pages = int(Path("/proc/self/statm").read_text().split()[0])
-            extra = _address_space_extra(pipeline)
+            extra = _address_space_extra(pipeline, consent)
             ceiling = pages * os.sysconf("SC_PAGE_SIZE") + extra
             resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
             limits = f"linux_address_space_plus_{extra // 1024**2}mib"
-        from imagen_cli.application.postprocess_service import budget_preflight, render
-
-        consent = budget_preflight(Path(source), pipeline, approval or None)
         data, metadata = render(source, pipeline, allow_large=bool(consent), progress=update)
         metadata.update(consent)
         Path(output).write_bytes(data)
@@ -99,9 +129,7 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
             budget_approval: str | None = None,
             progress: ProgressCallback | None = None,
             source_sha256: str | None = None) -> tuple[bytes, dict[str, Any]]:
-    if timeout is None:
-        timeout = default_timeout(pipeline)
-    if not math.isfinite(timeout) or timeout <= 0:
+    if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
         raise ValueError("timeout must be finite and positive")
     if cancelled is not None and cancelled.is_set():
         raise ValueError("postprocess cancelled")
@@ -115,6 +143,8 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
         root = Path(directory)
         snapshot = root / "source.image"
         snapshot.write_bytes(source_bytes)
+        if timeout is None:
+            timeout = default_timeout(pipeline, source_pixels(snapshot))
         consent = budget_preflight(snapshot, pipeline, budget_approval)
         output, response, specification = (
             root / "result.image", root / "response.json", root / "input.json",

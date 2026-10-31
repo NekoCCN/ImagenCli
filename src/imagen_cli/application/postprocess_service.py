@@ -258,13 +258,15 @@ def check_budget(
             "local_laplacian_sampled": 512, "weighted_guided_smooth": 512,
             "fast_guided_smooth": 512,
             "guided_smooth": 512, "rolling_guidance": 512, "flow_line": 512,
-            "l0_smooth": 512, "domain_transform": 256,
+            "l0_smooth": 128, "domain_transform": 256,
             "wls_detail": 512,
             "wls_smooth": 512, "rtv_smooth": 512,
             "bounded_sharpen": 256, "multiscale_detail": 384,
             "periodic_notch_auto": 512,
             "periodic_notch": 384, "chroma_transfer": 384,
             "illumination_correct": 256, "linear_resize": 128,
+            "kuwahara": 512, "guided": 448, "bilateral": 192, "nl_means": 192,
+            "total_variation": 160, "clahe": 128, "dehaze": 160,
         }.get(name, 0)
         if name == "weighted_median":
             radius = params.get("radius", 2)

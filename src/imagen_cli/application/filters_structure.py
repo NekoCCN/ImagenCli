@@ -10,15 +10,19 @@ import numpy as np
 from PIL import Image
 
 
-def _input(image: Image.Image, strength: float) -> np.ndarray[Any, Any]:
+def _input(
+    image: Image.Image, strength: float, dtype: Any = np.float64,
+) -> np.ndarray[Any, Any]:
     if not math.isfinite(strength) or not 0 <= strength <= 1:
         raise ValueError("strength must be finite and between 0 and 1")
-    rgb = np.asarray(image.convert("RGB"), dtype=np.float64) / 255
+    rgb: np.ndarray[Any, Any] = np.asarray(
+        image.convert("RGB"), dtype=dtype
+    ) / dtype(255)
     if "A" in image.getbands():
-        coverage = np.asarray(image.getchannel("A"), dtype=np.float64) / 255
+        coverage = np.asarray(image.getchannel("A"), dtype=dtype) / dtype(255)
         # Global solvers fill zero-coverage pixels with the visible weighted mean,
         # not hidden RGB; this is an extension policy, not a masked-domain solve.
-        mean = np.sum(rgb * coverage[..., None], axis=(0, 1)) / max(coverage.sum(), 1e-12)
+        mean = np.sum(rgb * coverage[..., None], axis=(0, 1)) / max(float(coverage.sum()), 1e-12)
         rgb[coverage == 0] = mean
     return rgb
 
@@ -41,8 +45,13 @@ def l0_smooth(
     image: Image.Image, *, smoothing: float = 0.02, beta_growth: float = 2,
     strength: float = 1,
 ) -> Image.Image:
-    """Half-quadratic L0 gradient minimization with explicitly periodic boundaries."""
-    original = _input(image, strength)
+    """Half-quadratic L0 gradient minimization with explicitly periodic boundaries.
+
+    float32 planes and one channel per transform keep the working set near 100
+    bytes per pixel; the half-quadratic threshold is joint across channels, as
+    in the paper and OpenCV's l0Smooth.
+    """
+    original = _input(image, strength, np.float32)
     if not math.isfinite(smoothing) or not 0 < smoothing <= 1:
         raise ValueError("smoothing must be between 0 and 1")
     if not math.isfinite(beta_growth) or not 1.1 <= beta_growth <= 4:
@@ -51,21 +60,40 @@ def l0_smooth(
         return image.copy()
     height, width = original.shape[:2]
     frequencies = (4 * np.sin(np.pi * np.fft.fftfreq(height))[:, None] ** 2
-                   + 4 * np.sin(np.pi * np.fft.fftfreq(width))[None, :] ** 2)
-    numerator = np.fft.fft2(original, axes=(0, 1))
+                   + 4 * np.sin(np.pi * np.fft.rfftfreq(width))[None, :] ** 2
+                   ).astype(np.float32)
+    numerator = [np.fft.rfft2(original[..., channel]) for channel in range(3)]
     result = original.copy()
+    dx = np.empty_like(result)
+    dy = np.empty_like(result)
+    divergence = np.empty_like(result)
+    denominator = np.empty(frequencies.shape, dtype=np.float32)
     beta = 2 * smoothing
     while beta < 1e5:
-        dx = np.roll(result, -1, axis=1) - result
-        dy = np.roll(result, -1, axis=0) - result
-        small = np.sum(dx * dx + dy * dy, axis=2) < smoothing / beta
-        dx[small] = 0
-        dy[small] = 0
-        divergence = np.roll(dx, 1, axis=1) - dx + np.roll(dy, 1, axis=0) - dy
-        result = np.fft.ifft2(
-            (numerator + beta * np.fft.fft2(divergence, axes=(0, 1)))
-            / (1 + beta * frequencies[..., None]), axes=(0, 1)
-        ).real
+        # Forward differences with periodic wrap, written straight into buffers.
+        np.subtract(result[:, 1:], result[:, :-1], out=dx[:, :-1])
+        np.subtract(result[:, 0], result[:, -1], out=dx[:, -1])
+        np.subtract(result[1:], result[:-1], out=dy[:-1])
+        np.subtract(result[0], result[-1], out=dy[-1])
+        keep = (np.einsum("hwc,hwc->hw", dx, dx)
+                + np.einsum("hwc,hwc->hw", dy, dy)) > smoothing / beta
+        np.multiply(dx, keep[..., None], out=dx)
+        np.multiply(dy, keep[..., None], out=dy)
+        # Backward differences of the thresholded gradients.
+        np.subtract(dx[:, :-1], dx[:, 1:], out=divergence[:, 1:])
+        np.subtract(dx[:, -1], dx[:, 0], out=divergence[:, 0])
+        divergence[1:] += dy[:-1]
+        divergence[1:] -= dy[1:]
+        divergence[0] += dy[-1]
+        divergence[0] -= dy[0]
+        np.multiply(frequencies, beta, out=denominator)
+        denominator += 1
+        for channel in range(3):
+            spectrum = np.fft.rfft2(divergence[..., channel])
+            spectrum *= beta
+            spectrum += numerator[channel]
+            spectrum /= denominator
+            result[..., channel] = np.fft.irfft2(spectrum, s=(height, width))
         beta *= beta_growth
     return _output(result, original, image, strength)
 

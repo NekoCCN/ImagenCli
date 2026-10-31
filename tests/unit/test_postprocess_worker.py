@@ -17,7 +17,7 @@ def test_worker_executes_real_pipeline(tmp_path):
     with Image.open(io.BytesIO(data)) as result:
         assert result.getpixel((0, 0)) == (155, 135, 115)
     assert metadata["execution"]["isolation"] == "spawn_process"
-    assert metadata["execution"]["timeout_seconds"] == 120
+    assert metadata["execution"]["timeout_seconds"] >= 120
 
 
 def test_expired_deadline_terminates_worker(tmp_path):
@@ -76,6 +76,13 @@ def test_model_pipelines_get_room_for_the_runtime(pipeline, expected):
     assert postprocess_worker._address_space_extra(pipeline) == expected
 
 
+def test_approved_working_set_raises_the_address_space_allowance():
+    consent = {"budget": {"estimated_working_bytes": 4 * 1024**3}}
+    assert postprocess_worker._address_space_extra(
+        [{"op": "l0_smooth", "params": {}}], consent
+    ) == 6 * 1024**3
+
+
 def test_allocation_failure_is_reported_in_plain_words():
     error = RuntimeError(
         "Fail: : 1 : FAIL : Non-zero status code returned while running Upsample node. "
@@ -96,3 +103,18 @@ def test_model_runs_get_a_longer_default_timeout():
     model = [{"op": "superres", "params": {"model": "realesrgan-x4plus"}}]
     assert postprocess_worker.default_timeout(plain) == postprocess_worker.TRANSFORM_TIMEOUT
     assert postprocess_worker.default_timeout(model) == postprocess_worker.MODEL_TIMEOUT
+
+
+def test_default_timeout_scales_with_pixels_and_solver_cost():
+    four_k = 3840 * 2160
+    rtv = postprocess_worker.default_timeout([{"op": "rtv_smooth", "params": {}}], four_k)
+    cheap = postprocess_worker.default_timeout([{"op": "invert", "params": {}}], four_k)
+    assert rtv >= 400, "a 4K iterative solver needs a deadline that fits its CPU cost"
+    assert cheap < rtv / 2
+
+
+def test_worker_sizes_the_default_deadline_from_the_image(tmp_path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (2000, 2000)).save(source)
+    _, metadata = postprocess_worker.execute(source, [{"op": "invert", "params": {}}])
+    assert metadata["execution"]["timeout_seconds"] > postprocess_worker.TRANSFORM_TIMEOUT

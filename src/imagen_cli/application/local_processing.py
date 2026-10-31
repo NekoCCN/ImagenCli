@@ -31,7 +31,9 @@ def submit(repositories: Repositories, store: ArtifactStore, source: str, pipeli
         session = matches[0] if len(matches) == 1 else None
     if session is None or session.get("deleted_at"):
         raise ValueError("destination session is unavailable")
-    timeout = postprocess_worker.default_timeout(steps) if timeout is None else timeout
+    timeout = (postprocess_worker.default_timeout(
+        steps, postprocess_worker.source_pixels(path)
+    ) if timeout is None else timeout)
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be finite and positive")
     postprocess_service.budget_preflight(path, steps, budget_approval)
