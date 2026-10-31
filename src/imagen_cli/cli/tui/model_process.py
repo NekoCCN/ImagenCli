@@ -242,8 +242,8 @@ class ModelProcessScreen(Modal[bool]):
         timeout = float(self.timeout.value)
         if tile < 4 or not 0 <= overlap < tile:
             raise ValueError(t("Overlap must be smaller than tile size", "重叠必须小于分块尺寸"))
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError(t("Timeout must be positive", "超时必须为正数"))
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError(t("Timeout must be zero or positive", "超时必须为零或正数"))
         args: dict[str, Any] = {"artifact": self.artifact, "session": self.session,
                                 "model": row["model"], "tile": tile, "overlap": overlap,
                                 "timeout": timeout}

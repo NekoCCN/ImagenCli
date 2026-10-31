@@ -42,4 +42,4 @@ def test_control_options_are_validated_like_the_cli():
     with pytest.raises(ValueError):
         _control_options(None, {"wait": True, "async_": True})
     with pytest.raises(ValueError):
-        _control_options(None, {"timeout": 0})
+        _control_options(None, {"timeout": -1})

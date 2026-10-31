@@ -11,7 +11,7 @@ class SharedOptions(BaseModel):
     output: Literal["human", "json", "jsonl"] | None = None
     no_interactive: bool = False
     dry_run: bool = False
-    timeout: int = Field(default=300, ge=1, le=86400)
+    timeout: int = Field(default=300, ge=0, le=86400)
     wait: bool = False
     async_: bool = False
     yes: bool = False
@@ -35,7 +35,7 @@ OPTION_METADATA: dict[str, dict[str, Any]] = {
     "en": {"type": "boolean", "default": False},
     "no-interactive": {"type": "boolean", "default": False},
     "dry-run": {"type": "boolean", "default": False},
-    "timeout": {"type": "integer", "default": 300, "minimum": 1, "maximum": 86400},
+    "timeout": {"type": "integer", "default": 300, "minimum": 0, "maximum": 86400},
     "wait": {"type": "boolean", "default": False},
     "async": {"type": "boolean", "default": False},
     "yes": {"type": "boolean", "default": False},

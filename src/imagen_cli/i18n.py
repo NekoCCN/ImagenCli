@@ -61,10 +61,18 @@ def save_language(value: str) -> str:
         raise ValueError("unsupported language")
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    payload: dict[str, Any] = {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            payload = loaded
+    except (OSError, ValueError):
+        pass
+    payload["language"] = normalized
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump({"language": normalized}, stream)
+            json.dump(payload, stream)
             stream.write("\n")
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)

@@ -36,7 +36,7 @@ def test_experimental_operations_work_through_offline_cli(tmp_path, png_bytes, a
         assert container.artifact_store.get(output["id"]).is_file()
 
 
-def test_cli_deadline_rejects_without_publishing(tmp_path, png_bytes):
+def test_cli_deadline_zero_disables_the_limit(tmp_path, png_bytes):
     workspace = tmp_path / "work"
     with Container(workspace=str(workspace)) as container:
         service = SessionService(container.repositories, container.artifact_store)
@@ -46,9 +46,9 @@ def test_cli_deadline_rejects_without_publishing(tmp_path, png_bytes):
         source = service.save_artifact(turn.id, png_bytes)
     code, result = invoke(workspace, "transform", source.id, "--op", "invert",
                           "--timeout", "0")
-    assert code != 0
+    assert code == 0
     with Container(workspace=str(workspace)) as container:
-        assert len(container.repositories.list("artifacts")) == 1
+        assert len(container.repositories.list("artifacts")) == 2
 
 
 def test_cli_replays_resolved_manifest_against_explicit_source(tmp_path, png_bytes):

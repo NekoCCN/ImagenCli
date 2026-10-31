@@ -34,8 +34,8 @@ def submit(repositories: Repositories, store: ArtifactStore, source: str, pipeli
     timeout = (postprocess_worker.default_timeout(
         steps, postprocess_worker.source_pixels(path)
     ) if timeout is None else timeout)
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("timeout must be finite and positive")
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("timeout must be a non-negative number of seconds")
     postprocess_service.budget_preflight(path, steps, budget_approval)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if digest != row["sha256"]:

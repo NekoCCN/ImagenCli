@@ -457,6 +457,8 @@ imagen job cancel JOB_ID --scope local
 
 CLI 在交互终端的 stderr 显示进度条。JSON 只返回最终结果，JSONL 包含进度事件。TUI 显示相同处理阶段：普通管线计数已完成步骤，模型推理计数已完成分块，加载、编码和保存显示活动指示。远程生成显示可观察的阶段。后台处理完成后，TUI 自动载入新产物。
 
+本地处理有两个可调上限。处理超时按图片尺寸和所选算子自适应；用 `IMAGEN_POSTPROCESS_TIMEOUT`（秒，`0` 表示不限制）或在 `config.json` 写入 `"postprocess_timeout_seconds"` 覆盖它，单次运行可用 `--timeout 0` 取消防线。工作内存默认 2 GiB；用 `IMAGEN_POSTPROCESS_MEMORY_MB`（MiB，`0` 表示取消上限和确认提示）或在同一文件写入 `"postprocess_memory_mb"` 调整，该文件位于 `imagen-cli` 的平台用户配置目录。超过上限时会先请求确认，而不是静默失败。
+
 处理超时会停止本次计算；`job wait` 超时只停止等待，任务继续运行。本地取消可以停止排队或执行中的处理，不保存半成品图片。
 
 超过默认像素或工作缓冲预算时，Imagen 显示尺寸和内存风险，询问是否继续，默认取消。非交互 CLI 返回 `approval_required`；用户明确接受风险后，用响应中的摘要加 `--budget-approval DIGEST` 重跑同一请求。确认绑定原图内容与处理参数，修改任一项都需要重新确认。内存不足或超时仍会让请求失败。

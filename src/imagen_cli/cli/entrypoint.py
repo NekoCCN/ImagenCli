@@ -401,6 +401,15 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             ),
             f"imagen help {command}",
         )
+    if ("timeout" in controls and options.timeout < 1
+            and command not in {"transform", "superres run"}):
+        raise UsageError(
+            i18n.t(
+                f"{command} needs a positive --timeout; only local processing accepts 0.",
+                f"{command} 的 --timeout 必须是正数；只有本地处理接受 0。",
+            ),
+            f"imagen help {command}",
+        )
     schema = discover(command)["input_schema"]
     if command == "update":
         if words:

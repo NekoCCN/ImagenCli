@@ -17,7 +17,7 @@ from typing import Any
 import PIL
 from PIL import Image
 
-from imagen_cli import i18n
+from imagen_cli import i18n, settings
 from imagen_cli.application import media_ops
 from imagen_cli.application.progress import ProgressCallback, current_progress, report
 from imagen_cli.domain.primitive import new_id
@@ -247,6 +247,9 @@ def check_budget(
     reasons: list[str] = []
     peak_pixels = width * height
     working_bytes = 0
+    configured = settings.memory_limit()
+    limit = MAX_WORKING_BYTES if configured is None else configured
+    budgeted = limit > 0
     if width <= 0 or height <= 0:
         raise ValueError("input dimensions must be positive")
     if width * height > MAX_INPUT_PIXELS:
@@ -274,7 +277,7 @@ def check_budget(
                 raise ValueError("invalid weighted median radius")
             estimate = width * height * 96 + width * (2 * radius + 1)**2 * 128
             working_bytes = max(working_bytes, estimate)
-            if estimate > MAX_WORKING_BYTES:
+            if budgeted and estimate > limit:
                 reasons.append("estimated working memory budget exceeded")
         if name == "kuwahara_anisotropic":
             sectors = params.get("sectors", 8)
@@ -282,7 +285,7 @@ def check_budget(
                 raise ValueError("invalid Kuwahara sectors")
             bytes_per_pixel = 512 + sectors * 56
         working_bytes = max(working_bytes, width * height * bytes_per_pixel)
-        if width * height * bytes_per_pixel > MAX_WORKING_BYTES:
+        if budgeted and width * height * bytes_per_pixel > limit:
             reasons.append("estimated working memory budget exceeded")
         if name in {"resize", "linear_resize", "pad", "perspective"}:
             scale = params.get("scale")
@@ -341,7 +344,7 @@ def check_budget(
             reasons.append("output pixel budget exceeded")
         if name == "linear_resize":
             working_bytes = max(working_bytes, width * height * 128)
-            if width * height * 128 > MAX_WORKING_BYTES:
+            if budgeted and width * height * 128 > limit:
                 reasons.append("estimated working memory budget exceeded")
     if reasons and not allow_large:
         raise BudgetApprovalRequired({

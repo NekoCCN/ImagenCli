@@ -389,7 +389,8 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {field: {"type": "string", "pattern": f"^{prefix}_[0-9a-f]{{32}}$"}}
         required = (field,)
         if name.endswith(" wait") or name == "plan execute":
-            properties["timeout"] = OPTION_METADATA["timeout"]
+            properties["timeout"] = {"type": "integer", "default": 300,
+                                     "minimum": 1, "maximum": 86400}
         if name == "job cancel":
             properties["scope"] = {"enum": ["wait", "local", "remote"]}
             required += ("scope",)
@@ -413,7 +414,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "op": text,
             "preset": text,
             "session": text,
-            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 120},
+            "timeout": {"type": "number", "minimum": 0},
             "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         }
         required = ("artifact",)
@@ -440,7 +441,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "overlap": {"type": "integer", "minimum": 0, "default": 16},
             "accept": {"type": "boolean", "default": False},
             "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 900},
+            "timeout": {"type": "number", "minimum": 0, "default": 900},
         }
         required = ("artifact", "model")
     elif name == "superres models":

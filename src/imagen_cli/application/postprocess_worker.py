@@ -12,13 +12,14 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
+from imagen_cli import settings
 from imagen_cli.application.progress import ProgressCallback, report
 
 
 class Cancellation(Protocol):
     def is_set(self) -> bool: ...
 
-MAX_WORKING_BYTES = 2 * 1024**3
+MAX_WORKING_BYTES = settings.DEFAULT_MEMORY_BYTES
 # ONNX inference reserves address space for weights, arenas and float32 feature maps
 # far beyond the pixel buffers the pixel budget counts.
 MODEL_RUNTIME_BYTES = 6 * 1024**3
@@ -42,6 +43,9 @@ def _has_model_steps(pipeline: Any) -> bool:
 
 
 def default_timeout(pipeline: Any, pixels: int = 0) -> float:
+    configured = settings.timeout_limit()
+    if configured is not None:
+        return configured
     if _has_model_steps(pipeline):
         return MODEL_TIMEOUT
     steps = pipeline if isinstance(pipeline, list) else []
@@ -83,12 +87,17 @@ def _error_message(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def _address_space_extra(pipeline: Any, consent: dict[str, Any] | None = None) -> int:
+def _address_space_extra(pipeline: Any, consent: dict[str, Any] | None = None) -> int | None:
+    """Extra address space the worker may map; None means the cap was disabled."""
+    configured = settings.memory_limit()
+    if configured == 0:
+        return None
+    base = MAX_WORKING_BYTES if configured is None else configured
     if _has_model_steps(pipeline):
-        return MODEL_RUNTIME_BYTES
+        return max(MODEL_RUNTIME_BYTES, base)
     # Consent must buy the run: the fixed ceiling would kill an approved job.
     estimated = int((consent or {}).get("budget", {}).get("estimated_working_bytes", 0))
-    return max(MAX_WORKING_BYTES, int(estimated * 1.5))
+    return max(base, int(estimated * 1.5))
 
 
 def _run(source: str, pipeline_path: str, output: str, response: str,
@@ -111,9 +120,12 @@ def _run(source: str, pipeline_path: str, output: str, response: str,
             # Bound additional virtual allocation, not already mapped shared libraries.
             pages = int(Path("/proc/self/statm").read_text().split()[0])
             extra = _address_space_extra(pipeline, consent)
-            ceiling = pages * os.sysconf("SC_PAGE_SIZE") + extra
-            resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
-            limits = f"linux_address_space_plus_{extra // 1024**2}mib"
+            if extra is None:
+                limits = "unlimited"
+            else:
+                ceiling = pages * os.sysconf("SC_PAGE_SIZE") + extra
+                resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+                limits = f"linux_address_space_plus_{extra // 1024**2}mib"
         data, metadata = render(source, pipeline, allow_large=bool(consent), progress=update)
         metadata.update(consent)
         Path(output).write_bytes(data)
@@ -129,8 +141,8 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
             budget_approval: str | None = None,
             progress: ProgressCallback | None = None,
             source_sha256: str | None = None) -> tuple[bytes, dict[str, Any]]:
-    if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
-        raise ValueError("timeout must be finite and positive")
+    if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
+        raise ValueError("timeout must be a non-negative number of seconds")
     if cancelled is not None and cancelled.is_set():
         raise ValueError("postprocess cancelled")
     from imagen_cli.application.postprocess_service import budget_preflight
@@ -165,7 +177,7 @@ def execute(source: Path, pipeline: Any, *, timeout: float | None = None,
                         progress(json.loads(line))
 
         specification.write_text(json.dumps(pipeline, allow_nan=False), encoding="utf-8")
-        deadline = time.monotonic() + timeout
+        deadline = math.inf if timeout == 0 else time.monotonic() + timeout
         process = subprocess.Popen(
             [sys.executable, "-m", "imagen_cli.application.postprocess_worker",
              str(snapshot), str(specification), str(output), str(response),
