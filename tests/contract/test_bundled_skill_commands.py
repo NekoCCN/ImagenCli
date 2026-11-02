@@ -15,6 +15,7 @@ PLACEHOLDERS = {
     "ARTIFACT_ID": "art_" + "a" * 32,
     "SOURCE_ID": "art_" + "b" * 32,
     "JOB_ID": "job_" + "a" * 32,
+    "REMOTE_JOB_ID": "rmt_" + "a" * 32,
     "SESSION_ID": "ses_" + "a" * 32,
     "BATCH_ID": "bat_" + "a" * 32,
     "PLAN_ID": "pln_" + "a" * 32,
@@ -93,7 +94,7 @@ def _known_flags() -> set[str]:
         known |= set(discover(name)["input_schema"].get("properties", {}))
     for controls in cli_options.COMMAND_CONTROLS.values():
         known |= controls
-    return {"--" + name.replace("_", "-") for name in known}
+    return {"--" + name.replace("_", "-") for name in known} | {"--region"}
 
 
 @pytest.mark.parametrize("path", sorted(BUNDLED.rglob("*.md")), ids=lambda path: path.name)

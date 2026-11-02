@@ -1,0 +1,273 @@
+"""Worker HTTP contract: auth, state modes, one-job bound, volume read protocol."""
+
+import base64
+import hashlib
+import json
+import threading
+import time
+
+import pytest
+
+pytest.importorskip("fastapi")
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated"
+)
+from fastapi.testclient import TestClient  # noqa: E402
+
+from deploy.worker.app import VolumeStore, WorkerConfig, create_app  # noqa: E402
+
+AUTH = {"Authorization": "Bearer secret"}
+DIGEST = "a" * 64
+JOB_ID = "job_0123456789ab4def8abc0123456789ab"
+PNG = b"\x89PNG\r\n\x1a\npayload"
+
+
+def job(**overrides):
+    payload = {
+        "schema_version": 1,
+        "operation": "watermark.visible",
+        "job_digest": DIGEST,
+        "max_seconds": 30,
+        "params": {},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def build(tmp_path, mode="single-replica-sync", execute=None, **overrides):
+    root = tmp_path / "jobs"
+    root.mkdir(parents=True, exist_ok=True)
+    config = WorkerConfig(
+        token="secret", state_mode=mode, jobs_root=root,
+        worker_version="1.2.3", imagen_cli_version="0.1.17",
+        raiw_version="0.53.0", providers=("cuda",), gpu="L4", **overrides,
+    )
+    return TestClient(create_app(config, execute=execute))
+
+
+def post(client, payload=None, data=PNG):
+    return client.post(
+        "/v1/jobs", headers=AUTH,
+        data={"job": json.dumps(payload or job())},
+        files={"input": ("in.png", data, "image/png")},
+    )
+
+
+def cleaned(job_id, payload, source):
+    return {"status": "cleaned", "report": {"marks": []}, "output_bytes": PNG,
+            "engine": {"provider": "cuda"}}
+
+
+def wait_for(client, job_id):
+    """Queue workers finish on a thread; tests must observe the terminal record."""
+    for _ in range(100):
+        record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+        if record["status"] in {"succeeded", "failed", "canceled"}:
+            return record
+        time.sleep(0.02)
+    return record
+
+
+def test_health_and_readiness_are_public_and_meta_needs_auth(tmp_path):
+    client = build(tmp_path)
+    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/readyz").json()["ready"] is True
+    assert client.get("/v1/meta").status_code == 401
+    meta = client.get("/v1/meta", headers=AUTH).json()
+    assert meta["schema_version"] == 1
+    assert meta["state_mode"] == "single-replica-sync"
+    assert meta["auth"] == "bearer"
+    assert meta["sync_max_seconds"] == 90
+
+
+def test_jobs_and_output_require_the_bearer_token(tmp_path):
+    client = build(tmp_path, mode="queue")
+    response = client.post(
+        "/v1/jobs", data={"job": json.dumps(job())},
+        files={"input": ("in.png", PNG, "image/png")},
+    )
+    assert response.status_code == 401
+    assert client.get(f"/v1/jobs/{JOB_ID}").status_code == 401
+    assert client.get(f"/v1/jobs/{JOB_ID}/output").status_code == 401
+
+
+def test_sync_mode_returns_the_result_inline(tmp_path):
+    client = build(tmp_path, execute=cleaned)
+    response = post(client)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "succeeded"
+    assert data["report_status"] == "cleaned"
+    assert base64.b64decode(data["output"]["base64"]) == PNG
+    assert data["output"]["sha256"] == hashlib.sha256(PNG).hexdigest()
+
+
+@pytest.mark.parametrize("overrides", [
+    {"operation": "watermark.invisible"},
+    {"max_seconds": 91},
+])
+def test_sync_mode_rejects_work_it_cannot_bound(tmp_path, overrides):
+    client = build(tmp_path, execute=cleaned)
+    response = post(client, job(**overrides))
+    assert response.status_code == 422
+    assert response.json()["detail"] == "sync_unsupported"
+
+
+def test_shared_volume_returns_before_the_job_finishes(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow(job_id, payload, source):
+        started.set()
+        release.wait(5)
+        return cleaned(job_id, payload, source)
+
+    client = build(tmp_path, mode="shared-volume", execute=slow)
+    response = post(client)
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    assert started.wait(2)
+    record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+    assert record["status"] in {"queued", "running"}
+    release.set()
+    for _ in range(100):
+        record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+        if record["status"] == "succeeded":
+            break
+        time.sleep(0.02)
+    assert record["status"] == "succeeded"
+    assert record["report_status"] == "cleaned"
+
+
+def test_a_repeated_digest_in_sync_mode_returns_the_output(tmp_path):
+    client = build(tmp_path, execute=cleaned)
+    assert post(client).status_code == 200
+    again = post(client)
+    assert again.status_code == 200
+    assert base64.b64decode(again.json()["output"]["base64"]) == PNG
+    assert again.json()["report_status"] == "cleaned"
+
+
+def test_queue_mode_records_attempts_and_maps_the_status(tmp_path):
+    client = build(tmp_path, mode="queue", execute=cleaned)
+    response = post(client)
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+    for _ in range(100):
+        if record["status"] == "succeeded":
+            break
+        time.sleep(0.02)
+        record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+    assert record["status"] == "succeeded"
+    assert record["report_status"] == "cleaned"
+    assert record["attempts"] == 1
+    assert record["max_attempts"] == 4
+    meta = client.get("/v1/meta", headers=AUTH).json()
+    assert meta["state_mode"] == "queue"
+    assert meta["max_attempts"] == 4
+
+
+def test_queue_mode_returns_before_the_job_finishes(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow(job_id, payload, source):
+        started.set()
+        release.wait(5)
+        return cleaned(job_id, payload, source)
+
+    client = build(tmp_path, mode="queue", execute=slow)
+    response = post(client)
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    assert started.wait(2)
+    record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+    assert record["status"] in {"queued", "running"}
+    release.set()
+    for _ in range(100):
+        record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
+        if record["status"] == "succeeded":
+            break
+        time.sleep(0.02)
+    assert record["status"] == "succeeded"
+
+
+
+def test_an_unknown_job_is_state_not_found(tmp_path):
+    client = build(tmp_path)
+    response = client.get(f"/v1/jobs/{JOB_ID}", headers=AUTH)
+    assert response.status_code == 404
+    assert response.json() == {"status": "unknown", "reason": "state_not_found"}
+
+
+def test_client_supplied_paths_are_rejected(tmp_path):
+    client = build(tmp_path, execute=cleaned)
+    response = post(client, job(input="/etc/passwd"))
+    assert response.status_code == 422
+
+
+def test_the_same_digest_never_runs_twice(tmp_path):
+    calls = []
+
+    def counting(job_id, payload, source):
+        calls.append(job_id)
+        return cleaned(job_id, payload, source)
+
+    client = build(tmp_path, mode="queue", execute=counting)
+    first = post(client)
+    second = post(client)
+    assert first.json()["job_id"] == second.json()["job_id"]
+    assert len(calls) == 1
+
+
+def test_a_second_concurrent_job_gets_429(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking(job_id, payload, source):
+        entered.set()
+        assert release.wait(5)
+        return cleaned(job_id, payload, source)
+
+    client = build(tmp_path, mode="queue", execute=blocking)
+    worker = threading.Thread(target=post, args=(client,))
+    worker.start()
+    assert entered.wait(5)
+    response = post(client, job(job_digest="b" * 64))
+    assert response.status_code == 429
+    release.set()
+    worker.join(5)
+
+
+def test_output_endpoint_returns_the_bytes(tmp_path):
+    client = build(tmp_path, mode="queue", execute=cleaned)
+    job_id = post(client).json()["job_id"]
+    assert wait_for(client, job_id)["status"] == "succeeded"
+    response = client.get(f"/v1/jobs/{job_id}/output", headers=AUTH)
+    assert response.status_code == 200
+    assert response.content == PNG
+    assert response.headers["content-type"].startswith("image/png")
+
+
+def test_cancel_is_best_effort_and_keeps_the_record(tmp_path):
+    client = build(tmp_path, mode="queue", execute=cleaned)
+    job_id = post(client).json()["job_id"]
+    assert wait_for(client, job_id)["status"] == "succeeded"
+    response = client.delete(f"/v1/jobs/{job_id}", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()["status"] == "succeeded"
+
+
+def test_a_busy_volume_read_is_unknown_never_state_not_found(tmp_path, monkeypatch):
+    client = build(tmp_path, mode="queue", execute=cleaned)
+    job_id = post(client).json()["job_id"]
+
+    def busy(self, identity):
+        raise OSError("volume busy")
+
+    monkeypatch.setattr(VolumeStore, "read", busy)
+    response = client.get(f"/v1/jobs/{job_id}", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()["status"] == "unknown"
+    assert response.json()["reason"] == "volume_unavailable"

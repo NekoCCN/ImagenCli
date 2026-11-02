@@ -1,0 +1,3 @@
+#!/command/with-contenv sh
+# Salad Container Gateway reaches containers over IPv6; bind dual-stack.
+exec uvicorn --factory --app-dir /app app:from_environment --host :: --port 8000

@@ -30,7 +30,7 @@ from imagen_cli.application.export_service import (
 from imagen_cli.domain.enums import ArtifactRole
 from imagen_cli.domain.models import ArtifactReference, Job, Session, Turn
 from imagen_cli.domain.primitive import new_id
-from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
+from imagen_cli.storage.artifacts import MAX_VIDEO_BYTES, ArtifactStore, inspect_media
 from imagen_cli.storage.repositories import Repositories
 from imagen_cli.storage.safety import (
     relative_path,
@@ -42,7 +42,7 @@ from imagen_cli.storage.safety import (
 
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_ARCHIVE_FILES = 10_000
-MAX_ARCHIVE_FILE_BYTES = MAX_BYTES
+MAX_ARCHIVE_FILE_BYTES = MAX_VIDEO_BYTES
 MAX_ARCHIVE_TOTAL_BYTES = 1024 * 1024 * 1024
 
 _SESSION_KEYS = ("id", "name", "intent", "version", "created_at")

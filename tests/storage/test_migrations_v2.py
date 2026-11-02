@@ -1,4 +1,4 @@
-"""Incremental schema upgrades: v1 workspaces gain the v2 tables intact."""
+"""Incremental schema upgrades: old workspaces gain every later table intact."""
 
 import sqlite3
 
@@ -19,8 +19,8 @@ def test_v1_workspace_upgrades_without_data_loss(tmp_path):
 
     migrations.migrate(connection)
 
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
-    assert {"provider_models", "artifact_links"} <= tables(connection)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
+    assert {"provider_models", "artifact_links", "remote_jobs"} <= tables(connection)
     assert connection.execute("SELECT id FROM sessions").fetchall() == [("ses_x",)]
 
 
@@ -28,7 +28,7 @@ def test_fresh_database_is_created_at_current_version(tmp_path):
     connection = sqlite3.connect(tmp_path / "state.sqlite3")
     migrations.migrate(connection)
     assert connection.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
-    assert {"provider_models", "artifact_links"} <= tables(connection)
+    assert {"provider_models", "artifact_links", "remote_jobs"} <= tables(connection)
 
 
 def test_newer_database_is_refused(tmp_path):

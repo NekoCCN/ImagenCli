@@ -1,0 +1,15 @@
+.git
+.venv
+.env
+.env.*
+live-results
+docs/live-evidence
+.superpowers
+.agents
+.claude
+skills-lock.json
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache

@@ -1,0 +1,3 @@
+#!/command/with-contenv sh
+# The Salad Queue Worker binary owns queue polling; the app never polls.
+exec /usr/local/bin/salad-queue-worker ${SALAD_QUEUE_WORKER_ARGS:-}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "imagen-cli"
-version = "0.1.17"
+version = "0.1.18"
 description = "Terminal image workbench for people and coding agents: shared CLI/TUI sessions, reviewable generation plans, local post-processing. Multi-provider, such as OpenAI-compatible Images."
 requires-python = ">=3.12"
 license = "MIT"
@@ -31,11 +31,13 @@ ai-onnx = ["onnxruntime>=1.20", "onnx>=1.20", "numpy>=2"]
 ai-onnx-gpu = ["onnxruntime-gpu>=1.20", "onnx>=1.20", "numpy>=2"]
 ai-openvino = ["onnxruntime-openvino>=1.20", "onnx>=1.20", "numpy>=2"]
 ai-torch = ["torch>=2.4", "numpy>=2"]
+worker = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart>=0.0.12"]
+deploy = ["modal>=1.0"]
 
 [dependency-groups]
 dev = [
     "pytest>=8", "ruff>=0.11", "mypy>=1.15", "jsonschema>=4.23", "types-jsonschema>=4",
-    "numpy>=2", "textual>=8.2.8",
+    "numpy>=2", "textual>=8.2.8", "fastapi>=0.115", "python-multipart>=0.0.12",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -55,6 +57,7 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["live: separately authorized paid provider tests", "performance: explicit performance benchmarks"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 
 [tool.ruff]
 target-version = "py312"
@@ -72,9 +75,11 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
 
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "src"
 strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "torch", "torch.*", "keyring"]
+module = ["onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "torch", "torch.*", "keyring",
+          "remove_ai_watermarks", "remove_ai_watermarks.*", "modal", "modal.*"]
 ignore_missing_imports = true

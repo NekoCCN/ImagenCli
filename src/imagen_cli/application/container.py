@@ -425,6 +425,258 @@ class Container:
                 asynchronous=self.options.async_,
                 progress=self.progress,
             )
+        if command.startswith("remote "):
+            from jsonschema import validate
+
+            from imagen_cli.application import remote_service
+            from imagen_cli.cli.registry import discover
+
+            validate(args, discover(command)["input_schema"])
+            try:
+                if command == "remote list":
+                    return "succeeded", {"remotes": remote_service.list_()}
+                if command == "remote add":
+                    return "succeeded", remote_service.add(
+                        args["name"], args["endpoint"], args["credential_ref"],
+                        gateway_credential_ref=args.get("gateway_credential_ref"),
+                    )
+                if command == "remote status":
+                    return "succeeded", remote_service.status(args["name"])
+                if command == "remote jobs list":
+                    return "succeeded", {
+                        "jobs": remote_service.jobs_list(
+                            self.repositories, args.get("provider"),
+                        ),
+                    }
+                if command.startswith("remote job "):
+                    action = command.removeprefix("remote job ")
+                    if action == "get":
+                        return "succeeded", remote_service.job_get(
+                            self.repositories, args["job"],
+                        )
+                    if action == "resume":
+                        return remote_service.job_resume(
+                            self.repositories, self.artifact_store, args["job"],
+                        )
+                    if action == "retry-interrupted":
+                        return remote_service.job_retry_interrupted(
+                            self.repositories, self.artifact_store, args["job"],
+                        )
+                    return remote_service.job_cancel(self.repositories, args["job"])
+                remote_service.remove(args["name"])
+                return "succeeded", {"removed": args["name"]}
+            except remote_service.RemoteError as error:
+                return error.status, {"error": {"type": error.status, "detail": str(error)}}
+            except (ValueError, OSError) as error:
+                return "validation_error", {"error": {
+                    "type": "validation_error", "detail": str(error),
+                }}
+        if command.startswith("watermark "):
+            from jsonschema import validate
+
+            from imagen_cli.application import remote_service, watermark_service
+            from imagen_cli.application.postprocess_service import BudgetApprovalRequired
+            from imagen_cli.cli.registry import discover
+
+            validate(args, discover(command)["input_schema"])
+            failures = {
+                "missing": "unsupported_capability",
+                "incompatible_worker": "unsupported_capability",
+                "incompatible_raiw": "unsupported_capability",
+            }
+
+            def failed(error: Any) -> tuple[str, dict[str, Any]]:
+                status = failures.get(error.status, error.status)
+                return status, {"error": {"type": status, "detail": str(error)},
+                                **error.data}
+
+            if command == "watermark status":
+                return "succeeded", watermark_service.status()
+            if command == "watermark setup":
+                try:
+                    return "succeeded", watermark_service.setup(
+                        args.get("accept") is True, args.get("extras"),
+                    )
+                except (ValueError, watermark_service.WatermarkError) as error:
+                    if isinstance(error, watermark_service.WatermarkError):
+                        return failed(error)
+                    return "validation_error", {"error": {
+                        "type": "validation_error", "detail": str(error),
+                    }}
+            if command == "watermark update":
+                try:
+                    return "succeeded", watermark_service.update(
+                        args.get("accept") is True, args.get("to"), args.get("extras"),
+                    )
+                except (ValueError, watermark_service.WatermarkError) as error:
+                    if isinstance(error, watermark_service.WatermarkError):
+                        return failed(error)
+                    return "validation_error", {"error": {
+                        "type": "validation_error", "detail": str(error),
+                    }}
+            if command in {"watermark batch", "watermark video batch"}:
+                try:
+                    if command == "watermark batch":
+                        return "succeeded", watermark_service.batch_directory(
+                            args["directory"], to=args.get("to"),
+                            mode=args.get("mode", "all"),
+                            pipeline=args.get("pipeline", "qwen-zimage"),
+                            backend=args.get("backend", "auto"),
+                            sensitivity=args.get("sensitivity", "auto"),
+                            force=args.get("force") is True,
+                            accept_license=args.get("accept_license") is True,
+                            options={
+                                "strength": args.get("strength"),
+                                "seed": args.get("seed"),
+                                "humanize": args.get("humanize"),
+                                "unsharp": args.get("unsharp"),
+                                "tile": args.get("tile") is True,
+                                "tile_size": args.get("tile_size", 1024),
+                                "tile_overlap": args.get("tile_overlap"),
+                                "cpu_offload": args.get("cpu_offload") is True,
+                                "max_resolution": args.get("max_resolution"),
+                                "adaptive_polish": args.get("adaptive_polish"),
+                                "text_manifest": args.get("text_manifest"),
+                                "fidelity_anchor": args.get("fidelity_anchor"),
+                                "vendor": args.get("vendor"),
+                            },
+                            timeout=args.get("max_seconds") or 3600,
+                        )
+                    return "succeeded", watermark_service.video_batch_directory(
+                        args["directory"], to=args.get("to"),
+                        mode=args.get("mode", "all"),
+                        options={
+                            "mark": args.get("mark"),
+                            "backend": args.get("backend"),
+                            "include_invisible": args.get("include_invisible"),
+                            "noise_std": args.get("noise_std"),
+                            "long_side": args.get("long_side"),
+                            "fps": args.get("fps"),
+                            "batch_size": args.get("batch_size"),
+                            "seed": args.get("seed"),
+                        },
+                        timeout=args.get("max_seconds") or 7200,
+                    )
+                except BudgetApprovalRequired as error:
+                    return "approval_required", {
+                        "budget": error.report,
+                        "error": {"type": "approval_required", "detail": str(error)},
+                    }
+                except (ValueError, watermark_service.WatermarkError) as error:
+                    if isinstance(error, watermark_service.WatermarkError):
+                        return failed(error)
+                    return "validation_error", {"error": {
+                        "type": "validation_error", "detail": str(error),
+                    }}
+            parts = command.split()
+            operation = ("watermark.video." + parts[2] if parts[1] == "video"
+                         else "watermark." + parts[1])
+            if operation == "watermark.metadata" and args.get("remove") is not True:
+                operation = "watermark.identify"
+            if operation == "watermark.video.metadata" and args.get("remove") is not True:
+                operation = "watermark.video.identify"
+            tuning = {
+                "sensitivity": args.get("sensitivity"),
+                "mark": args.get("mark"),
+                "inpaint_method": args.get("inpaint_method"),
+                "dilate": args.get("dilate"),
+                "tile_overlap": args.get("tile_overlap"),
+                "seed": args.get("seed"),
+                "humanize": args.get("humanize"),
+                "unsharp": args.get("unsharp"),
+                "controlnet_conditioning_scale": args.get("controlnet_conditioning_scale"),
+                "adaptive_polish": args.get("adaptive_polish"),
+                "text_manifest": args.get("text_manifest"),
+                "fidelity_anchor": args.get("fidelity_anchor"),
+                "vendor": args.get("vendor"),
+                "classify_source": args.get("source"),
+                "backend": args.get("backend"),
+                "include_invisible": args.get("include_invisible"),
+                "noise_std": args.get("noise_std"),
+                "long_side": args.get("long_side"),
+                "fps": args.get("fps"),
+                "batch_size": args.get("batch_size"),
+                "device": args.get("device"),
+                "model": args.get("model"),
+            }
+            remote_name = args.get("remote")
+            if remote_name:
+                remote_params = {
+                    "pipeline": args.get("pipeline"),
+                    "backend": args.get("backend"),
+                    "sensitivity": args.get("sensitivity"),
+                    "mark": args.get("mark"),
+                    "tile": args.get("tile") is True,
+                    "tile_size": args.get("tile_size", 1024),
+                    "tile_overlap": args.get("tile_overlap"),
+                    "cpu_offload": args.get("cpu_offload") is True,
+                    "max_resolution": args.get("max_resolution"),
+                    "force": args.get("force") is True,
+                    "strength": args.get("strength"),
+                    "seed": args.get("seed"),
+                    "humanize": args.get("humanize"),
+                    "unsharp": args.get("unsharp"),
+                    "controlnet_conditioning_scale": args.get(
+                        "controlnet_conditioning_scale"),
+                    "adaptive_polish": args.get("adaptive_polish"),
+                    "text_manifest": args.get("text_manifest"),
+                    "fidelity_anchor": args.get("fidelity_anchor"),
+                    "vendor": args.get("vendor"),
+                }
+                try:
+                    return remote_service.run_operation(
+                        self.repositories, self.artifact_store, args["artifact"],
+                        remote_name, operation,
+                        accept_remote=args.get("accept_remote"),
+                        session=args.get("session"),
+                        pipeline=args.get("pipeline"),
+                        params={key: value for key, value in remote_params.items()
+                                if value is not None},
+                        max_seconds=args.get("max_seconds"),
+                        accept_license=args.get("accept_license") is True,
+                        memory_mb=args.get("memory_mb"),
+                        budget_approval=args.get("budget_approval"),
+                    )
+                except BudgetApprovalRequired as error:
+                    return "approval_required", {
+                        "budget": error.report,
+                        "error": {"type": "approval_required", "detail": str(error)},
+                    }
+                except (ValueError, watermark_service.WatermarkError) as error:
+                    if isinstance(error, watermark_service.WatermarkError):
+                        return failed(error)
+                    return "validation_error", {"error": {
+                        "type": "validation_error", "detail": str(error),
+                    }}
+            try:
+                return watermark_service.run_operation(
+                    self.repositories, self.artifact_store, args["artifact"], operation,
+                    session=args.get("session"),
+                    pipeline=args.get("pipeline"),
+                    visible_backend=args.get("backend"),
+                    tile=args.get("tile") is True,
+                    tile_size=args.get("tile_size", 1024),
+                    cpu_offload=args.get("cpu_offload") is True,
+                    max_resolution=args.get("max_resolution"),
+                    force=args.get("force") is True,
+                    accept_license=args.get("accept_license") is True,
+                    strength=args.get("strength"),
+                    timeout=args.get("max_seconds")
+                    or (3600 if operation.startswith("watermark.video.")
+                        else 900 if operation in {"watermark.invisible", "watermark.all"}
+                        else self.options.timeout),
+                    memory_mb=args.get("memory_mb"),
+                    budget_approval=args.get("budget_approval"),
+                    regions=args.get("regions"),
+                    options=tuning,
+                )
+            except BudgetApprovalRequired as error:
+                return "approval_required", {
+                    "budget": error.report,
+                    "error": {"type": "approval_required", "detail": str(error)},
+                }
+            except watermark_service.WatermarkError as error:
+                return failed(error)
         if command.startswith("superres "):
             from jsonschema import validate
 
@@ -447,7 +699,11 @@ class Container:
                     progress=self.progress,
                 )
             if command == "superres models":
-                return "succeeded", superres.catalog()
+                return "succeeded", superres.catalog(verify=args.get("verify") is True)
+            if command == "superres doctor":
+                report = superres.doctor(args.get("model"), backend=args.get("backend", "auto"))
+                return ("succeeded" if report["status"] == "ready" else "unsupported_capability",
+                        report)
             if command == "superres install":
                 return "succeeded", superres.install(
                     args.get("model"),

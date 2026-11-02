@@ -60,6 +60,11 @@ FIELDS = {
     "provider_models": ("id profile_id model_id display_name fetched_at source_url evidence"),
     "artifact_links": "session_id artifact_id role created_at",
     "workers": "id pid boot_identity state heartbeat_at start_nonce",
+    "remote_jobs": (
+        "id provider provider_job_id queue_id endpoint_host operation input_artifact_id "
+        "input_sha256 request_canonical job_digest pipeline gpu max_seconds license "
+        "worker_image_digest status artifact_id created_at updated_at payload"
+    ),
 }
 PRIVATE = PRIVATE_FIELDS | {"lease_token", "staging_relpath"}
 

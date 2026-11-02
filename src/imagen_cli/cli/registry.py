@@ -59,7 +59,7 @@ COMMANDS = {
                 ("session fork", "从指定 turn 与产物分支新会话；不发送请求"),
                 ("session export", "导出不含秘密的可移植 ZIP；不发送请求"),
                 ("session import", "校验 ZIP 并事务导入，重映射全部标识"),
-                ("session import-image", "把本地图片导入会话并生成新产物；不覆盖原图"),
+                ("session import-image", "把本地图片或视频导入会话并生成新产物；不覆盖原文件"),
                 ("session delete", "逻辑删除 session；需显式 --yes"),
                 ("session remove-artifact", "从会话中移除指定的产物图片"),
                 ("session remove-image", "从会话中移除指定的产物图片（同 remove-artifact）"),
@@ -97,9 +97,36 @@ COMMANDS = {
                 ("ops", "列出可用的确定性变换操作"),
                 ("superres run", "独立本地模型处理：恢复或超分，保存新产物；超预算先确认"),
                 ("superres models", "列出超分模型、许可、下载与安装状态"),
+                ("superres doctor", "用一个 32×32 图跑一 tile，证明请求的 backend 真的生效"),
                 ("superres install", "装运行时与所选模型；不给 --model 只装运行时；需 --accept"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
+                ("watermark identify", "只读检查 C2PA/EXIF/XMP/IPTC/TC260 与可见、不可见标记"),
+                ("watermark metadata", "复制产物并移除 AI 元数据；--remove 才写入新产物"),
+                ("watermark visible", "复制产物并移除已注册的可见 AI 标记"),
+                ("watermark erase", "按 --region 擦除指定矩形区域并复制产物；不覆盖原图"),
+                ("watermark all", "依次移除可见、不可见与元数据水印并生成新产物；需许可证确认"),
+                ("watermark classify", "只读按像素分类来源或拍摄属性；不是来源证明"),
+                ("watermark batch", "按目录处理图片并写入新目录；不覆盖源目录；支持四种模式"),
+                ("watermark video identify", "只读检查视频容器中的 AI 元数据与稳定可见标记"),
+                ("watermark video metadata", "复制视频并移除 AI 元数据；--remove 才写入新产物"),
+                ("watermark video visible", "复制视频并移除已注册的可见标记；无匹配时不写产物"),
+                ("watermark video all", "复制视频并依次移除可见标记与 AI 元数据；可选像素重建"),
+                ("watermark video invisible", "用共享噪声场重建视频像素以破坏 SynthID 类水印"),
+                ("watermark video batch", "按目录处理视频并写入新目录；不覆盖源目录"),
+                ("watermark invisible", "用扩散重建移除不可见水印；需 GPU；超内存预算先确认"),
+                ("watermark status", "报告隔离 raiw 环境、版本、能力与内存上限；不打印密钥"),
+                ("watermark setup", "预览或创建隔离 raiw 环境；需 --accept 才安装"),
+                ("watermark update", "新建并验证隔离 raiw 环境后切换；失败保留旧环境；需 --accept"),
+                ("remote add", "登记远程 GPU 端点；探测 /v1/meta 后写入 config.json"),
+                ("remote list", "列出已登记的远程端点；不打印凭据"),
+                ("remote status", "读取端点状态并刷新登记的 GPU 与 worker digest"),
+                ("remote remove", "移除一个远程端点登记"),
+                ("remote jobs list", "列出本地记录的远程 job；可按 provider 过滤"),
+                ("remote job get", "读取远程 job 的本地记录与实时状态"),
+                ("remote job resume", "重新读取 queued/running/succeeded job 并取回结果"),
+                ("remote job retry-interrupted", "仅对 interrupted job 以同一 digest 重新入队"),
+                ("remote job cancel", "尽力取消远程 job；结果如实记录"),
                 ("language", "查看或设置默认界面语言"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
@@ -182,6 +209,8 @@ _SUMMARY_EN = {
     "sheet": "Compose artifacts into a contact sheet as a new artifact",
     "ops": "List available deterministic transform operations",
     "superres models": "List upscaling models, licenses, download and install state",
+    "superres doctor": "Run one tile on a 32x32 image to prove the requested backend "
+    "is really in use; no artifact, no weight download",
     "superres install": "Install the inference runtime and any named models; "
     "without --model it installs only the runtime; requires --accept",
     "superres run": "Run local model restoration or upscaling; save a new artifact, "
@@ -189,6 +218,44 @@ _SUMMARY_EN = {
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
+    "watermark identify": "Read-only check of C2PA, EXIF, XMP, IPTC, TC260 and visible "
+    "or invisible marks; creates no artifact",
+    "watermark metadata": "Remove AI metadata from a copy; --remove writes a new artifact",
+    "watermark visible": "Remove registered visible AI marks into a new artifact",
+    "watermark erase": "Erase explicit --region boxes into a new artifact; keeps the source",
+    "watermark all": "Run visible, invisible and metadata removal in order as a new artifact; "
+    "requires license confirmation",
+    "watermark classify": "Classify a photo or its source pipeline from pixels; read-only, "
+    "not provenance",
+    "watermark batch": "Process a directory of images into a new directory; never overwrites "
+    "the source directory; visible, metadata, all or invisible",
+    "watermark video identify": "Read-only check of video AI metadata and stable visible marks",
+    "watermark video metadata": "Copy a video and strip AI metadata; --remove writes an artifact",
+    "watermark video visible": "Copy a video and remove a stable visible mark; writes nothing "
+    "when no mark matches",
+    "watermark video all": "Copy a video and remove visible marks plus AI metadata; optional "
+    "pixel regeneration",
+    "watermark video invisible": "Regenerate video pixels with a shared noise field to disrupt "
+    "SynthID-class marks; lossy",
+    "watermark video batch": "Process a directory of videos into a new directory; never "
+    "overwrites the source directory",
+    "watermark invisible": "Regenerate pixels to disrupt invisible watermarks; needs a GPU; "
+    "an over-budget run asks first",
+    "watermark status": "Report the isolated raiw environment, version, capabilities and "
+    "memory limit; prints no secret",
+    "watermark setup": "Preview or create the isolated raiw environment; installs only "
+    "with --accept",
+    "watermark update": "Build and verify a new isolated raiw environment, then switch; "
+    "the old environment survives a failed probe; requires --accept",
+    "remote add": "Register a remote GPU endpoint; probes /v1/meta before writing config",
+    "remote list": "List registered remote endpoints; prints no credential",
+    "remote status": "Read endpoint status and refresh its recorded GPU and worker digest",
+    "remote remove": "Remove one remote endpoint registration",
+    "remote jobs list": "List locally recorded remote jobs; filter by provider",
+    "remote job get": "Read a remote job's local record and live status",
+    "remote job resume": "Re-read a queued, running or succeeded job and fetch its result",
+    "remote job retry-interrupted": "Re-enqueue only an interrupted job under the same digest",
+    "remote job cancel": "Best-effort cancel; the recorded result is reported as-is",
     "language": "Show or set the default interface language",
     "tui": "Open the terminal workspace; browse read-only and delete with confirmation",
 }
@@ -445,7 +512,13 @@ def _input_schema(name: str) -> dict[str, Any]:
         }
         required = ("artifact", "model")
     elif name == "superres models":
-        properties = {}
+        properties = {"verify": {"type": "boolean", "default": False}}
+        required = ()
+    elif name == "superres doctor":
+        properties = {
+            "model": {"type": "string", "minLength": 1},
+            "backend": {"enum": ["auto", "cpu", "cuda", "openvino"], "default": "auto"},
+        }
         required = ()
     elif name == "superres install":
         properties = {
@@ -466,6 +539,212 @@ def _input_schema(name: str) -> dict[str, Any]:
             "overlap": {"type": "integer", "minimum": 0, "maximum": 256, "default": 16},
         }
         required = ("artifact", "model")
+    elif name in {"watermark identify", "watermark metadata", "watermark visible"}:
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "session": text,
+            "memory_mb": {"type": "integer", "minimum": 1},
+            "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "accept_remote": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        }
+        if name == "watermark metadata":
+            properties["remove"] = {"type": "boolean", "default": False}
+        if name == "watermark visible":
+            properties["backend"] = {"enum": ["auto", "cv2", "migan", "lama"]}
+            properties["sensitivity"] = {"enum": ["auto", "strict"], "default": "auto"}
+            properties["mark"] = text
+        required = ("artifact",)
+    elif name == "watermark erase":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "regions": {
+                "type": "array", "minItems": 1,
+                "items": {"type": "string", "pattern": "^-?\\d+,-?\\d+,\\d+,\\d+$"},
+            },
+            "backend": {"enum": ["cv2", "migan", "lama"], "default": "cv2"},
+            "inpaint_method": {"enum": ["telea", "ns"], "default": "telea"},
+            "dilate": {"type": "integer", "minimum": 0, "maximum": 512, "default": 3},
+            "session": text,
+        }
+        required = ("artifact", "regions")
+    elif name == "watermark classify":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "source": {"type": "boolean", "default": False},
+        }
+        required = ("artifact",)
+    elif name == "watermark batch":
+        properties = {
+            "directory": text,
+            "to": text,
+            "mode": {"enum": ["visible", "metadata", "all", "invisible"],
+                     "default": "all"},
+            "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "auto"},
+            "sensitivity": {"enum": ["auto", "strict"], "default": "auto"},
+            "pipeline": {
+                "enum": ["qwen-zimage", "qwen21-zimage", "sdxl-zimage", "chroma-zimage"],
+                "default": "qwen-zimage",
+            },
+            "force": {"type": "boolean", "default": False},
+            "accept_license": {"type": "boolean", "default": False},
+            "tile": {"type": "boolean", "default": False},
+            "tile_size": {"type": "integer", "minimum": 256, "default": 1024},
+            "tile_overlap": {"type": "integer", "minimum": 0, "maximum": 512, "default": 128},
+            "cpu_offload": {"type": "boolean", "default": False},
+            "max_resolution": {"type": "integer", "minimum": 0},
+            "strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "seed": {"type": "integer", "minimum": 0},
+            "humanize": {"type": "number", "minimum": 0, "maximum": 1},
+            "unsharp": {"type": "number", "minimum": 0},
+            "adaptive_polish": {"type": "boolean"},
+            "text_manifest": text,
+            "fidelity_anchor": {"type": "boolean", "default": False},
+            "vendor": text,
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 3600},
+        }
+        required = ("directory",)
+    elif name == "watermark video identify":
+        properties = {"artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"}}
+        required = ("artifact",)
+    elif name == "watermark video metadata":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "remove": {"type": "boolean", "default": False},
+            "session": text,
+        }
+        required = ("artifact",)
+    elif name == "watermark video visible":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "mark": text,
+            "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "cv2"},
+            "session": text,
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 3600},
+        }
+        required = ("artifact",)
+    elif name == "watermark video all":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "mark": text,
+            "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "cv2"},
+            "include_invisible": {"type": "boolean", "default": False},
+            "noise_std": {"type": "number", "minimum": 0, "maximum": 1},
+            "long_side": {"type": "integer", "minimum": 16},
+            "fps": {"type": "number", "exclusiveMinimum": 0},
+            "batch_size": {"type": "integer", "minimum": 1},
+            "seed": {"type": "integer", "minimum": 0},
+            "session": text,
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 3600},
+        }
+        required = ("artifact",)
+    elif name == "watermark video invisible":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "noise_std": {"type": "number", "minimum": 0, "maximum": 1},
+            "long_side": {"type": "integer", "minimum": 16},
+            "fps": {"type": "number", "exclusiveMinimum": 0},
+            "batch_size": {"type": "integer", "minimum": 1},
+            "seed": {"type": "integer", "minimum": 0},
+            "model": text,
+            "device": {"enum": ["auto", "cpu", "cuda"], "default": "auto"},
+            "session": text,
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 7200},
+        }
+        required = ("artifact",)
+    elif name == "watermark video batch":
+        properties = {
+            "directory": text,
+            "to": text,
+            "mode": {"enum": ["all", "visible", "metadata"], "default": "all"},
+            "mark": text,
+            "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "cv2"},
+            "include_invisible": {"type": "boolean", "default": False},
+            "noise_std": {"type": "number", "minimum": 0, "maximum": 1},
+            "long_side": {"type": "integer", "minimum": 16},
+            "fps": {"type": "number", "exclusiveMinimum": 0},
+            "batch_size": {"type": "integer", "minimum": 1},
+            "seed": {"type": "integer", "minimum": 0},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 7200},
+        }
+        required = ("directory",)
+    elif name in {"watermark invisible", "watermark all"}:
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "session": text,
+            "pipeline": {
+                "enum": ["qwen-zimage", "qwen21-zimage", "sdxl-zimage", "chroma-zimage"],
+                "default": "qwen-zimage",
+            },
+            "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "auto"},
+            "sensitivity": {"enum": ["auto", "strict"], "default": "auto"},
+            "tile": {"type": "boolean", "default": False},
+            "tile_size": {"type": "integer", "minimum": 256, "default": 1024},
+            "tile_overlap": {"type": "integer", "minimum": 0, "maximum": 512, "default": 128},
+            "cpu_offload": {"type": "boolean", "default": False},
+            "max_resolution": {"type": "integer", "minimum": 0},
+            "force": {"type": "boolean", "default": False},
+            "accept_license": {"type": "boolean", "default": False},
+            "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "memory_mb": {"type": "integer", "minimum": 1},
+            "strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "seed": {"type": "integer", "minimum": 0},
+            "humanize": {"type": "number", "minimum": 0, "maximum": 1},
+            "unsharp": {"type": "number", "minimum": 0},
+            "controlnet_conditioning_scale": {"type": "number", "minimum": 0},
+            "adaptive_polish": {"type": "boolean"},
+            "text_manifest": text,
+            "fidelity_anchor": {"type": "boolean", "default": False},
+            "vendor": text,
+            "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "accept_remote": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 900},
+        }
+        required = ("artifact",)
+    elif name == "watermark status":
+        properties = {}
+        required = ()
+    elif name == "watermark setup":
+        properties = {
+            "accept": {"type": "boolean", "default": False},
+            "extras": {"type": "string", "pattern": "^[a-z0-9-]+(,[a-z0-9-]+)*$"},
+        }
+        required = ()
+    elif name == "watermark update":
+        properties = {
+            "accept": {"type": "boolean", "default": False},
+            "to": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]{0,31}$"},
+            "extras": {"type": "string", "pattern": "^[a-z0-9-]+(,[a-z0-9-]+)*$"},
+        }
+        required = ()
+    elif name == "remote add":
+        properties = {
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "endpoint": {"type": "string", "pattern": "^https?://"},
+            "credential_ref": {"type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$"},
+            "gateway_credential_ref": {
+                "type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$",
+            },
+        }
+        required = ("name", "endpoint", "credential_ref")
+    elif name in {"remote status", "remote remove"}:
+        properties = {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+        required = ("name",)
+    elif name == "remote list":
+        properties = {}
+        required = ()
+    elif name == "remote jobs list":
+        properties = {"provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+        required = ()
+    elif name in {"remote job get", "remote job resume",
+                  "remote job retry-interrupted", "remote job cancel"}:
+        properties = {"job": {"type": "string", "pattern": "^rmt_[0-9a-f]{32}$"}}
+        required = ("job",)
     elif name == "compare":
         properties = {
             "first": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
@@ -872,6 +1151,153 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "next_actions": {"type": "array", "items": {"type": "object"}},
             },
             ("job", "artifacts", "next_actions"),
+        )
+    if command.name.startswith("remote "):
+        row = {"type": "object"}
+        if command.name == "remote list":
+            return _object({"remotes": {"type": "array", "items": row}}, ("remotes",))
+        if command.name == "remote remove":
+            return _object({"removed": {"type": "string"}}, ("removed",))
+        if command.name == "remote jobs list":
+            return _object({"jobs": {"type": "array", "items": row}}, ("jobs",))
+        if command.name == "remote job get":
+            return _object(
+                {"job": row, "live": {"type": ["object", "null"]}}, ("job", "live"),
+            )
+        if command.name == "remote job resume":
+            return _object(
+                {"job": row, "live": row, "artifact": row, "report": row, "error": row},
+                ("job",),
+            )
+        if command.name == "remote job retry-interrupted":
+            return _object({"job": row, "live": row}, ("job", "live"))
+        if command.name == "remote job cancel":
+            return _object({"job": row}, ("job",))
+        # remote add / remote status: the description plus the probed metadata.
+        return _object(
+            {
+                "name": {"type": ["string", "null"]},
+                "endpoint": {"type": "string"},
+                **dict.fromkeys(
+                    ("state_mode", "gpu", "worker_digest", "raiw_version",
+                     "imagen_cli_version"),
+                    {"type": ["string", "null"]},
+                ),
+                "meta": {"type": "object"},
+            },
+            ("name", "endpoint", "meta"),
+        )
+    if command.name == "watermark status":
+        return _object(
+            {
+                "interpreter": {"type": ["string", "null"]},
+                "environment": {"type": "string"},
+                "supported_range": {"type": "string"},
+                "known_good": {"type": "string"},
+                "memory_limit": {"type": ["integer", "null"]},
+                "memory_mb": {"type": ["integer", "null"]},
+                "ready": {"type": "boolean"},
+                "missing": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": "string"},
+                "error": {"type": "string"},
+                "raiw_version": {"type": ["string", "null"]},
+                "capabilities": {"type": "object"},
+                "cuda": {"type": "boolean"},
+            },
+            ("interpreter", "environment", "supported_range", "known_good",
+             "memory_limit", "memory_mb", "ready"),
+        )
+    if command.name in {"watermark setup", "watermark update"}:
+        return _object(
+            {
+                "environment": {"type": "string"},
+                "target": {"type": "string"},
+                "packages": {"type": "array", "items": {"type": "string"}},
+                "extras": {"type": "string"},
+                "installed": {"type": "boolean"},
+                "hint": {"type": "string"},
+                "python": {"type": "string"},
+                "raiw_version": {"type": ["string", "null"]},
+                "capabilities": {"type": "object"},
+            },
+            ("environment", "target", "packages", "installed"),
+        )
+    if command.name in {"watermark batch", "watermark video batch"}:
+        return _object(
+            {
+                "source": {"type": "string"},
+                "output": {"type": "string"},
+                "report": {"type": "object"},
+            },
+            ("source", "output", "report"),
+        )
+    if command.name == "watermark video identify":
+        return _object(
+            {"report": {"type": "object"},
+             "raiw_version": {"type": ["string", "null"]}},
+            ("report",),
+        )
+    if command.name in {"watermark video metadata", "watermark video visible",
+                        "watermark video all", "watermark video invisible"}:
+        return _object(
+            {
+                "artifact": {"type": "object"},
+                "source": {"type": "string"},
+                "status": {"type": "string"},
+                "report": {"type": "object"},
+                "raiw_version": {"type": ["string", "null"]},
+            },
+            # metadata without --remove and a no-match visible run publish nothing.
+            ("artifact",) if command.name in {
+                "watermark video all", "watermark video invisible",
+            } else (),
+        )
+    if command.name in {"watermark identify", "watermark classify"}:
+        return _object(
+            {
+                "report": {"type": "object"},
+                "raiw_version": {"type": ["string", "null"]},
+                "remote": {"type": "object"},
+                "job_digest": {"type": "string"},
+                "remote_job": {"type": "string"},
+            },
+            ("report",),
+        )
+    if command.name in {"watermark metadata", "watermark visible", "watermark erase",
+                        "watermark invisible", "watermark all"}:
+        return _object(
+            {
+                "artifact": {"type": "object"},
+                "source": {"type": "string"},
+                "status": {"type": "string"},
+                "report": {"type": "object"},
+                "raiw_version": {"type": ["string", "null"]},
+                "remote": {"type": "object"},
+                "job_digest": {"type": "string"},
+                "remote_job": {"type": "string"},
+            },
+            # Without --remove, metadata returns the identity report and publishes nothing.
+            () if command.name == "watermark metadata" else ("artifact",),
+        )
+    if command.name == "superres doctor":
+        return _object(
+            {
+                "providers": {"type": "array", "items": {"type": "string"}},
+                "requested_backend": {"type": "string"},
+                "backend": {"type": ["string", "null"]},
+                "provider_used": {"type": ["string", "null"]},
+                "fallback": {"type": "boolean"},
+                "runtime": {"type": "object"},
+                "model": {"type": ["string", "null"]},
+                "weights_verified": {"type": "boolean"},
+                "inference": {"type": "boolean"},
+                "latency_ms": {"type": ["integer", "number", "null"]},
+                "output_sha256": {"type": ["string", "null"]},
+                "status": {"type": "string"},
+                "missing": {"type": "array", "items": {"type": "string"}},
+                "hint": {"type": "string"},
+            },
+            ("providers", "requested_backend", "backend", "status"),
         )
     return _object(
         {

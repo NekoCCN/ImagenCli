@@ -128,6 +128,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     agent = False
     language_seen = False
     help_flag = False
+    watermark_invocation = "watermark" in argv
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -207,6 +208,42 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "concurrency",
                 "to",
                 "from-turn",
+                "verify",
+                "memory-mb",
+                "tile-size",
+                "max-resolution",
+                "remove",
+                "mark",
+                "region",
+                "sensitivity",
+                "inpaint-method",
+                "dilate",
+                "strength",
+                "seed",
+                "humanize",
+                "unsharp",
+                "controlnet-scale",
+                "tile-overlap",
+                "adaptive-polish",
+                "text-manifest",
+                "fidelity-anchor",
+                "vendor",
+                "extras",
+                "source",
+                "mode",
+                "include-invisible",
+                "noise-std",
+                "long-side",
+                "fps",
+                "batch-size",
+                "device",
+                "cpu-offload",
+                "endpoint",
+                "gateway-credential-ref",
+                "remote",
+                "accept-remote",
+                "max-seconds",
+                "accept-license",
                 "artifact",
                 "name",
                 "plan",
@@ -243,12 +280,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             }
             if name not in OPTION_METADATA and not local_option:
                 raise UsageError(i18n.t(f"Unknown option --{name}.", f"未知选项 --{name}。"))
-            field = {"input": "inputs", "reference": "references"}.get(
+            field = {"input": "inputs", "reference": "references", "region": "regions"}.get(
                 name,
                 name.replace("-", "_") if name != "async" else "async_",
             )
             target = parameters if local_option else controls
-            repeated = name in {"input", "reference", "skill", "target"}
+            repeated = name in {"input", "reference", "skill", "target", "region"}
             if field in target and not repeated:
                 raise UsageError(
                     i18n.t(f"Option --{name} appears twice.", f"选项 --{name} 重复出现。")
@@ -263,7 +300,17 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "purge",
                 "global",
                 "install",
+                "verify",
+                "remove",
+                "cpu-offload",
+                "accept-license",
+                "adaptive-polish",
+                "fidelity-anchor",
+                "source",
+                "include-invisible",
             }
+            if name == "tile" and watermark_invocation:
+                boolean = True
             if name == "prompt-stdin" or boolean:
                 if separator:
                     raise UsageError(
@@ -297,7 +344,16 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     "overlap",
                     "columns",
                     "cell",
-                }:
+                    "memory-mb",
+                    "tile-size",
+                    "max-resolution",
+                    "max-seconds",
+                    "dilate",
+                    "seed",
+                    "tile-overlap",
+                    "long-side",
+                    "batch-size",
+                } and not (name == "tile" and watermark_invocation):
                     try:
                         value = int(value)
                     except ValueError:
@@ -305,6 +361,17 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                             i18n.t(
                                 f"--{name} must be a whole number, got '{value}'.",
                                 f"--{name} 必须是整数，当前为 '{value}'。",
+                            )
+                        ) from None
+                elif name in {"strength", "humanize", "unsharp", "controlnet-scale",
+                              "noise-std", "fps"}:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        raise UsageError(
+                            i18n.t(
+                                f"--{name} must be a number, got '{value}'.",
+                                f"--{name} 必须是数字，当前为 '{value}'。",
                             )
                         ) from None
                 elif not value or "\0" in value:
@@ -513,7 +580,9 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, parameters, options
     if command == "session import-image":
         if len(words) != 2:
-            raise _need(command, words, 2, "a session id and an image path", "会话标识和图片路径")
+            raise _need(command, words, 2,
+                        "a session id and an image or video path",
+                        "会话标识和图片或视频路径")
         parameters["session"] = words[0]
         parameters["path"] = words[1]
         validate(parameters, schema)
@@ -588,9 +657,41 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         validate(parameters, schema)
         return command, parameters, options
     if command == "superres models":
-        if words or parameters:
+        if words:
             raise _no_arguments(command, words, parameters)
-        return command, {}, options
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("remote "):
+        if command in {"remote list", "remote jobs list"}:
+            if words:
+                raise _no_positional(command, words)
+        elif command.startswith("remote job "):
+            if words:
+                if len(words) != 1 or "job" in parameters:
+                    raise _need(command, words, 1, "one remote job id", "一个远程 job 标识")
+                parameters["job"] = words[0]
+        else:
+            if words:
+                if len(words) != 1 or "name" in parameters:
+                    raise _need(command, words, 1, "one endpoint name", "一个端点名")
+                parameters["name"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("watermark "):
+        if command in {"watermark status", "watermark setup", "watermark update"}:
+            if words:
+                raise _no_positional(command, words)
+        elif command in {"watermark batch", "watermark video batch"}:
+            if len(words) != 1 or "directory" in parameters:
+                raise _need(command, words, 1, "one directory", "一个目录")
+            parameters["directory"] = words[0]
+        else:
+            if words:
+                if len(words) != 1 or "artifact" in parameters:
+                    raise _need(command, words, 1, "one artifact id", "一个产物标识")
+                parameters["artifact"] = words[0]
+        validate(parameters, schema)
+        return command, parameters, options
     if command == "superres run":
         if words:
             if len(words) != 1 or "artifact" in parameters:
@@ -611,7 +712,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         parameters["model"] = words[0]
         words = []
     if command in {"compare", "sheet", "superres fetch", "superres install",
-                   "superres benchmark"}:
+                   "superres doctor", "superres benchmark"}:
         if words:
             raise _no_positional(command, words)
         validate(parameters, discover(command)["input_schema"])

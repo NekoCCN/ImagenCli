@@ -27,9 +27,19 @@
 - **生成前先审阅**：检查冻结请求与摘要，再分别批准和执行。结果未知时不会自动重试。
 - **集中管理图像工作**：浏览、分支、导出、比较已保存产物，生成联系表，并保留来源信息。
 - **本地处理图片**：普通变换与模型处理使用独立页面；模型页用于恢复和超分，大图超预算先询问。
+- **按明确边界移除水印**：先检查，保留原图，并在运行前确认管线许可与任何图片上传。
 - **按明确边界自动化**：用 JSON Schema 发现命令，使用随包 agent skills，执行已授权的批量请求或本地后台任务。
 
 帮助、错误和 TUI 支持英文与简体中文；JSON 键、状态名和命令标识不随语言变化。
+
+## 新更新
+
+最近版本加入本地水印工作台与媒体批处理：
+
+- **图片**：`watermark identify`、`metadata`、`visible`、`erase`、`invisible`、`all`、`classify`，并保留许可证与内存预算确认。
+- **视频**：`watermark video identify`、`metadata`、`visible`、`all`、`invisible`，包括流复制元数据移除与稳定可见标记移除。
+- **批处理**：`watermark batch` 与 `watermark video batch` 把目录处理到新的空输出目录，不修改源目录。
+- **隔离 extras**：`watermark setup --extras ...` 只安装任务需要的依赖组，例如 `visible,video,diffusion`。
 
 ## 安装
 
@@ -158,7 +168,9 @@ request ──► plan (review) ──► approve ──► execute ──► jo
 | 生成／编辑 | `g` / `m` | `generate`、`edit` |
 | 批准／执行／重试计划 | 计划页：`a`、`enter`、`r` | `plan approve`、`plan execute`、`plan retry` |
 | 普通图像处理 | `t`；`p` 调参 | `ops`、`transform`、`compare`、`sheet` |
-| 模型恢复／超分 | `u`；`s` 管理运行时与权重 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark` |
+| 模型恢复／超分 | `u`；`s` 管理运行时与权重 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark`、`superres doctor` |
+| 水印检查／移除 | 命令面板；无独立页面 | `watermark identify`、`watermark metadata`、`watermark visible`、`watermark erase`、`watermark invisible`、`watermark all`、`watermark classify`、`watermark batch`、`watermark video ...`、`watermark status` |
+| 远程 GPU 任务 | 命令面板；无独立页面 | `remote ...`、`watermark ... --remote NAME` |
 | 打开图片／目录 | `o` / `O` | `asset open [--folder]` |
 | 导入图片／另存副本 | `i` / `S` | `session import-image`、`asset save` |
 | 分支／导出／删除会话 | `f`、`e`、`x` | `session fork`、`session export`、`session delete` |
@@ -512,6 +524,7 @@ CUDA 或 OpenVINO 需显式选择 `cuda` 或 `openvino`；检测到其他 ONNX �
 不会擅自卸载或切换后端，也不安装显卡驱动。安装后请重启 ImagenCli。
 源码环境后续执行 `uv run` / `uv sync` 时仍需保留 `--extra ai-onnx`（或所选后端 extra）。
 TUI 命令面板提供同样的后端与确认选项。
+在把某个后端用于整张图片前，`imagen superres doctor --backend cuda` 会用 32×32 样图跑一个 tile，并报告实际生效的 provider。它证明的是后端，不是画质。
 
 超分、原尺寸降噪与 JPEG 伪影清理使用独立模型处理命令：
 
@@ -549,6 +562,82 @@ imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
 下载会先进入临时目录，按固定 SHA-256 摘要校验，再发布到权重目录。失败或摘要不符不会留下可用权重。
 
 超分运行时和权重只在你执行安装命令并接受许可后安装。源码许可与权重许可分别授予，下载前请阅读权重许可。模型重建纹理时会生成新的细节，这些细节可能与原图不同。
+
+## 水印移除
+
+水印命令运行在独立的 `remove-ai-watermarks` 环境中，并且总是生成新产物；原图不会被修改。先做只读检查：
+
+```bash
+imagen watermark status
+imagen watermark identify ARTIFACT_ID
+imagen watermark metadata ARTIFACT_ID
+imagen watermark classify ARTIFACT_ID
+```
+
+`status` 报告隔离环境是否就绪；`identify` 检查 C2PA、EXIF、XMP、IPTC、TC260 与可见标记；`metadata` 不带 `--remove` 时返回同类报告，不发布任何产物。`classify` 只读取像素：默认分类照片属性，加 `--source` 时分类可能的来源管线。它不是来源证明，也不检测 SynthID。
+
+要生成新图片：
+
+```bash
+imagen watermark metadata ARTIFACT_ID --remove
+imagen watermark visible ARTIFACT_ID
+imagen watermark erase ARTIFACT_ID --region 1640,1930,400,100
+imagen watermark invisible ARTIFACT_ID --pipeline sdxl-zimage --accept-license
+imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
+```
+
+- `metadata --remove` 把 AI 元数据剥离到副本中，不处理像素级水印。
+- `visible` 用 CPU 后端（`cv2`、`migan` 或 `lama`）移除已注册的可见标记；`--mark NAME` 只处理指定的已注册标记，`--sensitivity strict` 保持高精度检测门限。
+- `erase` 用相同的 CPU 填充后端擦除每个 `--region x,y,width,height` 框内的内容。适合注册表未覆盖的标记；区域必须落在图片范围内。
+- `invisible` 通过图像模型重建像素，以破坏 SynthID 一类的不可见水印。它需要 GPU，会改变细节并降低保真度。本地没有 SynthID 像素检测器，因此 Imagen 无法证明隐藏水印已经消失。
+- `all` 依次执行可见、不可见与元数据移除。它和 `invisible` 一样需要许可证确认与 GPU；不可见阶段没有信号或没有 GPU 时会跳过，其余阶段照常运行。
+- 每条管线有各自的许可（`qwen-zimage`、`qwen21-zimage`、`sdxl-zimage`、`chroma-zimage`）；审阅后再加 `--accept-license`。预计超出内存上限时返回 `approval_required` 与预算摘要；用同一命令加 `--budget-approval DIGEST` 重跑。
+- `watermark setup --accept` 用 `visible` extra 创建隔离环境。按需追加 extra，例如不可见处理用 `--extras visible,qwen-zimage`，分类用 `--extras visible,classify,source-classify`，视频用 `--extras visible,video,diffusion`，然后重启 Imagen。`watermark update --accept` 构建并验证新环境后再切换；更新失败会保留旧环境。
+
+### 视频
+
+视频和图片一样通过 `session import-image` 导入；Imagen 保存容器字节，并通过 `ffprobe` 读取宽高与媒体类型。先安装 `ffmpeg` 与 `ffprobe`，再给隔离环境加上 `video` extra。
+
+```bash
+imagen session import-image SESSION_ID clip.mp4
+imagen watermark video identify ARTIFACT_ID
+imagen watermark video metadata ARTIFACT_ID
+imagen watermark video metadata ARTIFACT_ID --remove
+imagen watermark video visible ARTIFACT_ID --mark auto
+imagen watermark video all ARTIFACT_ID
+imagen watermark video invisible ARTIFACT_ID --noise-std 0.15
+```
+
+- `video identify` 只读检查容器来源信息与稳定的可见标记，不写任何文件。
+- `video metadata --remove` 用流复制重新封装，不转码视频或音频。
+- `video visible` 扫描完整序列，只移除在相邻帧稳定重复的标记；没有匹配时不写产物。
+- `video all` 移除稳定的可见标记与已验证的 AI 元数据，并且总会生成输出；`--include-invisible` 追加有损的 VAE 重建。
+- `video invisible` 用跨帧共享的噪声场重建像素，会改变分辨率、帧率和细节。本地没有公开的 SynthID 解码器，音频水印会报告为未验证。
+- 视频遵循与图片相同的规则：源产物不被修改，只发布新产物。
+
+### 目录批处理
+
+```bash
+imagen watermark batch ./images --mode visible --to ./images_clean
+imagen watermark batch ./images --mode all --accept-license --to ./images_clean
+imagen watermark video batch ./videos --mode all --to ./videos_clean
+```
+
+图片批处理模式为 `visible`、`metadata`、`all`、`invisible`；视频批处理模式为 `all`、`visible`、`metadata`。输出目录必须在源目录之外且为空，因此不会覆盖已有文件。单个文件失败会记录在 `data.report.errors`，不中断整批。批处理写入普通文件而不是受管产物，因此不创建 session/产物记录，也没有逐次运行的内存预算摘要；图片 `all` 与 `invisible` 仍要求 `--accept-license`。
+
+### 远程 GPU 端点
+
+水印任务可以改在已登记的远程 worker 上运行，而不是本地 GPU：
+
+```bash
+imagen remote add worker --endpoint https://worker.example --credential-ref env:WORKER_TOKEN
+imagen remote status worker
+imagen watermark invisible ARTIFACT_ID --remote worker --pipeline sdxl-zimage --accept-license
+```
+
+`remote add` 先探测 `/v1/meta`，探测失败不会写入登记。第一次上传图片的提交会返回 `approval_required` 与请求摘要；确认目标端点后，用完全相同的命令加 `--accept-remote DIGEST` 重跑。凭据只以 `env:`、`keyring:` 或 `private:` 引用保存，不会打印。
+
+用 `remote jobs list`、`remote job get`、`remote job resume`、`remote job retry-interrupted` 和 `remote job cancel` 查看与恢复已记录的 job。`resume` 重新读取 queued、running 或 succeeded 的任务；`retry-interrupted` 只对 interrupted 任务复用同一摘要。`unknown` 结果会被记录，但不会自动重试。`--max-seconds` 限制队列与共享卷端点的轮询时长；sync 端点在其自身的较短上限内直接返回。
 
 ## Agent skills
 
@@ -656,6 +745,10 @@ imagen tui
 
 **超分在推理前失败。** 缺少运行依赖或权重。运行时用 `superres install --backend cpu --accept` 安装；权重先运行 `superres models`，审阅许可后执行 `superres fetch --model NAME --accept`。
 
+**水印命令报告缺少环境。** 审阅计划后运行 `imagen watermark setup --accept`，再用 `imagen watermark status` 检查。水印处理始终留在隔离环境中，不会导入 TUI 或 CLI 进程。
+
+**视频命令报告缺少 ffmpeg 或依赖。** 安装 `ffmpeg` 与 `ffprobe`，运行 `imagen watermark setup --extras visible,video,diffusion --accept`，然后重启 Imagen。`video invisible` 与 `--include-invisible` 是有损的，无法证明 SynthID 已被移除。
+
 **命令返回 `permission_denied`。** 重试前先检查文件权限与所需的平台权限。在支持的平台上，交互式终端可以询问是否提权重跑同一命令，默认否。机器输出模式、`--no-interactive` 和 TUI 不会发起 UAC；agent 必须先询问人类，再执行任何提权操作。
 
 ## 后续发展
@@ -693,6 +786,16 @@ uv run mypy src
 使用问题或可复现的错误请[提交 issue](https://github.com/NekoCCN/ImagenCli/issues)，附上 Imagen 版本、操作系统、命令和脱敏后的错误。不要附带 API key、供应商原始响应或私有工作区导出。已发布的变更见 [Releases](https://github.com/NekoCCN/ImagenCli/releases)。
 
 欢迎范围明确的修改。行为变化请补充测试，保留端点请求的计划与批准边界；未经明确授权，不新增 live 或付费端点测试。
+
+## 致谢
+
+Imagen 建立在开源工作之上。以下是它所依赖项目的引用，不代表背书或隶属关系。
+
+- [remove-ai-watermarks](https://github.com/wiltodelta/remove-ai-watermarks)，作者 Victor Kuznetsov（wiltodelta），Apache-2.0：水印识别与移除引擎。Imagen 在隔离环境中运行它；可见标记注册表、元数据剥离、扩散管线与视频配置均来自上游作者。上游缺陷请向上游报告。
+- [FFmpeg](https://ffmpeg.org/) 与 FFprobe：视频容器检查、重新封装与转码。它们作为独立可执行文件运行，适用你所使用 FFmpeg 构建的许可。
+- [Textual](https://textual.textualize.io/)：终端界面框架。
+- [Pillow](https://python-pillow.org/)：图像解码与编码。
+- [ONNX Runtime](https://onnxruntime.ai/)、[OpenVINO](https://docs.openvino.ai/) 与 [PyTorch](https://pytorch.org/)：可选的本地推理运行时。模型权重保留各自的许可；下载前用 `imagen superres models` 查看。
 
 ## 许可证
 

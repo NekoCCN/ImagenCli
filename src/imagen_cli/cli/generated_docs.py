@@ -30,6 +30,12 @@ _PATTERN_SAMPLES = {
     r"^[0-9a-f]{64}$": "0" * 64,
     r"^[A-Za-z0-9_-]{1,2048}$": "example",
     r"^(artifact:art_[0-9a-f]{32}|file:.+)$": "artifact:art_" + "0" * 32,
+    r"^[a-z][a-z0-9-]{0,31}$": "modal",
+    r"^https?://": "https://worker.example",
+    r"^env:[A-Za-z_][A-Za-z0-9_]*$": "env:IMAGEN_WORKER_TOKEN",
+    r"^[0-9][0-9A-Za-z.+-]{0,31}$": "0.53.1",
+    r"^rmt_[0-9a-f]{32}$": "rmt_" + "0" * 32,
+    r"^-?\d+,-?\d+,\d+,\d+$": "4,8,16,12",
 }
 _CONSTRAINTS = (
     "const", "enum", "pattern", "minLength", "maxLength",
@@ -97,9 +103,9 @@ def _sample(spec: dict[str, Any], root: dict[str, Any]) -> Any:
     if isinstance(kind, list):
         kind = next((item for item in kind if item != "null"), None)
     if kind == "integer":
-        return spec.get("minimum", 0)
+        return spec.get("minimum", spec.get("exclusiveMinimum", -1) + 1)
     if kind == "number":
-        return spec.get("minimum", 0.0)
+        return spec.get("minimum", float(spec.get("exclusiveMinimum", -1) + 1))
     if kind == "boolean":
         return False
     if kind == "string":

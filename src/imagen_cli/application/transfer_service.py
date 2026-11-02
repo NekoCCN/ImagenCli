@@ -8,7 +8,12 @@ from pathlib import Path, PurePath
 from typing import Any
 
 from imagen_cli.domain.primitive import new_id
-from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore
+from imagen_cli.storage.artifacts import (
+    MAX_BYTES,
+    MAX_VIDEO_BYTES,
+    ArtifactStore,
+    looks_like_video,
+)
 from imagen_cli.storage.repositories import Repositories
 
 
@@ -31,7 +36,10 @@ def import_image(
     path = Path(source)
     if not path.is_file():
         raise FileNotFoundError(str(path))
-    if path.stat().st_size > MAX_BYTES:
+    with path.open("rb") as stream:
+        head = stream.read(16)
+    limit = MAX_VIDEO_BYTES if looks_like_video(head) else MAX_BYTES
+    if path.stat().st_size > limit:
         raise ValueError("image byte limit exceeded")
     data = path.read_bytes()
     identity = new_id("art")

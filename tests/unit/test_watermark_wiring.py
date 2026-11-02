@@ -1,0 +1,151 @@
+"""The watermark commands carry their choices into the worker and fail before publishing."""
+
+import io
+
+import pytest
+from PIL import Image
+
+from imagen_cli.application import remote_service, watermark_service
+from imagen_cli.application.container import Container
+from imagen_cli.application.session_service import SessionService
+from imagen_cli.cli.entrypoint import _parse
+from imagen_cli.cli.registry import discover
+
+ARTIFACT = "art_" + "a" * 32
+SESSION = "ses_" + "b" * 32
+
+
+def _png() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), (9, 8, 7)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_remote_watermark_forwards_pipeline_backend_and_session(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake(repositories, store, artifact, name, operation, **kwargs):
+        captured.update(kwargs, artifact=artifact, operation=operation)
+        return "approval_required", {"job_digest": "a" * 64}
+
+    monkeypatch.setattr(remote_service, "run_operation", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.execute("watermark invisible", {
+            "artifact": ARTIFACT, "remote": "modal", "pipeline": "sdxl-zimage",
+            "session": SESSION, "max_seconds": 600, "cpu_offload": True,
+        })
+        assert captured["pipeline"] == "sdxl-zimage"
+        assert captured["session"] == SESSION
+        assert captured["max_seconds"] == 600
+        assert captured["params"]["pipeline"] == "sdxl-zimage"
+        container.execute("watermark visible", {
+            "artifact": ARTIFACT, "remote": "modal", "backend": "lama",
+        })
+        assert captured["params"]["backend"] == "lama"
+
+
+def test_local_watermark_uses_max_seconds_as_the_timeout(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake(repositories, store, artifact, operation, **kwargs):
+        captured.update(kwargs)
+        return "succeeded", {}
+
+    monkeypatch.setattr(watermark_service, "run_operation", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.execute("watermark invisible", {
+            "artifact": ARTIFACT, "max_seconds": 1500, "accept_license": True,
+        })
+        assert captured["timeout"] == 1500
+        container.execute("watermark invisible", {
+            "artifact": ARTIFACT, "accept_license": True,
+        })
+        assert captured["timeout"] == 900
+
+
+def test_mark_takes_a_value():
+    command, args, _ = _parse([
+        "watermark", "visible", ARTIFACT, "--mark", "logo",
+    ])
+    assert command == "watermark visible"
+    assert args["mark"] == "logo"
+
+
+def test_an_ambiguous_session_publishes_nothing(tmp_path, monkeypatch):
+    def fake_run(request, *, timeout):
+        request["output"] and open(request["output"], "wb").write(_png())
+        return {"status": "succeeded", "raiw_version": "0.53.0"}
+
+    monkeypatch.setattr(watermark_service, "run", fake_run)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        service = SessionService(container.repositories, container.artifact_store)
+        first = service.create_session("first")
+        second = service.create_session("second")
+        turn = service.create_turn(
+            first.id, instruction="source", operation="generate",
+            resolved_profile_snapshot={}, model="fixture", parameters={},
+        )
+        source = service.save_artifact(turn.id, _png(), origin_manifest={"kind": "fixture"})
+        container.repositories.insert("artifact_links", {
+            "session_id": second.id, "artifact_id": source.id,
+            "role": "output", "created_at": source.created_at,
+        })
+        before = len(container.repositories.list("artifacts"))
+        with pytest.raises(ValueError, match="--session"):
+            watermark_service.run_operation(
+                container.repositories, container.artifact_store,
+                source.id, "watermark.visible",
+            )
+        assert len(container.repositories.list("artifacts")) == before
+
+
+def test_new_commands_advertise_their_own_data_schema():
+    for name in ("remote list", "remote job get", "watermark invisible",
+                 "watermark status", "superres doctor"):
+        schema = discover(name)["data_schema"]
+        assert "commands" not in schema["properties"], name
+
+
+def test_watermark_accepts_an_explicit_session():
+    command, args, _ = _parse([
+        "watermark", "visible", ARTIFACT, "--session", SESSION,
+    ])
+    assert command == "watermark visible"
+    assert args["session"] == SESSION
+
+
+def test_erase_parses_repeated_regions_and_fill_options():
+    command, args, _ = _parse([
+        "watermark", "erase", ARTIFACT,
+        "--region", "4,8,16,12", "--region", "40,8,16,12",
+        "--backend", "lama", "--inpaint-method", "ns", "--dilate", "5",
+    ])
+    assert command == "watermark erase"
+    assert args["regions"] == ["4,8,16,12", "40,8,16,12"]
+    assert args["backend"] == "lama"
+    assert args["inpaint_method"] == "ns"
+    assert args["dilate"] == 5
+
+
+def test_all_and_classify_parse_their_options():
+    command, args, _ = _parse([
+        "watermark", "all", ARTIFACT, "--backend", "migan",
+        "--sensitivity", "strict", "--pipeline", "sdxl-zimage",
+        "--strength", "0.35", "--seed", "7", "--force",
+    ])
+    assert command == "watermark all"
+    assert args["sensitivity"] == "strict"
+    assert args["strength"] == 0.35
+    assert args["seed"] == 7
+    command, args, _ = _parse(["watermark", "classify", ARTIFACT, "--source"])
+    assert command == "watermark classify"
+    assert args["source"] is True
+
+
+def test_setup_and_update_carry_the_requested_extras(monkeypatch, tmp_path):
+    monkeypatch.setenv("IMAGEN_RAIW_ROOT", str(tmp_path))
+    monkeypatch.setattr(watermark_service, "_imagen_version", lambda: "0.1.17")
+    plan = watermark_service.setup(accept=False, extras="visible,qwen-zimage")
+    assert "remove-ai-watermarks[visible,qwen-zimage]>=0.53,<0.54" in plan["packages"]
+    with pytest.raises(ValueError, match="extra"):
+        watermark_service.setup(accept=False, extras="visible,../../evil")

@@ -327,6 +327,17 @@ def _parameter_lines(item: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _import_line(data: dict[str, Any]) -> str | None:
+    """`session import-image` reports the session id beside the artifact it added."""
+    session, imported = data.get("session"), data.get("artifact")
+    if isinstance(session, str) and isinstance(imported, dict) and imported.get("id"):
+        return t(
+            f"✓ Imported {imported.get('id')} into session {session}",
+            f"✓ 已导入产物 {imported.get('id')} 到会话 {session}",
+        )
+    return None
+
+
 def _plain_lines(value: dict[str, Any]) -> list[str]:
     data = value.get("data") or {}
     lines: list[str] = []
@@ -368,7 +379,12 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             f"Profile {profile.get('id')} · {profile.get('provider')}/{profile.get('family')}"
             f" · {profile.get('model_default')} · revision {profile.get('revision')}"
         )
-    session = data.get("session") or {}
+    imported = _import_line(data)
+    if imported:
+        lines.append(imported)
+    session = data.get("session")
+    if not isinstance(session, dict):
+        session = {}
     if session and session.get("name"):
         lines.append(
             t(
@@ -637,7 +653,12 @@ def _rich(value: dict[str, Any], console: Any) -> None:
                 border_style="green",
             )
         )
-    session = data.get("session") or {}
+    imported = _import_line(data)
+    if imported:
+        console.print(imported)
+    session = data.get("session")
+    if not isinstance(session, dict):
+        session = {}
     if session and session.get("name"):
         intent = ""
         if session.get("intent"):

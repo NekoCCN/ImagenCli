@@ -547,7 +547,7 @@ class FilePickerScreen(Modal[Path | None]):
             )
         yield Vertical(
             Static(
-                t("Import image", "导入图片") if self.mode == "open"
+                t("Import image or video", "导入图片或视频") if self.mode == "open"
                 else t("Save image as", "图片另存为"),
                 classes="panel-title",
             ),
@@ -2397,6 +2397,10 @@ def _convert_arguments(command: str, values: dict[str, str]) -> dict[str, Any]:
                 import json
 
                 arguments[name] = json.loads(raw)
+            elif "," in (((spec.get("items") or {}).get("pattern")) or ""):
+                # Items are themselves comma-separated (x,y,w,h regions).
+                arguments[name] = [item.strip() for item in
+                                   raw.replace("\n", ";").split(";") if item.strip()]
             else:
                 arguments[name] = [item.strip() for item in raw.split(",") if item.strip()]
         elif kind == "object":
@@ -2652,7 +2656,7 @@ _BINDING_TEXT = {
     "providers": ("Providers", "端点"),
     "superres": ("Local models", "本地模型"),
     "model_process": ("Model processing", "模型处理"),
-    "import_image": ("Import image", "导入图片"),
+    "import_image": ("Import media", "导入媒体"),
     "save_artifact": ("Save image as", "图片另存为"),
     "new_session": ("New session", "新建会话"),
     "generate": ("Generate", "生成"),
@@ -2957,7 +2961,7 @@ class WorkbenchApp(App[None]):
         Binding("f", "fork", t("Fork session", "分支会话")),
         Binding("e", "export", t("Export session", "导出会话")),
         Binding("u", "model_process", t("Model processing", "模型处理")),
-        Binding("i", "import_image", t("Import image", "导入图片")),
+        Binding("i", "import_image", t("Import media", "导入媒体")),
         Binding("S", "save_artifact", t("Save image as", "图片另存为")),
         Binding("t", "transform", t("Transform", "变换")),
         Binding("o", "open_image", t("Open image", "打开图片")),
@@ -3355,6 +3359,13 @@ class WorkbenchApp(App[None]):
         width, height = artifact.get("width"), artifact.get("height")
         size = f"{width}×{height}" if width and height else ""
         self.meta.update(" · ".join(part for part in (self.meta_base, size) if part))
+        if str(artifact.get("media_type") or "").startswith("video/"):
+            self.preview.update(Text(
+                t("Video artifact\n\nPress o to open it with the system player",
+                  "视频产物\n\n按 o 用系统播放器打开"),
+                justify="center",
+            ))
+            return
         if not preview.supported():
             self.preview.update(preview.describe(artifact, path))
             return

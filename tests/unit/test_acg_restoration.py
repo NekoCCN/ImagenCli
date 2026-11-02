@@ -160,6 +160,7 @@ def test_install_accept_runs_runtime_then_downloads(tmp_path, monkeypatch):
         backend="cpu",
         runtime_install=runtime_install,
         download=download,
+        provider_probe=lambda: ["CPUExecutionProvider"],
     )
     assert [name for name, _ in calls] == ["runtime", "download"]
     assert calls[0][1]["accept"] is True
@@ -195,7 +196,11 @@ def test_install_without_a_model_touches_only_the_runtime(tmp_path, monkeypatch)
     assert "runtime_installed" in preview
 
     data = superres.install(
-        None, accept=True, backend="cpu", runtime_install=runtime_install
+        None,
+        accept=True,
+        backend="cpu",
+        runtime_install=runtime_install,
+        provider_probe=lambda: ["CPUExecutionProvider"],
     )
     assert calls == [{"backend": "cpu", "accept": True}]
     assert data["models"] == []

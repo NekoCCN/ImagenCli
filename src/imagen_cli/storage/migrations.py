@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -102,6 +102,34 @@ CREATE INDEX IF NOT EXISTS artifact_links_artifact ON artifact_links(artifact_id
 """
 
 
+SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS remote_jobs (
+ id TEXT PRIMARY KEY,
+ provider TEXT NOT NULL,
+ provider_job_id TEXT,
+ queue_id TEXT,
+ endpoint_host TEXT NOT NULL,
+ operation TEXT NOT NULL,
+ input_artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+ input_sha256 TEXT NOT NULL,
+ request_canonical TEXT NOT NULL,
+ job_digest TEXT NOT NULL,
+ pipeline TEXT,
+ gpu TEXT,
+ max_seconds INTEGER NOT NULL CHECK(max_seconds>0),
+ license TEXT,
+ worker_image_digest TEXT,
+ status TEXT NOT NULL,
+ artifact_id TEXT REFERENCES artifacts(id),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ payload TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS remote_jobs_status ON remote_jobs(status);
+CREATE UNIQUE INDEX IF NOT EXISTS remote_jobs_digest ON remote_jobs(job_digest);
+CREATE INDEX IF NOT EXISTS remote_jobs_provider ON remote_jobs(provider);
+"""
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     if connection.in_transaction:
         raise ValueError("migration requires no active transaction")
@@ -124,7 +152,12 @@ def migrate(connection: sqlite3.Connection) -> None:
         finally:
             backup.close()
     # Each step owns its transaction so DDL and the version advance are atomic.
-    steps = [(1, SCHEMA), (2, SCHEMA_V2)] if version == 0 else [(2, SCHEMA_V2)]
+    if version == 0:
+        steps = [(1, SCHEMA), (2, SCHEMA_V2), (3, SCHEMA_V3)]
+    elif version == 1:
+        steps = [(2, SCHEMA_V2), (3, SCHEMA_V3)]
+    else:
+        steps = [(3, SCHEMA_V3)]
     try:
         for target, script in steps:
             if target <= version:

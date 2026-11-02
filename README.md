@@ -27,9 +27,19 @@ Connect an OpenAI-compatible Images endpoint or Gemini native `generateContent` 
 - **Review before generating.** Inspect a frozen request and its digest, then approve and execute it as separate steps. Unknown outcomes are not retried automatically.
 - **Keep image work together.** Browse, fork, export, compare, and make contact sheets from saved artifacts and their provenance.
 - **Process locally.** Use ordinary transforms or the separate model-processing page for restoration and upscaling. Large processing asks for budget confirmation first.
+- **Remove watermarks on explicit terms.** Inspect first, keep the source, and confirm the pipeline license and any image upload before a run.
 - **Automate with explicit boundaries.** Discover commands through JSON Schema, use bundled agent skills, and run authorized batches or local background jobs.
 
 Help, errors, and TUI text support English and Simplified Chinese. JSON keys, status names, and command identifiers stay the same.
+
+## What's new
+
+The latest release adds a local watermark workbench and media batches:
+
+- **Images:** `watermark identify`, `metadata`, `visible`, `erase`, `invisible`, `all`, and `classify`, with explicit license and memory-budget gates.
+- **Video:** `watermark video identify`, `metadata`, `visible`, `all`, and `invisible`, including stream-copy metadata removal and stable visible-mark removal.
+- **Batches:** `watermark batch` and `watermark video batch` process a directory into a new, empty output directory without touching the source.
+- **Isolated extras:** `watermark setup --extras ...` installs only the dependency groups a task needs, such as `visible,video,diffusion`.
 
 ## Install
 
@@ -158,7 +168,9 @@ The workbench has Import and Save as buttons. More (or `F10`) opens the remainin
 | Generate / edit | `g` / `m` | `generate`, `edit` |
 | Approve / execute / retry a plan | plan page: `a`, `enter`, `r` | `plan approve`, `plan execute`, `plan retry` |
 | Ordinary image processing | `t`; `p` edits parameters | `ops`, `transform`, `compare`, `sheet` |
-| Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark` |
+| Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark`, `superres doctor` |
+| Watermark inspect / remove | command palette; no dedicated page | `watermark identify`, `watermark metadata`, `watermark visible`, `watermark erase`, `watermark invisible`, `watermark all`, `watermark classify`, `watermark batch`, `watermark video ...`, `watermark status` |
+| Remote GPU job | command palette; no dedicated page | `remote ...`, `watermark ... --remote NAME` |
 | Open image / folder | `o` / `O` | `asset open [--folder]` |
 | Import image / save a copy | `i` / `S` | `session import-image`, `asset save` |
 | Fork / export / delete session | `f`, `e`, `x` | `session fork`, `session export`, `session delete` |
@@ -514,6 +526,7 @@ packages are refused, not silently removed. GPU drivers are not installed. Resta
 ImagenCli after installation. In a uv-managed source checkout, keep `--extra ai-onnx`
 (or the selected backend extra) in subsequent `uv run`/`uv sync` commands.
 The TUI command palette exposes the same backend and acceptance choices.
+Before trusting a backend for a full image, `imagen superres doctor --backend cuda` runs one tile on a 32×32 sample and reports which provider actually ran. It proves the backend, not output quality.
 
 Run upscaling or same-size restoration through the dedicated model-processing command:
 
@@ -553,6 +566,82 @@ imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
 Downloaded weights are staged, checked against a pinned SHA-256 digest, and only then published into the weights directory. Failed or mismatched downloads leave no usable weight behind.
 
 Imagen installs the upscaling runtime and weights only when you run the install command and accept the license. Source and weight licenses are granted separately, so read the weight license before downloading. The model generates new detail when it reconstructs texture, and that detail may differ from the source image.
+
+## Watermark removal
+
+Watermark commands run in a separate, isolated `remove-ai-watermarks` environment and always write a new artifact; the source image is never modified. Start read-only:
+
+```bash
+imagen watermark status
+imagen watermark identify ARTIFACT_ID
+imagen watermark metadata ARTIFACT_ID
+imagen watermark classify ARTIFACT_ID
+```
+
+`status` reports whether the isolated environment is ready; `identify` checks C2PA, EXIF, XMP, IPTC, TC260, and visible marks; `metadata` without `--remove` returns the same kind of report and publishes nothing. `classify` reads pixels only: it classifies a photograph or, with `--source`, the likely source pipeline. It is not provenance and does not detect SynthID.
+
+To produce a new image:
+
+```bash
+imagen watermark metadata ARTIFACT_ID --remove
+imagen watermark visible ARTIFACT_ID
+imagen watermark erase ARTIFACT_ID --region 1640,1930,400,100
+imagen watermark invisible ARTIFACT_ID --pipeline sdxl-zimage --accept-license
+imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
+```
+
+- `metadata --remove` strips AI metadata into a copy. It does not remove pixel-level watermarks.
+- `visible` removes registered visible marks with a CPU backend (`cv2`, `migan`, or `lama`); `--mark NAME` targets one registered mark and `--sensitivity strict` keeps the high-precision detector gate.
+- `erase` removes whatever lies inside each `--region x,y,width,height` box with the same CPU fill backends. Use it for marks the registry does not cover; the box must lie inside the image.
+- `invisible` regenerates pixels through an image model to disrupt invisible watermarks such as SynthID-class marks. It needs a GPU, changes fine detail, and lowers fidelity. There is no local SynthID pixel detector, so Imagen cannot certify that a hidden mark is gone.
+- `all` runs visible, invisible, and metadata removal in order. It needs the same license confirmation and GPU as `invisible`; when the invisible stage has no signal or no GPU it is skipped and the other stages still run.
+- Each pipeline carries its own license (`qwen-zimage`, `qwen21-zimage`, `sdxl-zimage`, `chroma-zimage`); review it before `--accept-license`. A run estimated above the memory cap returns `approval_required` with a budget digest; repeat the identical command with `--budget-approval DIGEST`.
+- `watermark setup --accept` creates the isolated environment with the `visible` extra. Add the extras you need, such as `--extras visible,qwen-zimage` for invisible work, `--extras visible,classify,source-classify` for classification, or `--extras visible,video,diffusion` for video, then restart Imagen. `watermark update --accept` builds and probes a new one, then switches; a failed update keeps the previous environment.
+
+### Video
+
+Videos are imported like images with `session import-image`; Imagen stores the container bytes and reads width, height, and media type through `ffprobe`. Install `ffmpeg` and `ffprobe`, then add the `video` extra to the isolated environment.
+
+```bash
+imagen session import-image SESSION_ID clip.mp4
+imagen watermark video identify ARTIFACT_ID
+imagen watermark video metadata ARTIFACT_ID
+imagen watermark video metadata ARTIFACT_ID --remove
+imagen watermark video visible ARTIFACT_ID --mark auto
+imagen watermark video all ARTIFACT_ID
+imagen watermark video invisible ARTIFACT_ID --noise-std 0.15
+```
+
+- `video identify` reads container provenance and stable visible marks without writing anything.
+- `video metadata --remove` remuxes with stream copy; it does not transcode video or audio.
+- `video visible` scans the complete sequence and removes a mark only when it repeats at a stable position. When no mark matches, it writes no artifact.
+- `video all` removes a stable visible mark and verified AI metadata, and always produces an output. `--include-invisible` adds the lossy VAE regeneration profile.
+- `video invisible` regenerates pixels with one noise field shared across frames. It changes resolution, frame rate, and detail. There is no public local SynthID decoder, and the audio watermark is reported as unverified.
+- Video work follows the same rule as images: the source artifact stays untouched; a new artifact is published.
+
+### Directory batches
+
+```bash
+imagen watermark batch ./images --mode visible --to ./images_clean
+imagen watermark batch ./images --mode all --accept-license --to ./images_clean
+imagen watermark video batch ./videos --mode all --to ./videos_clean
+```
+
+Image batch modes are `visible`, `metadata`, `all`, and `invisible`; video batch modes are `all`, `visible`, and `metadata`. The output directory must be outside the source directory and empty, so an existing file is never replaced. A per-file failure is reported in `data.report.errors` and does not abort the run. Batches write plain files rather than managed artifacts, so they create no session/artifact records and no per-run budget digest; image `all` and `invisible` still require `--accept-license`.
+
+### Remote GPU endpoints
+
+Watermark work can run on a registered remote worker instead of the local GPU:
+
+```bash
+imagen remote add worker --endpoint https://worker.example --credential-ref env:WORKER_TOKEN
+imagen remote status worker
+imagen watermark invisible ARTIFACT_ID --remote worker --pipeline sdxl-zimage --accept-license
+```
+
+`remote add` probes `/v1/meta` and stores nothing if the probe fails. The first submission that uploads an image returns `approval_required` with a request digest; review the destination, then rerun the identical command with `--accept-remote DIGEST`. Credentials stay as `env:`, `keyring:`, or `private:` references and are never printed.
+
+Inspect and recover recorded jobs with `remote jobs list`, `remote job get`, `remote job resume`, `remote job retry-interrupted`, and `remote job cancel`. `resume` re-reads a queued, running, or succeeded job; `retry-interrupted` reuses the same digest only for an interrupted job. An `unknown` outcome is recorded, not retried automatically. `--max-seconds` bounds polling for queue and shared-volume endpoints; a sync endpoint answers within its own short limit.
 
 ## Agent skills
 
@@ -660,6 +749,10 @@ imagen tui
 
 **Upscaling fails before inference.** The runtime or weights are missing. For the runtime, run `superres install --backend cpu --accept`. For weights, run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
 
+**Watermark commands report a missing environment.** Run `imagen watermark setup --accept` after reviewing the plan, then check `imagen watermark status`. Watermark work stays in an isolated environment and is never imported into the TUI or CLI process.
+
+**Video commands report a missing ffmpeg or dependency.** Install `ffmpeg` and `ffprobe`, run `imagen watermark setup --extras visible,video,diffusion --accept`, then restart Imagen. `video invisible` and `--include-invisible` are lossy and cannot certify SynthID removal.
+
 **A command fails with `permission_denied`.** Check the file permissions and required platform privileges before retrying. Where supported, an interactive terminal offers elevation for the same command, defaulting to No. Machine output modes, `--no-interactive`, and the TUI do not launch UAC; an agent must ask its human before any elevated action.
 
 ## Roadmap
@@ -697,6 +790,16 @@ Source layout:
 For usage questions or reproducible bugs, [open an issue](https://github.com/NekoCCN/ImagenCli/issues) with the Imagen version, OS, command, and sanitized error. Do not attach API keys, raw provider responses, or private workspace exports. See [Releases](https://github.com/NekoCCN/ImagenCli/releases) for published changes.
 
 Small, focused changes are preferred. Add tests for behavior changes, keep provider requests behind the plan and approval boundary, and do not add live or paid provider tests without explicit authorization.
+
+## Acknowledgements
+
+Imagen builds on open-source work. These are references to the projects whose behavior it relies on, not an endorsement or affiliation.
+
+- [remove-ai-watermarks](https://github.com/wiltodelta/remove-ai-watermarks) by Victor Kuznetsov (wiltodelta), Apache-2.0: the watermark identification and removal engine. Imagen runs it in an isolated environment; its visible-mark registry, metadata stripping, diffusion pipelines, and video profiles are the upstream authors' work. Report upstream defects upstream.
+- [FFmpeg](https://ffmpeg.org/) and FFprobe: video container inspection and remuxing or transcoding. They run as separate executables; the license of your FFmpeg build applies.
+- [Textual](https://textual.textualize.io/): the terminal UI framework.
+- [Pillow](https://python-pillow.org/): image decoding and encoding.
+- [ONNX Runtime](https://onnxruntime.ai/), [OpenVINO](https://docs.openvino.ai/), and [PyTorch](https://pytorch.org/): optional local inference runtimes. Model weights keep their own licenses; check `imagen superres models` before downloading.
 
 ## License
 

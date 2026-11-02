@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -124,6 +125,37 @@ def available_providers() -> list[str]:
     return list(onnxruntime.get_available_providers())
 
 
+def _backend_provider(backend: str) -> str:
+    if backend not in PROVIDERS:
+        raise ValueError("unknown backend: " + backend)
+    return PROVIDERS[backend][0]
+
+
+_PROVIDER_PROBE = (
+    "import onnxruntime;print('\\n'.join(onnxruntime.get_available_providers()))"
+)
+
+
+def _subprocess_providers() -> list[str]:
+    """A runtime imported before installation keeps a stale provider list."""
+    import subprocess
+    import sys
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", _PROVIDER_PROBE],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
 def _choose_provider(backend: str | None, device: str | None) -> list[str]:
     providers = available_providers()
     if not providers:
@@ -171,11 +203,35 @@ def digest_path(model: str, suffix: str = ".onnx") -> Path:
 
 def _recorded_digest(model: str, suffix: str) -> str | None:
     path = digest_path(model, suffix)
-    return path.read_text(encoding="ascii").strip() if path.exists() else None
+    if not path.is_file():
+        return None
+    try:
+        value = path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        return None
+    return value
 
 
 def _record_digest(model: str, suffix: str, digest: str) -> None:
-    digest_path(model, suffix).write_text(digest)
+    path = digest_path(model, suffix)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".part")
+    temporary.write_text(digest, encoding="ascii")
+    temporary.replace(path)
+
+
+def _weight_state(path: Path, expected: str | None, verify: bool) -> str:
+    if not path.exists():
+        return "missing"
+    if not path.is_file() or path.stat().st_size > MAX_WEIGHT_BYTES:
+        return "corrupt"
+    if not verify:
+        return "ready" if expected is not None else "unverified"
+    if expected is None:
+        return "unverified"
+    return "ready" if hashlib.sha256(path.read_bytes()).hexdigest() == expected else "corrupt"
 
 
 def _download(url: str, target: Path) -> None:
@@ -456,10 +512,14 @@ def op(image: Image.Image, *, model: str = "realesrgan-x4plus",
     )[0]
 
 
-def catalog() -> dict[str, Any]:
+def catalog(*, verify: bool = False) -> dict[str, Any]:
     models = []
     for name, entry in sorted(MANIFEST.items()):
         path = weights_path(name)
+        expected = entry.get("sha256") or _recorded_digest(name, ".onnx")
+        state = _weight_state(path, expected, verify)
+        if verify and state == "unverified" and path.is_file():
+            _record_digest(name, ".onnx", hashlib.sha256(path.read_bytes()).hexdigest())
         models.append({
             "model": name,
             "task": entry.get("task", "upscale"),
@@ -471,11 +531,103 @@ def catalog() -> dict[str, Any]:
             "note": entry.get("note"),
             "downloadable": entry.get("url") is not None,
             "downloaded": path.exists(),
+            "state": state,
             "bytes": path.stat().st_size if path.exists() else None,
             "sha256": entry.get("sha256"),
             "multiple": entry.get("multiple", 1),
         })
-    return {**backend_report(), "models": models}
+    return {**backend_report(), "models": models, "verified": verify}
+
+
+DOCTOR_AUTO_ORDER = ("cuda", "openvino", "cpu")
+
+
+def _runtime_report() -> dict[str, Any]:
+    from importlib import metadata
+
+    for name in ("onnxruntime-gpu", "onnxruntime-openvino",
+                 "onnxruntime-directml", "onnxruntime"):
+        try:
+            return {"package": name, "version": metadata.version(name)}
+        except metadata.PackageNotFoundError:
+            continue
+    return {"package": None, "version": None}
+
+
+def _doctor_backend(backend: str, providers: list[str]) -> tuple[str | None, bool]:
+    if backend == "auto":
+        for index, candidate in enumerate(DOCTOR_AUTO_ORDER):
+            if _backend_provider(candidate) in providers:
+                return candidate, index > 0
+        return None, False
+    if backend not in PROVIDERS:
+        raise ValueError("unknown backend: " + backend)
+    return (backend, False) if _backend_provider(backend) in providers else (None, False)
+
+
+def _doctor_model(model: str | None) -> str | None:
+    if model is not None:
+        if model not in MANIFEST:
+            raise ValueError("unknown super-resolution model")
+        return model
+    for name in sorted(MANIFEST):
+        if weights_path(name).is_file():
+            return name
+    return None
+
+
+def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]:
+    """Prove the requested backend with one tile; never downloads or saves an artifact."""
+    providers = available_providers()
+    used, fallback = _doctor_backend(backend, providers)
+    data: dict[str, Any] = {
+        "providers": providers,
+        "requested_backend": backend,
+        "backend": used,
+        "provider_used": _backend_provider(used) if used else None,
+        "fallback": fallback,
+        "runtime": _runtime_report(),
+        "model": None,
+        "weights_verified": False,
+        "inference": False,
+        "latency_ms": None,
+        "output_sha256": None,
+        "status": "ready" if used else "missing",
+        "missing": [],
+    }
+    if used is None:
+        if backend != "auto":
+            data["missing"] = [_backend_provider(backend)]
+            data["hint"] = (
+                "CUDA needs the onnxruntime-gpu build plus CUDA 12.x and cuDNN 9 on the "
+                "loader path; run: imagen superres install --backend cuda --accept, then "
+                "start a new shell."
+                if backend == "cuda"
+                else f"run: imagen superres install --backend {backend} --accept"
+            )
+        else:
+            data["hint"] = (
+                "no ONNX provider is available; run: imagen superres install --backend cpu --accept"
+            )
+        return data
+    selected = _doctor_model(model)
+    data["model"] = selected
+    if selected is None:
+        data["hint"] = "no downloaded weights; run: imagen superres install --model NAME --accept"
+        return data
+    with tempfile.TemporaryDirectory(prefix="imagen-doctor-") as _scratch:
+        started = time.monotonic()
+        output, engine = upscale(
+            Image.new("RGB", (32, 32), (127, 127, 127)),
+            model=selected, backend=used, tile=32, overlap=0, accept=False,
+        )
+        data["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+    data["weights_verified"] = True
+    data["inference"] = True
+    data["provider_used"] = engine.get("provider", data["provider_used"])
+    data["weights_sha256"] = engine.get("weights_sha256")
+    data["output_sha256"] = hashlib.sha256(output.tobytes()).hexdigest()
+    return data
 
 
 def fetch_choices() -> list[tuple[str, str]]:
@@ -503,6 +655,7 @@ def install(
     accept: bool = False,
     runtime_install: Callable[..., tuple[str, dict[str, Any]]] | None = None,
     download: Callable[[str, Path], None] | None = None,
+    provider_probe: Callable[[], list[str]] | None = None,
 ) -> dict[str, Any]:
     """Preview or install the inference runtime and requested model weights.
 
@@ -517,7 +670,8 @@ def install(
     for name in names:
         if name not in MANIFEST:
             raise ValueError("unknown super-resolution model")
-    runtime_ready = bool(available_providers())
+    provider = _backend_provider(backend)
+    runtime_ready = provider in available_providers()
     runtime_data: dict[str, Any] | None = None
     if accept and not runtime_ready:
         if runtime_install is None:
@@ -525,7 +679,7 @@ def install(
 
             runtime_install = runtime_service.install
         _, runtime_data = runtime_install(backend=backend, accept=True)
-        runtime_ready = bool(runtime_data.get("installed")) or bool(available_providers())
+        runtime_ready = provider in (provider_probe or _subprocess_providers)()
     rows = []
     for name in names:
         entry = MANIFEST[name]

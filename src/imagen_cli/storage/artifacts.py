@@ -2,7 +2,11 @@
 
 import hashlib
 import io
+import json
 import os
+import shutil
+import subprocess
+import tempfile
 import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,7 +21,72 @@ from imagen_cli.storage.repositories import Repositories
 from imagen_cli.storage.safety import fsync_directory, safe_path, secure_directory, storage_id
 
 MAX_BYTES = 64 * 1024 * 1024
+MAX_VIDEO_BYTES = 1024 * 1024 * 1024
 MAX_PIXELS = 100_000_000
+
+_IMAGE_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"avif", b"avis"}
+_VIDEO_SUFFIX = {
+    "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+    "video/x-matroska": ".mkv", "video/x-msvideo": ".avi", "video/x-flv": ".flv",
+}
+
+
+def looks_like_video(data: bytes) -> bool:
+    """Container sniffing that leaves HEIF/AVIF images to Pillow."""
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return data[8:12] not in _IMAGE_BRANDS
+    return (
+        data.startswith(b"\x1aE\xdf\xa3")          # EBML: Matroska or WebM
+        or (data.startswith(b"RIFF") and data[8:12] == b"AVI ")
+        or data.startswith(b"FLV")
+    )
+
+
+def _video_type(data: bytes) -> str:
+    if data.startswith(b"RIFF"):
+        return "video/x-msvideo"
+    if data.startswith(b"FLV"):
+        return "video/x-flv"
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return "video/webm" if b"webm" in data[:64] else "video/x-matroska"
+    return "video/quicktime" if data[8:12] == b"qt  " else "video/mp4"
+
+
+def _video_metadata(data: bytes) -> dict[str, Any]:
+    executable = shutil.which("ffprobe")
+    if executable is None:
+        raise ValueError("video artifacts require ffprobe on PATH")
+    media_type = _video_type(data)
+    fd, name = tempfile.mkstemp(suffix=_VIDEO_SUFFIX[media_type])
+    os.close(fd)
+    try:
+        Path(name).write_bytes(data)
+        try:
+            completed = subprocess.run(
+                [executable, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-of", "json", name],
+                capture_output=True, text=True, timeout=120, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ValueError("invalid video") from error
+    finally:
+        Path(name).unlink(missing_ok=True)
+    if completed.returncode != 0:
+        raise ValueError("invalid video")
+    try:
+        streams = json.loads(completed.stdout).get("streams") or []
+        width, height = int(streams[0]["width"]), int(streams[0]["height"])
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("video has no readable video stream") from error
+    if width <= 0 or height <= 0:
+        raise ValueError("video has no readable video stream")
+    return {
+        "width": width,
+        "height": height,
+        "media_type": media_type,
+        "byte_size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
 
 
 _IMAGE_LIMIT_LOCK = RLock()
@@ -42,8 +111,12 @@ def inspect_media(
 ) -> dict[str, Any]:
     max_pixels = MAX_PIXELS if max_pixels is None else max_pixels
     max_bytes = MAX_BYTES if max_bytes is None else max_bytes
+    if looks_like_video(data):
+        if not data or len(data) > MAX_VIDEO_BYTES:
+            raise ValueError("media byte limit exceeded")
+        return _video_metadata(data)
     if not data or len(data) > max_bytes:
-        raise ValueError("image byte limit exceeded")
+        raise ValueError("media byte limit exceeded")
     try:
         with image_limits(allow_large), warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -134,7 +207,9 @@ class ArtifactStore:
         manifest = row.get("origin_manifest") or {}
         approved = bool(manifest.get("kind") == "postprocess" and manifest.get("budget_approval"))
         limits = manifest.get("local_media_limits", {}) if approved else {}
-        max_bytes = max(MAX_BYTES, limits.get("bytes", MAX_BYTES))
+        base = MAX_VIDEO_BYTES if str(row.get("media_type") or "").startswith("video/") \
+            else MAX_BYTES
+        max_bytes = max(base, limits.get("bytes", base))
         with path.open("rb") as source:
             data = source.read(max_bytes + 1)
         actual = inspect_media(data, max_pixels=max(MAX_PIXELS, limits.get("pixels", MAX_PIXELS)),

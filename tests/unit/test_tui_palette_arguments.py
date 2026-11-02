@@ -13,3 +13,12 @@ def test_const_true_confirmation_reaches_the_command_as_true():
         "session delete", {"session": "ses_" + "a" * 32, "yes": "true"}
     )
     assert arguments["yes"] is True
+
+
+def test_region_items_keep_their_commas_in_the_palette():
+    arguments = _convert_arguments(
+        "watermark erase",
+        {"artifact": "art_" + "a" * 32,
+         "regions": "4,8,16,12\n40,8,16,12"},
+    )
+    assert arguments["regions"] == ["4,8,16,12", "40,8,16,12"]
