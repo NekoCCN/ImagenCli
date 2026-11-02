@@ -639,6 +639,18 @@ imagen watermark invisible ARTIFACT_ID --remote worker --pipeline sdxl-zimage --
 
 用 `remote jobs list`、`remote job get`、`remote job resume`、`remote job retry-interrupted` 和 `remote job cancel` 查看与恢复已记录的 job。`resume` 重新读取 queued、running 或 succeeded 的任务；`retry-interrupted` 只对 interrupted 任务复用同一摘要。`unknown` 结果会被记录，但不会自动重试。`--max-seconds` 限制队列与共享卷端点的轮询时长；sync 端点在其自身的较短上限内直接返回。
 
+### 部署 worker（Modal 或 Salad）
+
+仓库提供同一套 worker 镜像和两个部署目标：Modal 用 `deploy/modal_app.py`，SaladCloud 用 `deploy/salad/`。这些文件不随 wheel 发布，部署需在仓库检出中运行；[deploy/README.md](deploy/README.md) 说明 Modal 密钥、GPU 规格与验证，[deploy/salad/README.md](deploy/salad/README.md) 说明队列模式。
+
+```bash
+modal deploy deploy/modal_app.py
+imagen remote add modal --endpoint https://WORKSPACE--imagen-worker-web.modal.run --credential-ref env:IMAGEN_WORKER_TOKEN
+imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref env:IMAGEN_WORKER_TOKEN --gateway-credential-ref env:SALAD_API_KEY
+```
+
+Salad 的 Container Gateway 还需要额外的 `--gateway-credential-ref env:SALAD_API_KEY`；worker 自己的 bearer token 仍放在 `--credential-ref`。推送镜像或创建云资源属于对外动作，只有获得明确授权后才执行。
+
 ## Agent skills
 
 随包 skills 教 agent 何时使用 Imagen、如何发现命令与 schema、如何遵守计划与批准流程、如何处理 unknown outcome，以及如何守住费用、凭据和权重下载边界。

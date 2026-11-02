@@ -643,6 +643,18 @@ imagen watermark invisible ARTIFACT_ID --remote worker --pipeline sdxl-zimage --
 
 Inspect and recover recorded jobs with `remote jobs list`, `remote job get`, `remote job resume`, `remote job retry-interrupted`, and `remote job cancel`. `resume` re-reads a queued, running, or succeeded job; `retry-interrupted` reuses the same digest only for an interrupted job. An `unknown` outcome is recorded, not retried automatically. `--max-seconds` bounds polling for queue and shared-volume endpoints; a sync endpoint answers within its own short limit.
 
+### Deploying the worker (Modal or Salad)
+
+The repository ships one worker image with two deployment targets: `deploy/modal_app.py` for Modal and `deploy/salad/` for SaladCloud. These files are not packaged in the wheel, so deployment runs from a checkout; [deploy/README.md](deploy/README.md) covers the Modal secret, GPU sizing, and verification, and [deploy/salad/README.md](deploy/salad/README.md) covers queue mode.
+
+```bash
+modal deploy deploy/modal_app.py
+imagen remote add modal --endpoint https://WORKSPACE--imagen-worker-web.modal.run --credential-ref env:IMAGEN_WORKER_TOKEN
+imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref env:IMAGEN_WORKER_TOKEN --gateway-credential-ref env:SALAD_API_KEY
+```
+
+Salad's Container Gateway requires the extra `--gateway-credential-ref env:SALAD_API_KEY`; the worker's own bearer token stays in `--credential-ref`. Publishing an image or creating cloud resources is outward-facing, so do it only after explicit authorization.
+
 ## Agent skills
 
 Imagen ships skills that teach coding agents when to use it, how to discover commands and schemas, how to follow the plan and approval lifecycle, how to handle unknown outcomes, and how to respect cost, credential, and weight-download boundaries.

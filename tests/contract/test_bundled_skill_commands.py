@@ -100,5 +100,7 @@ def _known_flags() -> set[str]:
 @pytest.mark.parametrize("path", sorted(BUNDLED.rglob("*.md")), ids=lambda path: path.name)
 def test_documented_flags_exist(path):
     known = _known_flags()
-    mentioned = set(re.findall(r"--[a-z][a-z0-9-]+", path.read_text(encoding="utf-8")))
+    # Hostnames such as Modal's ``workspace--app`` are not CLI flags.
+    text = re.sub(r"https?://\S+", "", path.read_text(encoding="utf-8"))
+    mentioned = set(re.findall(r"--[a-z][a-z0-9-]+", text))
     assert not mentioned - known, f"unknown flags in {path.name}: {sorted(mentioned - known)}"

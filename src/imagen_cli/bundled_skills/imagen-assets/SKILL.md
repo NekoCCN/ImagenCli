@@ -1,6 +1,6 @@
 ---
 name: imagen-assets
-version: 1.7.1
+version: 1.8.0
 description: Use when browsing or resuming Imagen sessions, importing or saving artifacts, applying local transforms, comparing images, upscaling, removing watermarks from images or video in single runs or directory batches, using a remote GPU endpoint, or reclaiming workspace disk space.
 ---
 
@@ -111,6 +111,14 @@ Image modes are `visible`, `metadata`, `all`, `invisible`; video modes are `all`
 ## Remote GPU endpoints
 
 Watermark work can run on a registered remote worker instead of the local GPU. Register an endpoint only when the user authorized that endpoint and supplied a credential reference; never read, print, or embed the credential itself.
+
+The repository ships one worker image with two deployment targets: `deploy/modal_app.py` for Modal and `deploy/salad/` for SaladCloud. They are not packaged in the wheel, so deploy from a clone and follow `deploy/README.md` (Modal secret, GPU sizing, verification) and `deploy/salad/README.md` (queue mode). Salad's Container Gateway additionally requires `--gateway-credential-ref env:SALAD_API_KEY`; the worker's own bearer token stays in `--credential-ref`. Publishing an image or creating cloud resources is outward-facing: do it only after explicit authorization.
+
+```bash
+.venv/bin/modal deploy deploy/modal_app.py
+imagen remote add modal --endpoint https://WORKSPACE--imagen-worker-web.modal.run --credential-ref env:IMAGEN_WORKER_TOKEN --agent
+imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref env:IMAGEN_WORKER_TOKEN --gateway-credential-ref env:SALAD_API_KEY --agent
+```
 
 ```bash
 imagen remote add worker --endpoint https://worker.example --credential-ref env:WORKER_TOKEN --agent
