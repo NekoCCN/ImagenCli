@@ -104,3 +104,26 @@ def test_documented_flags_exist(path):
     text = re.sub(r"https?://\S+", "", path.read_text(encoding="utf-8"))
     mentioned = set(re.findall(r"--[a-z][a-z0-9-]+", text))
     assert not mentioned - known, f"unknown flags in {path.name}: {sorted(mentioned - known)}"
+
+
+def test_salad_control_plane_examples_name_their_org_and_project():
+    """A Salad example without org/project fails before it reaches the API."""
+    missing = []
+    for path in sorted(BUNDLED.rglob("*.md")):
+        for kind, lines in _blocks(path.read_text(encoding="utf-8")):
+            if kind not in {"", "bash", "sh"}:
+                continue
+            joined, buffer = [], ""
+            for line in lines:
+                buffer += line.rstrip()
+                if buffer.endswith("\\"):
+                    buffer = buffer[:-1] + " "
+                    continue
+                joined.append(buffer.strip())
+                buffer = ""
+            joined = [*joined, buffer.strip()] if buffer.strip() else joined
+            for line in joined:
+                if line.startswith("imagen deploy") and "--vendor salad" in line:
+                    if "--salad-org" not in line or "--salad-project" not in line:
+                        missing.append(f"{path.name}: {line}")
+    assert not missing, "\n".join(missing)

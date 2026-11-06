@@ -671,11 +671,11 @@ imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref en
 
 Salad 的 Container Gateway 还需要额外的 `--gateway-credential-ref env:SALAD_API_KEY`；worker 自己的 bearer token 仍放在 `--credential-ref`。推送镜像或创建云资源属于对外动作，只有获得明确授权后才执行。
 
-`imagen deploy` 在仓库检出中管理两套控制面。`deploy status` 只读，报告就绪状态、已登记 remote 与漂移警告；`deploy update` 先打印计划并要求 `--accept`。Salad 改名是先建后删：新组必须 `/readyz` 通过，`--yes` 才会删除旧组。凭据接受 `env:NAME` 或 `private:NAME`；`imagen deploy secret set --name NAME --key-file PATH` 把密钥写入私有存储，只回显引用。
+`imagen deploy` 在仓库检出中管理两套控制面。`deploy status` 只读，报告就绪状态、已登记 remote 与漂移警告；`deploy update` 先打印计划并要求 `--accept`。Salad 改名是先建后删：新组必须 `/readyz` 通过，`--yes` 才会删除旧组。凭据接受 `env:NAME` 或 `private:NAME`；`imagen deploy secret set --name NAME --key-file PATH` 把密钥写入私有存储，只回显引用。每条 Salad 命令都需要 `--salad-org` 与 `--salad-project`，可以写在命令行上，也可以写成 `config.json` 里的 `deploy.salad.organization` 和 `deploy.salad.project`。
 
 ```bash
-imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN
-imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --accept
+imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT
+imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT --accept
 ```
 
 两套镜像需要显式构建；私有包推送时还要先登录 registry：
@@ -693,7 +693,7 @@ imagen deploy build --tag TAG --image ghcr.io/PRIVATE/worker:TAG --push --regist
 `deploy remove` 删除 Salad 容器组或停止 Modal 应用。它是唯一会销毁云端状态的命令，因此需要同时给 `--accept` 与 `--yes`；Salad 侧会先读取该组，所以名字打错会直接报错，而不是静默返回成功：
 
 ```bash
-imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --accept --yes
+imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --salad-org ORGANIZATION --salad-project PROJECT --accept --yes
 imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes
 ```
 

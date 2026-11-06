@@ -196,3 +196,30 @@ def test_discovery_schema_remains_usable_after_rendering():
     assert main(["schema", "generate", "--agent"], stdout=out, stderr=io.StringIO()) == 0
     schema = json.loads(out.getvalue())["data"]["input_schema"]
     jsonschema.Draft202012Validator.check_schema(schema)
+
+
+def test_a_public_source_url_survives_redaction():
+    """A licence page is the one thing `source` exists for; a signed URL is not."""
+    from imagen_cli.cli.diagnostics import redact
+
+    public = "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX"
+    assert redact({"source": public}) == {"source": public}
+    hint = "weights are missing; rerun with accept=true after reviewing " + public
+    assert redact(hint) == hint
+    for signed in (
+        "https://bucket.example/x?X-Amz-Signature=abc",
+        "https://bucket.example/x?sig=abc",
+        "https://bucket.example/x?token=abc",
+        "https://user:pass@bucket.example/x",
+    ):
+        assert redact(signed) == "[redacted]"
+    assert redact("Bearer abc") == "[redacted]"
+
+
+def test_the_shared_timeout_set_matches_both_surfaces():
+    """The CLI and the TUI must agree that only local processing accepts 0."""
+    from imagen_cli.cli.options import COMMAND_CONTROLS, LOCAL_TIMEOUT_COMMANDS
+
+    assert LOCAL_TIMEOUT_COMMANDS == {"transform", "superres run", "matting run"}
+    for command in LOCAL_TIMEOUT_COMMANDS:
+        assert "timeout" in COMMAND_CONTROLS.get(command, set())

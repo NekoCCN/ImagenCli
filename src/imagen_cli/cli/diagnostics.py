@@ -9,6 +9,9 @@ from typing import Any, TextIO
 _PRIVATE = re.compile(
     r"prompt|secret|token|key|signature|url|uri|response|base64|authorization|credential", re.I
 )
+# A model's `source` is a public licence page that the user is asked to review
+# before downloading; redacting it removes the only thing the field is for.
+_PUBLIC_FIELDS = {"source", "source_url", "homepage", "license_url", "note"}
 # Usage counts are billing evidence, not credentials, even when named *Token*.
 _USAGE = {
     "input_tokens", "output_tokens", "total_tokens",
@@ -23,7 +26,9 @@ def redact(value: Any) -> Any:
                 {name: redact(schema) for name, schema in item.items()}
                 if key == "properties" and isinstance(item, Mapping)
                 else "[redacted]"
-                if str(key) not in _USAGE and _PRIVATE.search(str(key))
+                if str(key) not in _USAGE
+                and str(key) not in _PUBLIC_FIELDS
+                and _PRIVATE.search(str(key))
                 else redact(item)
             )
             for key, item in value.items()
@@ -31,7 +36,14 @@ def redact(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [redact(item) for item in value]
     if isinstance(value, str):
-        if re.search(r"Bearer\s|https?://|data:image/|\x1b|(?:api_key|token|secret)=", value, re.I):
+        if re.search(r"Bearer\s|data:image/|\x1b|(?:api_key|token|secret)=", value, re.I):
+            return "[redacted]"
+        # A bare URL is not a credential. Signed and tokenised URLs are, so only
+        # those are dropped; a licence or documentation link the user is told to
+        # open must survive, or the instruction becomes unactionable.
+        if re.match(r"^https?://\S+$", value) and re.search(
+            r"[?&](?:sig|signature|token|key|X-Amz-Signature|se|sp)=|//[^/]*@", value, re.I
+        ):
             return "[redacted]"
     return value
 

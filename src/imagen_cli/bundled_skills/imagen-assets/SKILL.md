@@ -1,6 +1,6 @@
 ---
 name: imagen-assets
-version: 1.12.0
+version: 1.13.0
 description: Use when browsing or resuming Imagen sessions, importing or saving artifacts, applying local transforms, comparing images, upscaling, removing watermarks from images or video in single runs or directory batches, using a remote GPU endpoint, or reclaiming workspace disk space.
 ---
 
@@ -167,14 +167,14 @@ These commands manage the cloud side only; they never run a paid generation requ
 ```bash
 imagen deploy secret set --name salad-api-key --key-file PATH --agent
 imagen deploy status --vendor salad --name imagen-worker-3090 \
-  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --agent
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT --agent
 imagen deploy update --vendor salad --name imagen-worker-3090 \
   --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
-  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN \
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT \
   --accept --agent
 imagen deploy update --vendor salad --name imagen-qwen-3090-low \
   --rename imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
-  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN \
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT \
   --accept --yes --agent
 imagen deploy update --vendor modal --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
   --modal-token-id-ref env:MODAL_TOKEN_ID \
@@ -188,14 +188,14 @@ imagen deploy build --tag 0.1.20 --image ghcr.io/priv/worker:0.1.20 --push \
   --registry-user-ref env:REGISTRY_USER --registry-password-ref private:registry-password \
   --accept --agent
 imagen deploy remove --vendor salad --name imagen-worker-3090 \
-  --salad-key-ref env:SALAD_API_KEY --accept --yes --agent
+  --salad-key-ref env:SALAD_API_KEY --salad-org ORGANIZATION --salad-project PROJECT --accept --yes --agent
 imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID \
   --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes --agent
 ```
 
 `deploy update` on Salad replaces the image in place and waits for `/readyz`. Renaming is create-then-delete: the new group must answer `/readyz` before `--yes` authorizes deleting the old one; any failure keeps the old group. Modal app names are fixed, so `--name` and `--rename` apply to Salad only. `deploy status` reports image, state, `/readyz`, `/healthz`, worker metadata, the matching registered remote, and drift warnings such as `healthz_not_ok_readyz_ok`, `shared_volume_on_salad`, and `version_drift`. A Salad 503 on `/healthz` while `/readyz` is 200 is a gateway or readiness symptom, not proof the worker is down.
 
-`deploy build` runs Docker from a repository checkout and requires `--accept`; it is never part of `deploy update`. `--image-target worker` builds the base image and `--image-target salad-queue` builds the Salad queue image on top of it; the queue image needs `--salad-queue-worker-url-ref` because the vendor binary is not redistributable, so it is never baked in from a public URL. Pushing to a private registry needs both `--registry-user-ref` and `--registry-password-ref`; the password reaches `docker login` on stdin and is redacted from any error output.
+`deploy build` runs Docker from a repository checkout and requires `--accept`; it is never part of `deploy update`. It installs the checkout, not the PyPI release, so an unreleased operation is present in the image. `--image-target worker` builds the base image and `--image-target salad-queue` builds the Salad queue image on top of it; the queue image needs `--salad-queue-worker-url-ref` because the vendor binary is not redistributable, so it is never baked in from a public URL. `--matting-runtime gpu` installs the CUDA build plus the pip CUDA/cuDNN wheels; the default `cpu` keeps the image small and still serves a GPU host. Pushing a private image needs both `--registry-user-ref` and `--registry-password-ref`; the password reaches `docker login` on stdin and is redacted from any error output. A push also rewrites the manifest to the OCI layer media type, because Docker's legacy builder mixes Docker and OCI labels and Modal refuses that mixture with `unsupported mediatype`.
 
 `deploy update` on Salad sends a JSON merge patch, not a `PUT`; `PUT` answers 405 on that path. A merge patch never resumes a stopped group, so the command starts it first and only then waits for readiness. `deploy status` and the readiness wait send `Salad-Api-Key` when the group has gateway auth enabled; without it every probe returns 403 and the wait can only time out.
 

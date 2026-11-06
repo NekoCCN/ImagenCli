@@ -43,6 +43,11 @@ OPTION_METADATA: dict[str, dict[str, Any]] = {
     "cursor": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,2048}$"},
 }
 
+# Local processing is the only place `--timeout 0` means "no deadline", and the
+# CLI and the TUI must agree on that set: the schema already carries `timeout`
+# for these commands, so the TUI hides the shared control instead of duplicating it.
+LOCAL_TIMEOUT_COMMANDS = frozenset({"transform", "superres run", "matting run"})
+
 # Which shared options each command accepts; shared with the TUI's run forms.
 COMMAND_CONTROLS: dict[str, set[str]] = {
     "deploy update": {"yes"},

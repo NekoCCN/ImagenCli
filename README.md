@@ -675,11 +675,11 @@ imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref en
 
 Salad's Container Gateway requires the extra `--gateway-credential-ref env:SALAD_API_KEY`; the worker's own bearer token stays in `--credential-ref`. Publishing an image or creating cloud resources is outward-facing, so do it only after explicit authorization.
 
-`imagen deploy` manages both control planes from the checkout. `deploy status` is read-only and reports readiness, the registered remote, and drift warnings; `deploy update` prints a plan and needs `--accept`. Renaming a Salad group is create-then-delete: the new group must answer `/readyz` before `--yes` allows removing the old one. Credentials accept `env:NAME` or `private:NAME`; `imagen deploy secret set --name NAME --key-file PATH` stores one privately and prints only its reference.
+`imagen deploy` manages both control planes from the checkout. `deploy status` is read-only and reports readiness, the registered remote, and drift warnings; `deploy update` prints a plan and needs `--accept`. Renaming a Salad group is create-then-delete: the new group must answer `/readyz` before `--yes` allows removing the old one. Credentials accept `env:NAME` or `private:NAME`; `imagen deploy secret set --name NAME --key-file PATH` stores one privately and prints only its reference. Every Salad command needs `--salad-org` and `--salad-project`, either on the command line or as `deploy.salad.organization` and `deploy.salad.project` in `config.json`.
 
 ```bash
-imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN
-imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --accept
+imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT
+imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --salad-org ORGANIZATION --salad-project PROJECT --accept
 ```
 
 Build the two images explicitly, and push with a registry login when the package is private:
@@ -697,7 +697,7 @@ A push also rewrites the manifest so every layer carries the OCI media type. Doc
 `deploy remove` deletes a Salad container group or stops the Modal app. It is the only command that destroys cloud state, so it needs both `--accept` and `--yes`; on Salad it reads the group first, so a mistyped name fails instead of silently reporting success:
 
 ```bash
-imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --accept --yes
+imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --salad-org ORGANIZATION --salad-project PROJECT --accept --yes
 imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes
 ```
 

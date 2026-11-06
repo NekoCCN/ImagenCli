@@ -10,7 +10,12 @@ from imagen_cli import i18n
 from imagen_cli.application.container import Container
 
 from . import elevation
-from .options import COMMAND_CONTROLS, OPTION_METADATA, SharedOptions
+from .options import (
+    COMMAND_CONTROLS,
+    LOCAL_TIMEOUT_COMMANDS,
+    OPTION_METADATA,
+    SharedOptions,
+)
 from .registry import COMMANDS, discover, select_output
 from .renderers import Renderer, result
 from .usage import UsageError, describe_pydantic, describe_validation, plain_detail
@@ -495,7 +500,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             f"imagen help {command}",
         )
     if ("timeout" in controls and options.timeout < 1
-            and command not in {"transform", "superres run", "matting run"}):
+            and command not in LOCAL_TIMEOUT_COMMANDS):
         raise UsageError(
             i18n.t(
                 f"{command} needs a positive --timeout; only local processing accepts 0.",
@@ -919,7 +924,7 @@ def main(
                 workspace=options.workspace, options=options, progress=progress,
             ) as container:
                 status, data = container.execute(command, args)
-                if (command in {"transform", "superres run", "matting run"}
+                if (command in LOCAL_TIMEOUT_COMMANDS
                         and status == "approval_required"
                         and data.get("budget") and isinstance(args, dict)):
                     digest = data["budget"]["digest"]

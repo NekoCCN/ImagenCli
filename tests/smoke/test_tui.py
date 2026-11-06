@@ -2382,3 +2382,20 @@ def test_switching_to_a_route_without_pixels_clears_the_pixel_field(deps):
             assert form.values()["size"] == ""
 
     asyncio.run(run())
+
+
+def test_matting_presets_ask_for_matting_weights():
+    """The picker must offer the family the pipeline needs, not the upscaler."""
+    from imagen_cli.application.operator_catalog import PRESETS
+    from imagen_cli.cli.tui.app import _pipeline_model_family
+
+    matte = [name for name, steps in PRESETS.items()
+             if any(step.get("op") == "matte" for step in steps)]
+    assert matte, "no matting preset is registered"
+    for name in matte:
+        assert _pipeline_model_family(PRESETS[name]) == "matting"
+    superres = [name for name, steps in PRESETS.items()
+                if any(step.get("op") == "superres" for step in steps)]
+    for name in superres:
+        assert _pipeline_model_family(PRESETS[name]) == "superres"
+    assert _pipeline_model_family([{"op": "sharpen"}]) is None

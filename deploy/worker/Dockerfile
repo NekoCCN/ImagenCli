@@ -29,13 +29,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Heavy third-party dependencies go below the source copy on purpose. Docker
+# caches layers as a chain, so anything installed after `COPY src` is rebuilt on
+# every source edit; the raiw stack is ~6.6 GB and must not pay that cost.
+#
+# The install order is unchanged: imagen-cli's own dependencies first, then
+# raiw, then imagen-cli itself with --no-deps. Reading the dependency list from
+# pyproject.toml keeps it honest instead of copying a list that can drift, and
+# --no-deps on the final install means it cannot move any other package.
 COPY pyproject.toml README.md LICENSE /src/
-COPY src /src/src
 
-RUN if [ "${IMAGEN_FROM_SOURCE}" = "1" ]; then \
-        pip install --no-cache-dir /src; \
-    else \
+RUN if [ "${IMAGEN_FROM_SOURCE}" = "0" ]; then \
         pip install --no-cache-dir "imagen-cli==${IMAGEN_VERSION}"; \
+    else \
+        python -c "import tomllib,sys; print(*tomllib.load(open('/src/pyproject.toml','rb'))['project']['dependencies'], sep='\n')" > /tmp/requirements.txt \
+        && pip install --no-cache-dir -r /tmp/requirements.txt; \
     fi \
     && pip install --no-cache-dir \
         "${RAIW_SPEC}" \
@@ -51,6 +59,14 @@ RUN if [ "${IMAGEN_MATTING}" = "1" ]; then \
             pip install --no-cache-dir \
                 "onnxruntime>=1.20" "onnx>=1.20" "numpy>=2"; \
         fi; \
+    fi
+
+COPY src /src/src
+
+# --no-deps: the dependencies were resolved above, so this only installs the
+# package itself and cannot change another package's version.
+RUN if [ "${IMAGEN_FROM_SOURCE}" = "1" ]; then \
+        pip install --no-cache-dir --no-deps /src; \
     fi
 
 COPY deploy/worker/app.py /app/app.py

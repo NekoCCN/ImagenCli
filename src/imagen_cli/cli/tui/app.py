@@ -29,7 +29,11 @@ from imagen_cli.application import cache_service, matting, media_ops, superres
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
 from imagen_cli.application.skill_targets import prompt_order
 from imagen_cli.cli.human import render as human_render
-from imagen_cli.cli.options import COMMAND_CONTROLS, SharedOptions
+from imagen_cli.cli.options import (
+    COMMAND_CONTROLS,
+    LOCAL_TIMEOUT_COMMANDS,
+    SharedOptions,
+)
 from imagen_cli.cli.registry import COMMANDS, command_summary, discover
 from imagen_cli.cli.renderers import data_error, error_message
 from imagen_cli.i18n import is_chinese, t
@@ -1371,33 +1375,38 @@ class TransformScreen(Modal[bool]):
             return
         name = self.names[row]
         pipeline = self._pipeline(name)
-        if any(step.get("op") == "superres" for step in pipeline):
-            self._ask_local_model(pipeline)
+        family = _pipeline_model_family(pipeline)
+        if family is not None:
+            self._ask_local_model(pipeline, family)
             return
         self._run_pipeline(pipeline)
 
-    def _ask_local_model(self, pipeline: list[dict[str, Any]]) -> None:
+    def _ask_local_model(self, pipeline: list[dict[str, Any]], family: str) -> None:
         """A licence is answered per run: a stored acceptance would be consent by default."""
         current = str(pipeline[0].get("params", {}).get("model") or "")
+
+        op = "superres" if family == "superres" else "matte"
 
         def chosen(model: str | None) -> None:
             if model is None or self.running:
                 return
             self._run_pipeline([
                 {**step, "params": {**step.get("params", {}), "model": model, "accept": True}}
-                if step.get("op") == "superres"
+                if step.get("op") == op
                 else step
                 for step in pipeline
             ])
 
         fetch = (
             (lambda model: _executor(self.deps)(
-                "superres fetch", {"model": model, "accept": True}
+                f"{family} fetch", {"model": model, "accept": True}
             ))
             if self.deps.execute is not None
             else None
         )
-        self.app.push_screen(LocalModelScreen(current, fetch=fetch), chosen)
+        self.app.push_screen(
+            LocalModelScreen(current, family=family, fetch=fetch), chosen
+        )
 
     def _run_pipeline(
         self, pipeline: list[dict[str, Any]], budget_approval: str | None = None,
@@ -1598,6 +1607,20 @@ def _family_cell(family: str) -> str:
     return t("Matting", "抠图") if family == "matting" else t("Upscaling", "超分")
 
 
+def _pipeline_model_family(pipeline: list[dict[str, Any]]) -> str | None:
+    """Which local model family a pipeline needs before it can run, if any.
+
+    Naming this once keeps the picker and the transform step in agreement; a
+    matte has to ask for matting weights, not for the upscaling catalog.
+    """
+    for step in pipeline:
+        if step.get("op") == "superres":
+            return "superres"
+        if step.get("op") == "matte":
+            return "matting"
+    return None
+
+
 def _weights_cells(row: dict[str, Any]) -> tuple[str, str, str, str]:
     """Model, scale, licence, state: the columns both local-weight panels show."""
     megabytes = int(row["bytes"] or 0) / 1048576
@@ -1760,10 +1783,12 @@ class LocalModelScreen(Modal[str | None]):
         self,
         current: str = "",
         *,
+        family: str = "superres",
         fetch: Callable[[str], tuple[str, dict[str, Any]]] | None = None,
     ) -> None:
         super().__init__()
         self.current = current
+        self.family = family
         self.fetch = fetch
         self.downloading = False
         self.rows: list[dict[str, Any]] = []
@@ -1794,19 +1819,32 @@ class LocalModelScreen(Modal[str | None]):
 
     def on_mount(self) -> None:
         self.table.cursor_type = "row"
+        third = t("Scale", "倍率") if self._keeps_scale else t("Model", "模型类型")
         self.table.add_columns(
-            t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"), t("State", "状态")
+            t("Model", "模型"), third, t("License", "许可"), t("State", "状态")
         )
         self._populate(self.current)
 
     def on_data_table_row_highlighted(self, _: DataTable.RowHighlighted) -> None:
         self._describe()
 
+    def _family_catalog(self) -> list[dict[str, Any]]:
+        module = matting if self.family == "matting" else superres
+        return list(module.catalog()["models"])
+
+    @property
+    def _keeps_scale(self) -> bool:
+        """Only upscaling changes the pixel size; a matte keeps the source size."""
+        return self.family == "superres"
+
     def _populate(self, select: str = "") -> None:
-        self.rows = list(superres.catalog()["models"])
+        self.rows = self._family_catalog()
         self.table.clear()
         for row in self.rows:
-            self.table.add_row(*_weights_cells(row), key=_sanitize(row["model"]))
+            cells = _weights_cells(row)
+            middle = cells[1] if self._keeps_scale else _family_cell(self.family)
+            self.table.add_row(cells[0], middle, cells[2], cells[3],
+                               key=_sanitize(row["model"]))
         names = [str(row["model"]) for row in self.rows]
         if names:
             self.table.move_cursor(row=names.index(select) if select in names else 0)
@@ -2621,7 +2659,7 @@ def _control_fields(command: str) -> list[tuple[str, str, str]]:
         # `asset gc` reads dry_run as an argument; the schema field already asks for it.
         if name in taken and name != "timeout":
             continue
-        if name == "timeout" and command in {"transform", "superres run"}:
+        if name == "timeout" and command in LOCAL_TIMEOUT_COMMANDS:
             continue
         fields.append((name, "seconds" if name == "timeout" else "true | false", ""))
     return fields
