@@ -101,6 +101,11 @@ COMMANDS = {
                 ("superres install", "装运行时与所选模型；不给 --model 只装运行时；需 --accept"),
                 ("superres fetch", "按固定摘要下载超分权重；需 --accept"),
                 ("superres benchmark", "用降采样自洽比较多个超分模型的 PSNR/SSIM 与耗时"),
+                ("matting run", "本地抠图：生成带 alpha 的新产物；可链式做贴纸或虚化"),
+                ("matting models", "列出抠图模型、许可、下载与安装状态"),
+                ("matting doctor", "用 64×64 图跑一次推理，证明请求的 backend 真的生效"),
+                ("matting install", "装运行时与所选抠图模型；需 --accept"),
+                ("matting fetch", "按固定摘要下载抠图权重；需 --accept"),
                 ("watermark identify", "只读检查 C2PA/EXIF/XMP/IPTC/TC260 与可见、不可见标记"),
                 ("watermark metadata", "复制产物并移除 AI 元数据；--remove 才写入新产物"),
                 ("watermark visible", "复制产物并移除已注册的可见 AI 标记"),
@@ -127,6 +132,11 @@ COMMANDS = {
                 ("remote job resume", "重新读取 queued/running/succeeded job 并取回结果"),
                 ("remote job retry-interrupted", "仅对 interrupted job 以同一 digest 重新入队"),
                 ("remote job cancel", "尽力取消远程 job；结果如实记录"),
+                ("deploy status", "只读检查 Salad/Modal worker 的镜像、就绪与登记漂移"),
+                ("deploy update", "按已发布镜像更新 worker 或改名重建 Salad 组；需 --accept"),
+                ("deploy build", "显式构建 worker 或 Salad 队列镜像；需 --accept"),
+                ("deploy remove", "删除 Salad 容器组或停止 Modal 应用；需 --accept --yes"),
+                ("deploy secret set", "把部署密钥写入私有存储并只返回 private: 引用"),
                 ("language", "查看或设置默认界面语言"),
                 ("tui", "打开终端控制面板；只读浏览与确认式删除"),
             )
@@ -218,6 +228,14 @@ _SUMMARY_EN = {
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
+    "matting run": "Predict an alpha matte locally and save an RGBA artifact; the source "
+    "is never modified",
+    "matting models": "List matting models with licence, download and install state",
+    "matting doctor": "Run one inference on a 64x64 image to prove the requested backend "
+    "is really in use; no weight download",
+    "matting install": "Install the inference runtime and any named matting models; "
+    "requires --accept",
+    "matting fetch": "Download matting weights pinned to a digest; requires --accept",
     "watermark identify": "Read-only check of C2PA, EXIF, XMP, IPTC, TC260 and visible "
     "or invisible marks; creates no artifact",
     "watermark metadata": "Remove AI metadata from a copy; --remove writes a new artifact",
@@ -256,6 +274,16 @@ _SUMMARY_EN = {
     "remote job resume": "Re-read a queued, running or succeeded job and fetch its result",
     "remote job retry-interrupted": "Re-enqueue only an interrupted job under the same digest",
     "remote job cancel": "Best-effort cancel; the recorded result is reported as-is",
+    "deploy status": "Read-only check of the Salad/Modal worker image, readiness and "
+    "registration drift",
+    "deploy update": "Update a worker from a published image, or recreate a Salad group "
+    "under a new name; requires --accept",
+    "deploy build": "Build the worker image, or the Salad queue image on top of it; "
+    "explicit only; requires --accept",
+    "deploy remove": "Delete a Salad container group or stop the Modal app; "
+    "irreversible; requires --accept and --yes",
+    "deploy secret set": "Store a deployment key privately and return only its "
+    "private: reference",
     "language": "Show or set the default interface language",
     "tui": "Open the terminal workspace; browse read-only and delete with confirmation",
 }
@@ -360,6 +388,7 @@ def _creation_schema(operation: str | None = None) -> dict[str, Any]:
 
 def _input_schema(name: str) -> dict[str, Any]:
     text = {"type": "string", "minLength": 1}
+    _REF = r"^(env:[A-Za-z_][A-Za-z0-9_]*|private:[A-Za-z][A-Za-z0-9_-]{0,127})$"
     properties: dict[str, Any] = {}
     required: tuple[str, ...] = ()
     if name in {"generate", "edit"}:
@@ -539,6 +568,46 @@ def _input_schema(name: str) -> dict[str, Any]:
             "overlap": {"type": "integer", "minimum": 0, "maximum": 256, "default": 16},
         }
         required = ("artifact", "model")
+    elif name == "matting run":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "model": {
+                "enum": ["birefnet-lite"],
+                "default": "birefnet-lite",
+            },
+            "backend": {"enum": ["auto", "cpu", "cuda", "openvino"], "default": "auto"},
+            "tile": {"type": "integer", "minimum": 0, "maximum": 4096, "default": 0},
+            "overlap": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64},
+            "feather": {"type": "integer", "minimum": 0, "maximum": 64, "default": 0},
+            "edge_shift": {"type": "number", "minimum": -0.5, "maximum": 0.5, "default": 0},
+            "accept": {"type": "boolean", "default": False},
+            "session": text,
+            "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "accept_remote": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 900},
+            "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "timeout": {"type": "number", "minimum": 0, "default": 900},
+        }
+        required = ("artifact",)
+    elif name == "matting models":
+        properties = {"verify": {"type": "boolean", "default": False}}
+        required = ()
+    elif name == "matting doctor":
+        properties = {
+            "model": {"type": "string", "minLength": 1},
+            "backend": {"enum": ["auto", "cpu", "cuda", "openvino"], "default": "auto"},
+        }
+        required = ()
+    elif name == "matting install":
+        properties = {
+            "model": {"type": "string", "minLength": 1},
+            "backend": {"enum": ["cpu", "cuda", "openvino"], "default": "cpu"},
+            "accept": {"type": "boolean", "default": False},
+        }
+        required = ()
+    elif name == "matting fetch":
+        properties = {"model": text, "accept": {"const": True}}
+        required = ("model", "accept")
     elif name in {"watermark identify", "watermark metadata", "watermark visible"}:
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
@@ -584,7 +653,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "sensitivity": {"enum": ["auto", "strict"], "default": "auto"},
             "pipeline": {
                 "enum": ["qwen-zimage", "qwen21-zimage", "sdxl-zimage", "chroma-zimage"],
-                "default": "qwen-zimage",
+                "default": "sdxl-zimage",
             },
             "force": {"type": "boolean", "default": False},
             "accept_license": {"type": "boolean", "default": False},
@@ -679,7 +748,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "session": text,
             "pipeline": {
                 "enum": ["qwen-zimage", "qwen21-zimage", "sdxl-zimage", "chroma-zimage"],
-                "default": "qwen-zimage",
+                "default": "sdxl-zimage",
             },
             "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "auto"},
             "sensitivity": {"enum": ["auto", "strict"], "default": "auto"},
@@ -726,10 +795,8 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {
             "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
             "endpoint": {"type": "string", "pattern": "^https?://"},
-            "credential_ref": {"type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$"},
-            "gateway_credential_ref": {
-                "type": "string", "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$",
-            },
+            "credential_ref": {"type": "string", "pattern": _REF},
+            "gateway_credential_ref": {"type": "string", "pattern": _REF},
         }
         required = ("name", "endpoint", "credential_ref")
     elif name in {"remote status", "remote remove"}:
@@ -745,6 +812,75 @@ def _input_schema(name: str) -> dict[str, Any]:
                   "remote job retry-interrupted", "remote job cancel"}:
         properties = {"job": {"type": "string", "pattern": "^rmt_[0-9a-f]{32}$"}}
         required = ("job",)
+    elif name == "deploy status":
+        properties = {
+            "vendor": {"enum": ["salad", "modal"]},
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "salad_key_ref": {"type": "string", "pattern": _REF},
+            "worker_token_ref": {"type": "string", "pattern": _REF},
+            "salad_org": text,
+            "salad_project": text,
+        }
+        required = ("vendor",)
+    elif name == "deploy update":
+        properties = {
+            "vendor": {"enum": ["salad", "modal"]},
+            "image": text,
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "rename": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "set_env": {
+                "type": "array",
+                "items": {"type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"},
+            },
+            "salad_key_ref": {"type": "string", "pattern": _REF},
+            "worker_token_ref": {"type": "string", "pattern": _REF},
+            "modal_token_id_ref": {"type": "string", "pattern": _REF},
+            "modal_token_secret_ref": {"type": "string", "pattern": _REF},
+            "salad_org": text,
+            "salad_project": text,
+            "modal_gpu": text,
+            "modal_memory_mb": {"type": "integer", "minimum": 256},
+            "modal_cpu": {"type": "number", "exclusiveMinimum": 0},
+            "accept": {"type": "boolean", "default": False},
+            "yes": {"type": "boolean", "default": False},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
+                            "default": 900},
+        }
+        required = ("vendor", "image")
+    elif name == "deploy build":
+        properties = {
+            "tag": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]{0,31}$"},
+            "image": text,
+            "image_target": {"enum": ["worker", "salad-queue"], "default": "worker"},
+            "base_image": text,
+            "salad_queue_worker_url_ref": {"type": "string", "pattern": _REF},
+            "matting_runtime": {"enum": ["cpu", "gpu"], "default": "cpu"},
+            "push": {"type": "boolean", "default": False},
+            "registry_user_ref": {"type": "string", "pattern": _REF},
+            "registry_password_ref": {"type": "string", "pattern": _REF},
+            "accept": {"type": "boolean", "default": False},
+        }
+        required = ("tag", "image")
+    elif name == "deploy remove":
+        properties = {
+            "vendor": {"enum": ["salad", "modal"]},
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "salad_key_ref": {"type": "string", "pattern": _REF},
+            "salad_org": text,
+            "salad_project": text,
+            "modal_token_id_ref": {"type": "string", "pattern": _REF},
+            "modal_token_secret_ref": {"type": "string", "pattern": _REF},
+            "accept": {"type": "boolean", "default": False},
+            "yes": {"type": "boolean", "default": False},
+        }
+        required = ("vendor",)
+    elif name == "deploy secret set":
+        properties = {
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "key_file": text,
+        }
+        required = ("name", "key_file")
     elif name == "compare":
         properties = {
             "first": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
@@ -1152,6 +1288,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
             },
             ("job", "artifacts", "next_actions"),
         )
+    if command.name.startswith("deploy "):
+        return _object({}, ())
     if command.name.startswith("remote "):
         row = {"type": "object"}
         if command.name == "remote list":

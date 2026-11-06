@@ -271,3 +271,42 @@ def test_a_busy_volume_read_is_unknown_never_state_not_found(tmp_path, monkeypat
     assert response.status_code == 200
     assert response.json()["status"] == "unknown"
     assert response.json()["reason"] == "volume_unavailable"
+
+
+def test_matte_is_accepted_inline_and_returns_output(tmp_path):
+    """A sync endpoint must accept matte and answer with the produced bytes."""
+    seen = {}
+
+    def execute(job_id, payload, source):
+        seen["operation"] = payload["operation"]
+        return {"status": "succeeded", "report": {"model": "birefnet-lite"},
+                "output_bytes": PNG}
+
+    client = build(tmp_path, execute=execute)
+    response = post(client, job(operation="matte", params={"model": "birefnet-lite"}))
+    assert response.status_code == 200
+    assert seen["operation"] == "matte"
+    body = response.json()
+    assert body["status"] == "succeeded"
+    assert base64.b64decode(body["output"]["base64"]) == PNG
+
+
+def test_unknown_operations_are_still_rejected(tmp_path):
+    client = build(tmp_path)
+    response = post(client, job(operation="watermark.not_real"))
+    assert response.status_code == 422
+
+
+def test_meta_reports_capabilities_and_operations(tmp_path):
+    """A client must be able to tell an accepted route from a working one."""
+    client = build(tmp_path)
+    meta = client.get("/v1/meta", headers=AUTH).json()
+    assert "matte" in meta["capabilities"]
+    assert "matte" in meta["operations"]
+
+
+def test_sync_mode_advertises_only_operations_it_will_accept(tmp_path):
+    client = build(tmp_path, mode="single-replica-sync")
+    meta = client.get("/v1/meta", headers=AUTH).json()
+    assert "matte" in meta["operations"]
+    assert "watermark.invisible" not in meta["operations"]

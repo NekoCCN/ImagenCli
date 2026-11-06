@@ -169,6 +169,7 @@ request ──► plan (review) ──► approve ──► execute ──► jo
 | 批准／执行／重试计划 | 计划页：`a`、`enter`、`r` | `plan approve`、`plan execute`、`plan retry` |
 | 普通图像处理 | `t`；`p` 调参 | `ops`、`transform`、`compare`、`sheet` |
 | 模型恢复／超分 | `u`；`s` 管理运行时与权重 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark`、`superres doctor` |
+| 本地抠图／透明底 | 变换页预设；`s` 列出对应模型 | `matting run`、`matting models`、`matting install`、`matting fetch`、`matting doctor`、`transform --preset '抠图贴纸 (Cutout Sticker)'` |
 | 水印检查／移除 | 命令面板；无独立页面 | `watermark identify`、`watermark metadata`、`watermark visible`、`watermark erase`、`watermark invisible`、`watermark all`、`watermark classify`、`watermark batch`、`watermark video ...`、`watermark status` |
 | 远程 GPU 任务 | 命令面板；无独立页面 | `remote ...`、`watermark ... --remote NAME` |
 | 打开图片／目录 | `o` / `O` | `asset open [--folder]` |
@@ -526,6 +527,25 @@ CUDA 或 OpenVINO 需显式选择 `cuda` 或 `openvino`；检测到其他 ONNX �
 TUI 命令面板提供同样的后端与确认选项。
 在把某个后端用于整张图片前，`imagen superres doctor --backend cuda` 会用 32×32 样图跑一个 tile，并报告实际生效的 provider。它证明的是后端，不是画质。
 
+## 本地抠图
+
+抠图在本地预测 alpha 通道并生成新的 RGBA 产物，原图不会被修改。它正是那两个只认透明通道的算子的前提：`sticker_outline` 与 `background_blur` 对普通 RGB 产物都会直接报错。
+
+```bash
+imagen matting models
+imagen matting install --model birefnet-lite --accept
+imagen matting run ARTIFACT_ID
+imagen transform ARTIFACT_ID --preset '抠图贴纸 (Cutout Sticker)'
+```
+
+`s` 打开的本地模型表会同时列出超分与抠图两类，并带一个「类别」列。默认权重是 `birefnet-lite`：MIT 许可的 BiRefNet_lite ONNX 导出，输入 1024×1024，在插画与实拍上都能保住发丝软边。权重不随包分发，每条都固定 SHA-256，只有加 `--accept` 才下载。
+
+非商用权重被刻意排除在清单之外。例如 Bria RMBG-2.0 是 CC BY-NC 4.0、商用需单独协议，因此不作为默认值。
+
+`--tile 0` 表示整图一次推理；给正数则对大图分块，`--overlap` 避免接缝落在发丝上。`--feather` 羽化 alpha，`--edge-shift` 移动视觉边界，两者默认都是 `0`。
+
+抠图是预测而非保证：极细发丝、玻璃与半透明材质可能判断错误，抠得不准时边缘会残留原背景颜色。
+
 超分、原尺寸降噪与 JPEG 伪影清理使用独立模型处理命令：
 
 ```bash
@@ -591,7 +611,7 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `erase` 用相同的 CPU 填充后端擦除每个 `--region x,y,width,height` 框内的内容。适合注册表未覆盖的标记；区域必须落在图片范围内。
 - `invisible` 通过图像模型重建像素，以破坏 SynthID 一类的不可见水印。它需要 GPU，会改变细节并降低保真度。本地没有 SynthID 像素检测器，因此 Imagen 无法证明隐藏水印已经消失。
 - `all` 依次执行可见、不可见与元数据移除。它和 `invisible` 一样需要许可证确认与 GPU；不可见阶段没有信号或没有 GPU 时会跳过，其余阶段照常运行。
-- 每条管线有各自的许可（`qwen-zimage`、`qwen21-zimage`、`sdxl-zimage`、`chroma-zimage`）；审阅后再加 `--accept-license`。预计超出内存上限时返回 `approval_required` 与预算摘要；用同一命令加 `--budget-approval DIGEST` 重跑。
+- 每条管线有各自的许可（`qwen-zimage`、`qwen21-zimage`、`sdxl-zimage`、`chroma-zimage`）；默认是 `sdxl-zimage`，模型栈最小。审阅后再加 `--accept-license`。预计超出内存上限时返回 `approval_required` 与预算摘要；用同一命令加 `--budget-approval DIGEST` 重跑。
 - `watermark setup --accept` 用 `visible` extra 创建隔离环境。按需追加 extra，例如不可见处理用 `--extras visible,qwen-zimage`，分类用 `--extras visible,classify,source-classify`，视频用 `--extras visible,video,diffusion`，然后重启 Imagen。`watermark update --accept` 构建并验证新环境后再切换；更新失败会保留旧环境。
 
 ### 视频
@@ -650,6 +670,38 @@ imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref en
 ```
 
 Salad 的 Container Gateway 还需要额外的 `--gateway-credential-ref env:SALAD_API_KEY`；worker 自己的 bearer token 仍放在 `--credential-ref`。推送镜像或创建云资源属于对外动作，只有获得明确授权后才执行。
+
+`imagen deploy` 在仓库检出中管理两套控制面。`deploy status` 只读，报告就绪状态、已登记 remote 与漂移警告；`deploy update` 先打印计划并要求 `--accept`。Salad 改名是先建后删：新组必须 `/readyz` 通过，`--yes` 才会删除旧组。凭据接受 `env:NAME` 或 `private:NAME`；`imagen deploy secret set --name NAME --key-file PATH` 把密钥写入私有存储，只回显引用。
+
+```bash
+imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN
+imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --accept
+```
+
+两套镜像需要显式构建；私有包推送时还要先登录 registry：
+
+```bash
+imagen deploy build --tag TAG --image ghcr.io/nekoccn/imagen-worker:TAG --accept
+imagen deploy build --tag TAG --image ghcr.io/nekoccn/imagen-worker-queue:TAG --image-target salad-queue --base-image ghcr.io/nekoccn/imagen-worker:TAG --salad-queue-worker-url-ref env:SALAD_QUEUE_WORKER_URL --accept
+imagen deploy build --tag TAG --image ghcr.io/PRIVATE/worker:TAG --push --registry-user-ref env:REGISTRY_USER --registry-password-ref private:registry-password --accept
+```
+
+`--image-target worker` 构建基础 worker；`--image-target salad-queue` 在其之上构建 Salad 队列镜像，需要厂商 Queue Worker 下载地址，该二进制不会用公开 URL 直接固化进镜像。registry 密码只通过 stdin 交给 `docker login`，错误输出中会被脱敏。`--matting-runtime gpu` 装 CUDA 版运行时和 pip 的 CUDA/cuDNN wheel，而不是仅 CPU 版。
+
+带 `--push` 时还会把 manifest 的每一层改写成 OCI media type。Docker legacy builder 会在 OCI 基础镜像之上用 Docker 类型标记自己产生的层，Modal 的解包器会以 `unsupported mediatype` 拒绝这种混合；改写只改标签，不动层的字节。
+
+`deploy remove` 删除 Salad 容器组或停止 Modal 应用。它是唯一会销毁云端状态的命令，因此需要同时给 `--accept` 与 `--yes`；Salad 侧会先读取该组，所以名字打错会直接报错，而不是静默返回成功：
+
+```bash
+imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --accept --yes
+imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes
+```
+
+抠图同样可以跑在已登记的 worker 上。镜像必须启用抠图（`IMAGEN_MATTING=1`，默认开启）；`/v1/meta` 会报告 `capabilities.matte`，缺少该能力的 worker 会直接失败，不会退回本地：
+
+```bash
+imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST
+```
 
 ## Agent skills
 

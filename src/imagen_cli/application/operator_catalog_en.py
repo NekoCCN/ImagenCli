@@ -13,8 +13,43 @@ CATEGORY_LABELS = {
     "photo": "Color and tone",
     "art": "Style and optics",
     "superres": "Model restoration",
+    "matting": "Matting and transparency",
     "geometry": "Size and geometry",
     "utility": "Utility",
+}
+
+INTROS_MATTING = {
+    "抠图贴纸": {
+        "title": "Cutout sticker",
+        "summary": "Predict an alpha matte locally, then grow a white outline and drop shadow.",
+        "principle": "The matting model writes an RGBA artifact; a morphological dilation of "
+        "the alpha channel and a Gaussian shadow composite produce the sticker edge.",
+        "scenarios": "Character art, standees and reaction images; edge quality follows the "
+        "matting model.",
+        "use_case": "Turn an opaque illustration into a transparent sticker",
+        "benefit": "No manual masking; edge and shadow in one step",
+        "loss": "A wrong matte leaves background colour on the edge and needs a rerun",
+    },
+    "抠图虚化": {
+        "title": "Cutout bokeh",
+        "summary": "Cut the subject out first, then blur only the background.",
+        "principle": "The predicted alpha composites the original against a Gaussian-blurred copy.",
+        "scenarios": "Portrait, product and character art passes; same-colour backgrounds "
+        "separate poorly.",
+        "use_case": "Keep the subject sharp while the background gains depth",
+        "benefit": "Subject separation without hand-drawn selection",
+        "loss": "An inaccurate matte leaves a sharp halo of the original background",
+    },
+    "matte": {
+        "title": "Alpha matting",
+        "summary": "Predict a soft alpha channel with a local ONNX model and save an RGBA copy.",
+        "principle": "A pinned BiRefNet export runs through ONNX Runtime; the source bytes are "
+        "never modified and the result is a new artifact.",
+        "scenarios": "Preparing transparent cutouts for downstream operators and exports.",
+        "use_case": "Get a transparent copy without touching the original",
+        "benefit": "Unlocks sticker outline, background blur and RGBA export",
+        "loss": "Thin strands and semi-transparent material can be judged wrong by the model",
+    },
 }
 
 OPERATORS: dict[str, dict[str, str]] = {
@@ -1957,7 +1992,7 @@ for _name, _note in _NOTES.items():
 def intro_en(key: str) -> dict[str, str] | None:
     """English intro text for a catalog key, or None when no translation exists."""
     target = ALIASES.get(key, key)
-    entry = INTROS.get(target)
+    entry = INTROS_MATTING.get(target) or INTROS.get(target)
     if entry is None:
         entry = INTROS.get(target.split(" (", 1)[0])
     return entry

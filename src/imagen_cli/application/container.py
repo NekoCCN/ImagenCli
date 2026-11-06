@@ -439,9 +439,12 @@ class Container:
                     return "succeeded", remote_service.add(
                         args["name"], args["endpoint"], args["credential_ref"],
                         gateway_credential_ref=args.get("gateway_credential_ref"),
+                        private_store=self.private_state_store,
                     )
                 if command == "remote status":
-                    return "succeeded", remote_service.status(args["name"])
+                    return "succeeded", remote_service.status(
+                        args["name"], private_store=self.private_state_store,
+                    )
                 if command == "remote jobs list":
                     return "succeeded", {
                         "jobs": remote_service.jobs_list(
@@ -453,20 +456,94 @@ class Container:
                     if action == "get":
                         return "succeeded", remote_service.job_get(
                             self.repositories, args["job"],
+                            private_store=self.private_state_store,
                         )
                     if action == "resume":
                         return remote_service.job_resume(
                             self.repositories, self.artifact_store, args["job"],
+                            private_store=self.private_state_store,
                         )
                     if action == "retry-interrupted":
                         return remote_service.job_retry_interrupted(
                             self.repositories, self.artifact_store, args["job"],
+                            private_store=self.private_state_store,
                         )
-                    return remote_service.job_cancel(self.repositories, args["job"])
+                    return remote_service.job_cancel(
+                        self.repositories, args["job"],
+                        private_store=self.private_state_store,
+                    )
                 remote_service.remove(args["name"])
                 return "succeeded", {"removed": args["name"]}
             except remote_service.RemoteError as error:
                 return error.status, {"error": {"type": error.status, "detail": str(error)}}
+            except (ValueError, OSError) as error:
+                return "validation_error", {"error": {
+                    "type": "validation_error", "detail": str(error),
+                }}
+        if command.startswith("deploy "):
+            from jsonschema import validate
+
+            from imagen_cli.application import deploy_service
+            from imagen_cli.cli.registry import discover
+
+            validate(args, discover(command)["input_schema"])
+            try:
+                if command == "deploy status":
+                    return deploy_service.status(
+                        args["vendor"], name=args.get("name"),
+                        salad_key_ref=args.get("salad_key_ref"),
+                        worker_token_ref=args.get("worker_token_ref"),
+                        salad_org=args.get("salad_org"),
+                        salad_project=args.get("salad_project"),
+                        private_store=self.private_state_store,
+                    )
+                if command == "deploy update":
+                    return deploy_service.update(
+                        args["vendor"], image=args["image"],
+                        name=args.get("name"), rename=args.get("rename"),
+                        set_env=args.get("set_env"),
+                        accept=args.get("accept") is True,
+                        yes=args.get("yes") is True,
+                        salad_key_ref=args.get("salad_key_ref"),
+                        worker_token_ref=args.get("worker_token_ref"),
+                        salad_org=args.get("salad_org"),
+                        salad_project=args.get("salad_project"),
+                        modal_token_id_ref=args.get("modal_token_id_ref"),
+                        modal_token_secret_ref=args.get("modal_token_secret_ref"),
+                        modal_gpu=args.get("modal_gpu"),
+                        modal_memory_mb=args.get("modal_memory_mb"),
+                        modal_cpu=args.get("modal_cpu"),
+                        max_seconds=args.get("max_seconds", 900),
+                        private_store=self.private_state_store,
+                    )
+                if command == "deploy build":
+                    return deploy_service.build(
+                        tag=args["tag"], image=args["image"],
+                        push=args.get("push") is True,
+                        target=args.get("image_target", "worker"),
+                        salad_queue_worker_url_ref=args.get(
+                            "salad_queue_worker_url_ref"),
+                        base_image=args.get("base_image"),
+                        registry_username_ref=args.get("registry_user_ref"),
+                        registry_password_ref=args.get("registry_password_ref"),
+                        accept=args.get("accept") is True,
+                        private_store=self.private_state_store,
+                    )
+                if command == "deploy remove":
+                    return deploy_service.remove(
+                        args["vendor"], name=args.get("name"),
+                        accept=args.get("accept") is True,
+                        yes=args.get("yes") is True,
+                        salad_key_ref=args.get("salad_key_ref"),
+                        salad_org=args.get("salad_org"),
+                        salad_project=args.get("salad_project"),
+                        modal_token_id_ref=args.get("modal_token_id_ref"),
+                        modal_token_secret_ref=args.get("modal_token_secret_ref"),
+                        private_store=self.private_state_store,
+                    )
+                return deploy_service.set_secret(
+                    self.private_state_store, args["name"], args["key_file"],
+                )
             except (ValueError, OSError) as error:
                 return "validation_error", {"error": {
                     "type": "validation_error", "detail": str(error),
@@ -520,7 +597,7 @@ class Container:
                         return "succeeded", watermark_service.batch_directory(
                             args["directory"], to=args.get("to"),
                             mode=args.get("mode", "all"),
-                            pipeline=args.get("pipeline", "qwen-zimage"),
+                            pipeline=args.get("pipeline", "sdxl-zimage"),
                             backend=args.get("backend", "auto"),
                             sensitivity=args.get("sensitivity", "auto"),
                             force=args.get("force") is True,
@@ -636,6 +713,7 @@ class Container:
                         accept_license=args.get("accept_license") is True,
                         memory_mb=args.get("memory_mb"),
                         budget_approval=args.get("budget_approval"),
+                        private_store=self.private_state_store,
                     )
                 except BudgetApprovalRequired as error:
                     return "approval_required", {
@@ -677,6 +755,68 @@ class Container:
                 }
             except watermark_service.WatermarkError as error:
                 return failed(error)
+        if command.startswith("matting "):
+            from jsonschema import validate
+
+            from imagen_cli.application import matting
+
+            validate(args, discover(command)["input_schema"])
+            if command == "matting run":
+                from imagen_cli.cli.commands import postprocess
+
+                matting_params: dict[str, Any] = {
+                    key: args[key] for key in
+                    ("model", "backend", "tile", "overlap", "feather", "edge_shift", "accept")
+                    if key in args
+                }
+                remote_name = args.get("remote")
+                if remote_name:
+                    from imagen_cli.application import remote_service
+
+                    remote_params = {
+                        key: matting_params[key]
+                        for key in ("model", "backend", "tile", "overlap",
+                                    "feather", "edge_shift")
+                        if key in matting_params
+                    }
+                    try:
+                        return remote_service.run_operation(
+                            self.repositories, self.artifact_store, args["artifact"],
+                            remote_name, "matte",
+                            accept_remote=args.get("accept_remote"),
+                            session=args.get("session"),
+                            params=remote_params,
+                            max_seconds=args.get("max_seconds"),
+                            private_store=self.private_state_store,
+                        )
+                    except (ValueError, remote_service.RemoteError) as error:
+                        status = getattr(error, "status", "validation_error")
+                        return status, {"error": {
+                            "type": status, "detail": str(error),
+                        }}
+                return postprocess.transform_(
+                    self.repositories, self.artifact_store, args["artifact"],
+                    model_params=matting_params, op_name="matte",
+                    session=args.get("session"), timeout=args.get("timeout"),
+                    budget_approval=args.get("budget_approval"),
+                    asynchronous=self.options.async_,
+                    progress=self.progress,
+                )
+            if command == "matting models":
+                return "succeeded", matting.catalog(verify=args.get("verify") is True)
+            if command == "matting doctor":
+                report = matting.doctor(args.get("model"), backend=args.get("backend", "auto"))
+                return ("succeeded" if report["status"] == "ready" else "unsupported_capability",
+                        report)
+            if command == "matting install":
+                return "succeeded", matting.install(
+                    args.get("model"),
+                    backend=args.get("backend", "cpu"),
+                    accept=args.get("accept") is True,
+                )
+            return "succeeded", matting.fetch(
+                args["model"], accept=args.get("accept") is True,
+            )
         if command.startswith("superres "):
             from jsonschema import validate
 

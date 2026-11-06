@@ -81,12 +81,13 @@ def transform_(
     timeout: float | None = None,
     budget_approval: str | None = None,
     model_params: dict[str, Any] | None = None,
+    op_name: str = "superres",
     asynchronous: bool = False,
     progress: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     steps: list[dict[str, Any]]
     if model_params is not None:
-        steps = [{"op": "superres", "params": model_params}]
+        steps = [{"op": op_name, "params": model_params}]
     elif pipeline is not None:
         from imagen_cli.cli.input_readers import read_json
 

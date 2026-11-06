@@ -2185,7 +2185,7 @@ def _optional_ops() -> dict[str, Callable[..., Image.Image]]:
     operations: dict[str, Callable[..., Image.Image]] = {}
     for module in (
         "filters_numpy", "filters_structure", "filters_advanced", "filters_restoration",
-        "filters_rank", "filters_fast", "filters_frequency", "superres"
+        "filters_rank", "filters_fast", "filters_frequency", "superres", "matting"
     ):
         try:
             registered = importlib.import_module(f"imagen_cli.application.{module}").OPS

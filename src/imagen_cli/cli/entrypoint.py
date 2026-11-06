@@ -240,6 +240,26 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "cpu-offload",
                 "endpoint",
                 "gateway-credential-ref",
+                "image",
+                "tag",
+                "rename",
+                "set-env",
+                "salad-key-ref",
+                "worker-token-ref",
+                "modal-token-id-ref",
+                "modal-token-secret-ref",
+                "salad-org",
+                "salad-project",
+                "modal-gpu",
+                "modal-memory-mb",
+                "modal-cpu",
+                "base-image",
+                "image-target",
+                "salad-queue-worker-url-ref",
+                "matting-runtime",
+                "registry-user-ref",
+                "registry-password-ref",
+                "push",
                 "remote",
                 "accept-remote",
                 "max-seconds",
@@ -269,6 +289,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "backend",
                 "tile",
                 "overlap",
+                "feather",
+                "edge-shift",
                 "accept",
                 "budget-approval",
                 "key-file",
@@ -285,7 +307,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 name.replace("-", "_") if name != "async" else "async_",
             )
             target = parameters if local_option else controls
-            repeated = name in {"input", "reference", "skill", "target", "region"}
+            repeated = name in {"input", "reference", "skill", "target", "region",
+                                "set-env"}
             if field in target and not repeated:
                 raise UsageError(
                     i18n.t(f"Option --{name} appears twice.", f"选项 --{name} 重复出现。")
@@ -308,6 +331,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "fidelity-anchor",
                 "source",
                 "include-invisible",
+                "push",
             }
             if name == "tile" and watermark_invocation:
                 boolean = True
@@ -348,11 +372,13 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                     "tile-size",
                     "max-resolution",
                     "max-seconds",
+                    "modal-memory-mb",
                     "dilate",
                     "seed",
                     "tile-overlap",
                     "long-side",
                     "batch-size",
+                    "feather",
                 } and not (name == "tile" and watermark_invocation):
                     try:
                         value = int(value)
@@ -364,7 +390,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                             )
                         ) from None
                 elif name in {"strength", "humanize", "unsharp", "controlnet-scale",
-                              "noise-std", "fps"}:
+                              "noise-std", "fps", "modal-cpu", "edge-shift"}:
                     try:
                         value = float(value)
                     except ValueError:
@@ -469,7 +495,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             f"imagen help {command}",
         )
     if ("timeout" in controls and options.timeout < 1
-            and command not in {"transform", "superres run"}):
+            and command not in {"transform", "superres run", "matting run"}):
         raise UsageError(
             i18n.t(
                 f"{command} needs a positive --timeout; only local processing accepts 0.",
@@ -661,6 +687,32 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
             raise _no_arguments(command, words, parameters)
         validate(parameters, schema)
         return command, parameters, options
+    if command == "matting run":
+        if words:
+            if len(words) != 1 or "artifact" in parameters:
+                raise _need(command, words, 1, "one artifact id", "一个产物标识")
+            parameters["artifact"] = words[0]
+        if "timeout" in controls:
+            parameters["timeout"] = options.timeout
+        validate(parameters, schema)
+        return command, parameters, options
+    if command in {"matting fetch", "matting install"} and words:
+        if len(words) != 1 or "model" in parameters:
+            raise _need(command, words, 1, "one model name", "一个模型名")
+        parameters["model"] = words[0]
+        words = []
+    if command in {"matting models", "matting fetch", "matting install", "matting doctor"}:
+        if words:
+            raise _no_positional(command, words)
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("deploy "):
+        if words:
+            raise _no_positional(command, words)
+        if options.yes:
+            parameters["yes"] = True
+        validate(parameters, schema)
+        return command, parameters, options
     if command.startswith("remote "):
         if command in {"remote list", "remote jobs list"}:
             if words:
@@ -828,7 +880,8 @@ def main(
                 )
                 and not any(not value.startswith("-") for value in argv[2:])
             ):
-                from imagen_cli.application.superres import fetch_choices, weights_directory
+                from imagen_cli.application.model_weights import weights_directory
+                from imagen_cli.application.superres import fetch_choices
 
                 choices = fetch_choices()
                 stderr.write(
@@ -866,7 +919,8 @@ def main(
                 workspace=options.workspace, options=options, progress=progress,
             ) as container:
                 status, data = container.execute(command, args)
-                if (command in {"transform", "superres run"} and status == "approval_required"
+                if (command in {"transform", "superres run", "matting run"}
+                        and status == "approval_required"
                         and data.get("budget") and isinstance(args, dict)):
                     digest = data["budget"]["digest"]
                     if _interactive(renderer, stdout, argv):

@@ -436,3 +436,92 @@ def test_add_does_not_register_an_endpoint_that_fails_the_probe(tmp_path, monkey
     with pytest.raises(remote_service.RemoteError):
         remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
     assert "modal" not in remote_service.remotes()
+
+
+def test_matte_submits_under_its_own_operation_with_the_licence(remote, published):
+    """Matting is not a watermark op: it must not borrow the raiw licence label."""
+    server, _ = remote
+    container, source = published
+    remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
+
+    status, data = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "matte", params={"model": "birefnet-lite"},
+    )
+    assert status == "approval_required"
+    assert data["request"]["operation"] == "matte"
+    assert data["request"]["license"] == "matting:birefnet-lite:MIT"
+
+
+def test_matte_rejects_an_unknown_model_before_any_upload(remote, published):
+    server, _ = remote
+    container, source = published
+    remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
+    server.calls.clear()
+    with pytest.raises(ValueError, match="unknown matting model"):
+        remote_service.run_operation(
+            container.repositories, container.artifact_store, source.id, "modal",
+            "matte", params={"model": "not-a-model"},
+        )
+    assert not any(method == "POST" for method, _path in server.calls)
+
+
+def test_matte_publishes_an_rgba_artifact(remote, published):
+    server, _ = remote
+    container, source = published
+    remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
+    server.output = _png()
+    approved = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "matte", params={"model": "birefnet-lite"},
+    )[1]["job_digest"]
+    status, data = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "matte", params={"model": "birefnet-lite"}, accept_remote=approved,
+    )
+    assert status == "succeeded"
+    assert data["artifact"]["id"] != source.id
+    assert data["artifact"]["origin_manifest"]["operation"] == "matte"
+
+
+def test_job_path_resolves_private_credentials(monkeypatch):
+    """`private:` refs must resolve outside the submit call, too."""
+    from imagen_cli.application import remote_service as rs
+    from imagen_cli.storage.private_state import PrivateStateStore
+
+    seen = {}
+
+    class Store:
+        def read_secret(self, name):
+            seen["name"] = name
+            return "resolved-secret"
+
+    record = {"endpoint": "https://w.example", "credential_ref": "private:worker-token"}
+    monkeypatch.setattr(rs, "remotes", lambda: {"w": record})
+    monkeypatch.setattr(rs, "TRANSPORT", httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"status": "queued"})
+    ))
+    with rs._client(record, private_store=Store()) as client:
+        client.get("/v1/jobs")
+    assert seen["name"] == "worker-token"
+    assert PrivateStateStore is not None
+
+
+def test_matte_is_refused_before_upload_when_the_worker_cannot_do_it(monkeypatch):
+    """A route that exists is not a capability; refuse before spending an upload."""
+    from imagen_cli.application import remote_service as rs
+
+    record = {"endpoint": "https://w.example", "credential_ref": "env:T",
+              "capabilities": {"matte": False}}
+    monkeypatch.setattr(rs, "get", lambda name: record)
+
+    class Repos:
+        def get(self, table, ident):
+            return {"id": ident, "sha256": "0" * 64, "save_state": "published"}
+
+    class Store:
+        def get(self, ident):
+            raise AssertionError("the source must not be read before the refusal")
+
+    with pytest.raises(ValueError, match="capabilities.matte"):
+        rs.run_operation(Repos(), Store(), "art_x", "worker", "matte")

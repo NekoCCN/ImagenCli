@@ -33,6 +33,9 @@ _PATTERN_SAMPLES = {
     r"^[a-z][a-z0-9-]{0,31}$": "modal",
     r"^https?://": "https://worker.example",
     r"^env:[A-Za-z_][A-Za-z0-9_]*$": "env:IMAGEN_WORKER_TOKEN",
+    r"^(env:[A-Za-z_][A-Za-z0-9_]*|private:[A-Za-z][A-Za-z0-9_-]{0,127})$":
+        "env:IMAGEN_WORKER_TOKEN",
+    r"^[A-Za-z_][A-Za-z0-9_]*=.*$": "IMAGEN_WORKER_VERSION=0.1.20",
     r"^[0-9][0-9A-Za-z.+-]{0,31}$": "0.53.1",
     r"^rmt_[0-9a-f]{32}$": "rmt_" + "0" * 32,
     r"^-?\d+,-?\d+,\d+,\d+$": "4,8,16,12",

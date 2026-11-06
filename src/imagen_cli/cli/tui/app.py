@@ -25,7 +25,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
 from textual.widgets import Button, DataTable, Input, ProgressBar, Select, Static
 
-from imagen_cli.application import cache_service, media_ops, superres
+from imagen_cli.application import cache_service, matting, media_ops, superres
 from imagen_cli.application.operator_catalog import PRESET_PIPELINES as PRESETS
 from imagen_cli.application.skill_targets import prompt_order
 from imagen_cli.cli.human import render as human_render
@@ -1279,6 +1279,7 @@ class TransformScreen(Modal[bool]):
                 needs_alpha = any(
                     s.get("op") in ("sticker_outline", "background_blur") for s in pipeline
                 )
+                needs_alpha = needs_alpha or any(s.get("op") == "matte" for s in pipeline)
                 if needs_alpha and "A" not in thumbnail.getbands():
                     from PIL import ImageDraw
 
@@ -1291,6 +1292,22 @@ class TransformScreen(Modal[bool]):
                     thumbnail.putalpha(mask)
                 for step in pipeline:
                     op_name = step.get("op", "")
+                    if op_name == "matte":
+                        # A real matte needs the model and a runtime; the preview keeps the
+                        # resolved alpha shape instead of failing the whole panel.
+                        if "A" in thumbnail.getbands():
+                            continue
+                        from PIL import ImageDraw
+
+                        mask = Image.new("L", thumbnail.size, 0)
+                        draw = ImageDraw.Draw(mask)
+                        draw.ellipse(
+                            [1, 0, max(2, thumbnail.width - 2),
+                             max(1, thumbnail.height - 1)], fill=255
+                        )
+                        thumbnail = thumbnail.convert("RGBA")
+                        thumbnail.putalpha(mask)
+                        continue
                     if op_name == "superres":
                         model_name = str(step.get("params", {}).get("model", ""))
                         scale = 4 if "x4" in model_name else 2
@@ -1577,6 +1594,10 @@ class ModelPickerScreen(Modal[str | None]):
         self.dismiss(None)
 
 
+def _family_cell(family: str) -> str:
+    return t("Matting", "抠图") if family == "matting" else t("Upscaling", "超分")
+
+
 def _weights_cells(row: dict[str, Any]) -> tuple[str, str, str, str]:
     """Model, scale, licence, state: the columns both local-weight panels show."""
     megabytes = int(row["bytes"] or 0) / 1048576
@@ -1606,7 +1627,7 @@ class SuperresScreen(Modal[bool]):
         super().__init__()
         self.deps = deps
         self.run = run
-        self.rows: list[dict[str, Any]] = []
+        self.rows: list[tuple[dict[str, Any], str]] = []
         self.table: DataTable[Any] = DataTable(id="superres-table")
         self.status = Static("")
 
@@ -1637,8 +1658,10 @@ class SuperresScreen(Modal[bool]):
         self.table.cursor_type = "row"
         # A long licence would push the state column off an 80-column panel; the consent
         # dialog carries the full text.
+        # State stays last: this table is also read by scripts and tests by position.
         self.table.add_columns(
-            t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"), t("State", "状态")
+            t("Model", "模型"), t("Scale", "倍率"), t("License", "许可"),
+            t("Family", "类别"), t("State", "状态"),
         )
         self.refresh_rows()
 
@@ -1647,10 +1670,16 @@ class SuperresScreen(Modal[bool]):
 
     def refresh_rows(self) -> None:
         report = superres.catalog()
-        self.rows = list(report["models"])
+        matting_report = matting.catalog()
+        self.rows = [
+            *((row, "superres") for row in report["models"]),
+            *((row, "matting") for row in matting_report["models"]),
+        ]
         self.table.clear()
-        for row in self.rows:
-            self.table.add_row(*_weights_cells(row), key=_sanitize(row["model"]))
+        for row, family in self.rows:
+            cells = _weights_cells(row)
+            self.table.add_row(cells[0], cells[1], cells[2], _family_cell(family), cells[3],
+                              key=_sanitize(f"{family}:{row['model']}"))
         runtime = t("runtime ready", "运行时可用") if report["onnxruntime"] else t(
             "runtime missing", "缺少运行时"
         )
@@ -1658,15 +1687,16 @@ class SuperresScreen(Modal[bool]):
             f"{runtime} · {_sanitize(report['model_dir'])}" if self.rows else runtime
         )
 
-    def _selected(self) -> dict[str, Any] | None:
+    def _selected(self) -> tuple[dict[str, Any], str] | None:
         if not self.rows:
             return None
         return self.rows[self.table.cursor_coordinate.row]
 
     def action_fetch(self) -> None:
-        row = self._selected()
-        if row is None:
+        selected = self._selected()
+        if selected is None:
             return
+        row, family = selected
         name = str(row["model"])
         if not row["downloadable"]:
             self.status.update(
@@ -1676,7 +1706,7 @@ class SuperresScreen(Modal[bool]):
 
         def done(confirmed: bool | None) -> None:
             if confirmed:
-                self.run("superres fetch", {"model": name, "accept": True})
+                self.run(f"{family} fetch", {"model": name, "accept": True})
 
         self.app.push_screen(
             ConfirmScreen(
@@ -3739,9 +3769,18 @@ class WorkbenchApp(App[None]):
         status: str,
         data: dict[str, Any],
     ) -> None:
-        if data.get("plan") and status in {"approval_required", "planned"}:
+        plan = data.get("plan") or {}
+        if plan.get("id") and status in {"approval_required", "planned"}:
             self._push_plan(status, data, t("Command", "命令"))
             return
+        if status == "approval_required" and plan:
+            self._say(
+                t(
+                    "Review the plan, then rerun with accept=true to execute.",
+                    "查看计划后，将 accept 设为 true 重新运行以执行。",
+                ),
+                "info",
+            )
         reason = error_message(data_error(data))
         self._say(
             f"{command} · {status}" + (f" · {reason}" if reason else ""),

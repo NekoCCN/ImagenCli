@@ -1,6 +1,40 @@
 # Remote worker environments
 
-One worker image, two clouds. Deployment tooling is an optional extra, so a
+One worker image, two clouds. The same checkout can drive both control planes
+through `imagen deploy`: `deploy status` is read-only, `deploy update` prints a
+plan and needs `--accept`, `deploy build` builds one image explicitly, and
+`deploy secret set` stores a key privately. `deploy remove` is the only command
+that destroys cloud state and needs both `--accept` and `--yes`.
+
+Two images are built from this checkout. `--image-target worker` produces the
+base HTTP worker; `--image-target salad-queue` layers the vendor Queue Worker
+binary on top of it and needs `--salad-queue-worker-url-ref`, because that binary
+is not redistributable and is deliberately not fetched from a hard-coded URL.
+Pushing to a private registry needs `--registry-user-ref` and
+`--registry-password-ref`; the password reaches `docker login` on stdin and is
+redacted from any error text.
+
+`--matting-runtime gpu` installs `onnxruntime-gpu` plus the pip CUDA/cuDNN
+wheels instead of the CPU-only runtime. It is not faster by default: a small
+image on a small card spends more time copying than computing, and a card under
+roughly 8 GB cannot hold BiRefNet-lite at 1024x1024. Measure with
+`imagen matting doctor --backend cuda` before promising a speedup.
+
+After a push, the manifest is rewritten so every layer carries the OCI media
+type. Docker's legacy builder labels its own layers with the Docker type on top
+of an OCI base image, and Modal's unpacker rejects that mix with
+`layer data is an unsupported mediatype`. Only the label changes.
+
+`deploy update` on Salad sends a JSON merge patch (`PATCH` with
+`application/merge-patch+json`). `PUT` on the same path answers 405. When the
+group is stopped, the update starts it, because a merge patch alone never
+resumes a group.
+
+The worker image bakes the pinned matting weights (`IMAGEN_MATTING=1`, on by
+default) so a job never downloads them at request time. Set `IMAGEN_MATTING=0`
+for a watermark-only image. `/v1/meta` reports `capabilities.matte`, which is
+true only when the ONNX runtime and every pinned weight are present. The manual steps
+below remain the reference for what those commands run. Deployment tooling is an optional extra, so a
 normal `imagen` install never pulls in the Modal SDK:
 
 ```bash
@@ -26,16 +60,24 @@ docker build -f deploy/worker/Dockerfile \
 ```
 
 `IMAGEN_FROM_SOURCE=1` installs the checked-out source; without it the image
-installs `imagen-cli` from PyPI. Smoke-test the endpoints before deploying:
+installs `imagen-cli` from PyPI. Smoke-test the endpoints before deploying. The
+worker binds `::` because the Salad Container Gateway is IPv6-only, and Docker's
+`-p` mapping is IPv4, so a published port cannot reach it; use host networking
+and IPv6:
 
 ```bash
-docker run --rm -p 8000:8000 \
+docker run --rm --network host \
   -e IMAGEN_WORKER_TOKEN=test-token \
   -e IMAGEN_WORKER_STATE_MODE=single-replica-sync \
   imagen-worker:dev
-curl -fsS http://127.0.0.1:8000/healthz
-curl -fsS -H "Authorization: Bearer test-token" http://127.0.0.1:8000/v1/meta
+curl -fsS "http://[::1]:8000/healthz"
+curl -fsS -H "Authorization: Bearer test-token" "http://[::1]:8000/v1/meta"
 ```
+
+`--network host` is Linux-only. On Docker Desktop, run the checks inside the
+container instead: `docker run --rm imagen-worker:dev ...` followed by
+`docker exec <id> python -c "import urllib.request as u;
+print(u.urlopen('http://[::1]:8000/healthz').read())"`.
 
 ## Published dev image
 
@@ -139,7 +181,10 @@ same process.
 
    The Container Gateway reaches containers over IPv6, so the image binds
    `::` via uvicorn (see `deploy/worker/Dockerfile`). A command override that
-   binds `0.0.0.0` makes every gateway request return `503`.
+   binds `0.0.0.0` makes every gateway request return `503`. For the same
+   reason, Docker's IPv4 `-p` mapping cannot reach a running worker: when you
+   smoke-test locally, use `--network host` and `http://[::1]:8000`, or run the
+   checks inside the container with `docker exec`.
 3. Register the gateway URL. Salad's Container Gateway authenticates with a
    Salad API key in addition to the worker's own bearer token:
 
@@ -151,6 +196,11 @@ imagen remote add salad \
   --gateway-credential-ref env:SALAD_API_KEY
 imagen remote status salad
 ```
+
+A large image can sit in `downloading` at 100% while the node pulls slowly, or
+loop between `allocating` and `downloading`; Salad's troubleshooting guide blames
+node network conditions and suggests reallocating the instance. The deploy helper
+does not reallocate on its own, because that changes where the job may run.
 
 Queue mode (long jobs) needs the vendor Queue Worker binary and a queue name;
 build it with `deploy/salad/queue-worker.Dockerfile` and follow

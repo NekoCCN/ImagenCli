@@ -23,6 +23,10 @@ MAX_WORKING_BYTES = settings.DEFAULT_MEMORY_BYTES
 # ONNX inference reserves address space for weights, arenas and float32 feature maps
 # far beyond the pixel buffers the pixel budget counts.
 MODEL_RUNTIME_BYTES = 6 * 1024**3
+# A 1024x1024 matting model measured ~7.6 GiB peak on CPU: the weights plus the
+# encoder feature maps dominate, and shrinking the input does not shrink it much.
+# The ceiling must clear the measured peak or every matte run dies at allocation.
+MATTING_RUNTIME_BYTES = 10 * 1024**3
 TRANSFORM_TIMEOUT = 120.0
 # A 4x model needs minutes on CPU well before images reach the pixel budget.
 MODEL_TIMEOUT = 900.0
@@ -37,9 +41,14 @@ SECONDS_PER_MEGAPIXEL = {
 DEFAULT_SECONDS_PER_MEGAPIXEL = 4.0
 
 
+MODEL_OPS = frozenset({"superres", "matte"})
+
+
 def _has_model_steps(pipeline: Any) -> bool:
     steps = pipeline if isinstance(pipeline, list) else []
-    return any(isinstance(step, dict) and step.get("op") == "superres" for step in steps)
+    return any(
+        isinstance(step, dict) and step.get("op") in MODEL_OPS for step in steps
+    )
 
 
 def default_timeout(pipeline: Any, pixels: int = 0) -> float:
@@ -87,14 +96,26 @@ def _error_message(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def _model_runtime_bytes(pipeline: Any) -> int | None:
+    """Runtime floor for the heaviest model step in the pipeline."""
+    steps = pipeline if isinstance(pipeline, list) else []
+    names = {
+        step.get("op") for step in steps if isinstance(step, dict)
+    }
+    if "matte" in names:
+        return max(MATTING_RUNTIME_BYTES, MODEL_RUNTIME_BYTES)
+    return MODEL_RUNTIME_BYTES if names & MODEL_OPS else None
+
+
 def _address_space_extra(pipeline: Any, consent: dict[str, Any] | None = None) -> int | None:
     """Extra address space the worker may map; None means the cap was disabled."""
     configured = settings.memory_limit()
     if configured == 0:
         return None
     base = MAX_WORKING_BYTES if configured is None else configured
-    if _has_model_steps(pipeline):
-        return max(MODEL_RUNTIME_BYTES, base)
+    floor = _model_runtime_bytes(pipeline)
+    if floor is not None:
+        return max(floor, base)
     # Consent must buy the run: the fixed ceiling would kill an approved job.
     estimated = int((consent or {}).get("budget", {}).get("estimated_working_bytes", 0))
     return max(base, int(estimated * 1.5))

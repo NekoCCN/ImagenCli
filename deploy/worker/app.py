@@ -27,7 +27,10 @@ from imagen_cli.contract import JobStatus, reject_client_paths
 
 SCHEMA_VERSION = 1
 STATE_MODES = {"shared-volume", "queue", "single-replica-sync"}
-SYNC_OPERATIONS = {"watermark.identify", "watermark.metadata", "watermark.visible"}
+SYNC_OPERATIONS = {"watermark.identify", "watermark.metadata", "watermark.visible",
+                   "matte"}
+# Long diffusion rebuilds: only a queue or shared-volume endpoint can carry them.
+ASYNC_OPERATIONS = {"watermark.invisible", "watermark.all"}
 SYNC_MAX_SECONDS = 90
 SYNC_MAX_BYTES = 64 * 1024 * 1024
 
@@ -86,6 +89,29 @@ class VolumeStore:
 
     def output(self, job_id: str) -> bytes:
         return (self._directory(job_id) / "output.bin").read_bytes()
+
+
+def _capabilities(config: WorkerConfig) -> dict[str, bool]:
+    """Report what this image can actually run, not what its routes accept.
+
+    A route existing is not evidence the operation will work: the probe imports
+    the backend and checks the pinned weights, so a missing extra or weight is
+    reported the same way a real job would fail. Route names live in
+    ``operations`` so the two questions stay separate.
+    """
+    try:
+        from imagen_cli.remote.worker_cli import handle
+
+        probe = handle({"schema_version": SCHEMA_VERSION, "operation": "probe"})
+        return {str(k): bool(v) for k, v in (probe.get("capabilities") or {}).items()}
+    except Exception:  # noqa: BLE001 - an unprobeable image reports nothing as ready
+        return {}
+
+
+def _operations(config: WorkerConfig) -> list[str]:
+    allowed = SYNC_OPERATIONS if config.state_mode == "single-replica-sync" \
+        else SYNC_OPERATIONS | ASYNC_OPERATIONS
+    return sorted(allowed)
 
 
 def _default_execute(job: dict[str, Any], source: bytes) -> dict[str, Any]:
@@ -180,6 +206,8 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
     def meta() -> dict[str, Any]:
         data: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
+            "capabilities": _capabilities(config),
+            "operations": _operations(config),
             "worker_version": config.worker_version,
             "imagen_cli_version": config.imagen_cli_version,
             "raiw_version": config.raiw_version,
@@ -208,7 +236,7 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
             if payload.get("schema_version") != SCHEMA_VERSION:
                 raise ValueError("unsupported schema_version")
             operation = payload.get("operation")
-            if operation not in SYNC_OPERATIONS | {"watermark.invisible", "watermark.all"}:
+            if operation not in SYNC_OPERATIONS | ASYNC_OPERATIONS:
                 raise ValueError("unknown operation")
             digest = payload.get("job_digest")
             if not isinstance(digest, str) or len(digest) != 64:

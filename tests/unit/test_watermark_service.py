@@ -111,7 +111,7 @@ def test_invisible_requires_explicit_license_acceptance(published, monkeypatch):
             "watermark.invisible",
         )
     assert error.value.status == "approval_required"
-    assert error.value.data["license"]["pipeline"] == "qwen-zimage"
+    assert error.value.data["license"]["pipeline"] == "sdxl-zimage"
     assert "non-commercial" not in error.value.data["license"]["license"]
 
 

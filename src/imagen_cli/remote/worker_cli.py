@@ -16,6 +16,7 @@ SCHEMA_VERSION = 1
 
 OPERATIONS = {
     "probe",
+    "matte",
     "watermark.identify",
     "watermark.metadata",
     "watermark.visible",
@@ -76,12 +77,49 @@ def _cuda() -> bool:
 
 def _probe() -> dict[str, Any]:
     capabilities = _capabilities()
+    capabilities["matte"] = _matting_ready()
     return {
         "status": "succeeded",
         "raiw_version": _version(),
         "capabilities": capabilities,
         "cuda": _cuda(),
     }
+
+
+def _matting_ready() -> bool:
+    """True only when the runtime and every pinned matting weight are present."""
+    try:
+        from imagen_cli.application import matting
+
+        return bool(matting.available_providers()) and all(
+            matting.weights_path(name).is_file() for name in matting.MANIFEST
+        )
+    except Exception:  # noqa: BLE001 - a missing extra is a capability gap
+        return False
+
+
+def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]:
+    from PIL import Image
+
+    from imagen_cli.application import matting
+
+    model = str(params.get("model", "birefnet-lite"))
+    if model not in matting.MANIFEST:
+        raise ValueError(f"unknown matting model: {model}")
+    with Image.open(source) as opened:
+        opened.load()
+        result, engine = matting.matte(
+            opened,
+            model=model,
+            backend=params.get("backend"),
+            tile=int(params.get("tile") or 0),
+            overlap=int(params.get("overlap") or 64),
+            feather=int(params.get("feather") or 0),
+            edge_shift=float(params.get("edge_shift") or 0.0),
+            accept=False,
+        )
+    result.save(output, format="PNG")
+    return {"status": "succeeded", "report": {"engine": engine, "model": model}}
 
 
 def _identify(source: Path) -> dict[str, Any]:
@@ -225,7 +263,7 @@ def _all(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]:
 
     values = {
         "strength": params.get("strength"),
-        "pipeline": params.get("pipeline", "qwen-zimage"),
+        "pipeline": params.get("pipeline", "sdxl-zimage"),
         "vendor": params.get("vendor"),
         "seed": params.get("seed"),
         "humanize": params.get("humanize", 0.0),
@@ -269,7 +307,7 @@ def _all(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]:
 def _invisible(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]:
     from remove_ai_watermarks.invisible_engine import InvisibleEngine
 
-    pipeline = params.get("pipeline", "qwen-zimage")
+    pipeline = params.get("pipeline", "sdxl-zimage")
     engine = InvisibleEngine(pipeline=pipeline, cpu_offload=bool(params.get("cpu_offload")))
     options = {
         key: params[key] for key in
@@ -369,7 +407,7 @@ def _invisible_options(params: dict[str, Any]) -> Any:
 
     values = {
         "strength": params.get("strength"),
-        "pipeline": params.get("pipeline", "qwen-zimage"),
+        "pipeline": params.get("pipeline", "sdxl-zimage"),
         "vendor": params.get("vendor"),
         "seed": params.get("seed"),
         "humanize": params.get("humanize", 0.0),
@@ -457,6 +495,9 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
             output = Path(request["output"]) if request.get("output") else None
             if operation == "watermark.identify":
                 response.update(_identify(source))
+            elif operation == "matte":
+                assert output is not None
+                response.update(_matte(source, output, params))
             elif operation == "watermark.classify":
                 response.update(_classify(source, params))
             elif operation == "watermark.video.identify":

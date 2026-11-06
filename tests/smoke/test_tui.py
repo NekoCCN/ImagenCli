@@ -1678,15 +1678,17 @@ def _superres_workspace(monkeypatch, tmp_path):
     return superres
 
 
-def test_superres_screen_lists_the_cli_catalog(deps, monkeypatch, tmp_path):
-    """The panel reads the same catalog the CLI prints, download state included."""
+def test_superres_screen_lists_every_local_model_family(deps, monkeypatch, tmp_path):
+    """The panel reads the same catalogs the CLI prints, for both model families."""
     from textual.widgets import DataTable
 
     _superres_workspace(monkeypatch, tmp_path)
+    from imagen_cli.application import matting
     from imagen_cli.application.superres import MANIFEST, catalog
 
     deps_value, _ = deps
     expected = catalog()["models"]
+    matting_models = matting.catalog()["models"]
 
     async def run():
         app = WorkbenchApp(deps_value)
@@ -1696,13 +1698,20 @@ def test_superres_screen_lists_the_cli_catalog(deps, monkeypatch, tmp_path):
             await pilot.pause()
             assert type(app.screen).__name__ == "SuperresScreen"
             table = app.screen.query_one("#superres-table", DataTable)
-            assert table.row_count == len(MANIFEST)
+            assert table.row_count == len(MANIFEST) + len(matting.MANIFEST)
             rows = [
                 [str(cell) for cell in table.get_row_at(index)]
                 for index in range(table.row_count)
             ]
-            assert [row[0] for row in rows] == [row["model"] for row in expected]
-            downloaded = {row["model"]: row["downloaded"] for row in expected}
+            assert [row[0] for row in rows] == [
+                row["model"] for row in [*expected, *matting_models]
+            ]
+            # The family column distinguishes the two catalogs in one flat table.
+            assert {row[3] for row in rows[: len(expected)]} == {"超分"}
+            assert {row[3] for row in rows[len(expected):]} == {"抠图"}
+            downloaded = {
+                row["model"]: row["downloaded"] for row in [*expected, *matting_models]
+            }
             for row in rows:
                 assert ("已下载" in row[-1]) is downloaded[row[0]]
 

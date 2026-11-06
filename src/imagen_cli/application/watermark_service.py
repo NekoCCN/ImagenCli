@@ -356,7 +356,7 @@ def run_operation(
             dilate=tuning.get("dilate", 3),
         )
     if operation in {"watermark.invisible", "watermark.all"}:
-        pipeline = pipeline or "qwen-zimage"
+        pipeline = pipeline or "sdxl-zimage"
         if pipeline not in PIPELINES:
             raise ValueError("unknown watermark pipeline: " + pipeline)
         if not accept_license:
@@ -463,7 +463,7 @@ def batch_directory(
     *,
     to: str | Path | None = None,
     mode: str = "all",
-    pipeline: str = "qwen-zimage",
+    pipeline: str = "sdxl-zimage",
     backend: str = "auto",
     sensitivity: str = "auto",
     force: bool = False,

@@ -45,6 +45,8 @@ OPTION_METADATA: dict[str, dict[str, Any]] = {
 
 # Which shared options each command accepts; shared with the TUI's run forms.
 COMMAND_CONTROLS: dict[str, set[str]] = {
+    "deploy update": {"yes"},
+    "deploy remove": {"yes"},
     "providers": {"limit", "cursor"},
     "models": {"limit", "cursor"},
     "profile list": {"limit", "cursor"},
@@ -60,6 +62,7 @@ COMMAND_CONTROLS: dict[str, set[str]] = {
     "skills uninstall": {"yes"},
     "transform": {"pipeline", "op", "preset", "session", "timeout", "async_", "wait"},
     "superres run": {"timeout", "async_", "wait"},
+    "matting run": {"timeout", "async_", "wait"},
     "ops": {"op", "preset", "verbose"},
     "models refresh": {"profile", "send_credential"},
     "models add": {"profile", "id"},

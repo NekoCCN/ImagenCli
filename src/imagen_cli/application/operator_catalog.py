@@ -80,6 +80,7 @@ CATEGORIES: dict[str, str] = {
     "photo": "颜色明暗",
     "art": "风格光学",
     "superres": "模型恢复",
+    "matting": "抠图与透明",
     "geometry": "尺寸几何",
     "utility": "实用工具",
 }
@@ -199,6 +200,14 @@ PRESET_PIPELINES: dict[str, list[dict[str, Any]]] = {
     ],
     "黑白漫画网点 (Manga Screentone)": [
         {"op": "screentone", "params": {"frequency": 35, "angle": 45.0, "contrast": 1.2}},
+    ],
+    "抠图贴纸 (Cutout Sticker)": [
+        {"op": "matte", "params": {"model": "birefnet-lite"}},
+        {"op": "sticker_outline", "params": {"width": 8, "color": "#ffffff", "shadow": True}},
+    ],
+    "抠图虚化 (Cutout Bokeh)": [
+        {"op": "matte", "params": {"model": "birefnet-lite"}},
+        {"op": "background_blur", "params": {"radius": 12.0}},
     ],
     "立绘贴纸白边 (Die-cut Sticker)": [
         {"op": "sticker_outline", "params": {"width": 8, "color": "#ffffff", "shadow": True}},
@@ -833,6 +842,53 @@ OPERATORS: list[OperatorItem] = [
                 min_value=8,
                 max_value=32,
                 description="瓦片拼接余量像素以消除边缘伪影",
+            ),
+        ],
+    ),
+    # --- Matting ---
+    OperatorItem(
+        key="matte",
+        name="AI 抠图 (Alpha Matting)",
+        category="matting",
+        category_label=CATEGORIES["matting"],
+        description="本地模型预测 alpha 通道，输出透明新产物；可继续做贴纸白边或背景虚化。",
+        default_op="matte",
+        default_params={"model": "birefnet-lite", "tile": 0, "overlap": 64},
+        parameters=[
+            Parameter(
+                "model",
+                "抠图模型",
+                "choice",
+                "birefnet-lite",
+                choices=["birefnet-lite"],
+                description="许可为 MIT 的本地权重；下载前会先显示来源与许可",
+            ),
+            Parameter(
+                "tile",
+                "分块尺寸",
+                "int",
+                0,
+                min_value=0,
+                max_value=2048,
+                description="0 表示整图一次推理；分块可降低大图显存占用",
+            ),
+            Parameter(
+                "overlap",
+                "分块重叠",
+                "int",
+                64,
+                min_value=0,
+                max_value=512,
+                description="瓦片拼接余量，避免接缝出现在发丝边缘",
+            ),
+            Parameter(
+                "feather",
+                "边缘羽化",
+                "int",
+                0,
+                min_value=0,
+                max_value=64,
+                description="对 alpha 做高斯羽化；默认 0 保留模型原始边缘",
             ),
         ],
     ),
@@ -2411,6 +2467,24 @@ INTROS: dict[str, dict[str, str]] = {
         ),
         "scenarios": "适用于黑白漫画出版、同人印刷品预览与报纸版画非真实感风格化。",
     },
+    "抠图贴纸": {
+        "title": "抠图贴纸 (Cutout Sticker)",
+        "summary": "先用本地模型预测 alpha 通道，再沿透明边界扩出白边与投影，直接得到可用贴纸。",
+        "principle": "模型抠图输出 RGBA 新产物，随后按 alpha 做形态学膨胀与高斯投影合成。",
+        "scenarios": "立绘、角色立牌与表情包的一键出图；边缘质量取决于抠图模型。",
+        "use_case": "把一张不透明的立绘直接做成透明贴纸",
+        "benefit": "省掉手工抠底，透明边缘和投影一步到位",
+        "loss": "模型判断错误时边缘会留下原背景残影，需要换模型或重跑",
+    },
+    "抠图虚化": {
+        "title": "抠图虚化 (Cutout Bokeh)",
+        "summary": "先抠出前景，再对背景做高斯虚化，保留主体清晰。",
+        "principle": "模型抠图得到 alpha，随后按 alpha 合成原图与模糊层。",
+        "scenarios": "人像、商品与立绘的氛围化处理；主体与背景同色时容易分离不全。",
+        "use_case": "让主体保持清晰、背景带景深",
+        "benefit": "不用手工选区就能突出主体",
+        "loss": "抠图边界不准时，主体边缘会出现原背景的清晰残边",
+    },
     "立绘贴纸白边": {
         "title": "贴纸白边 (Sticker Outline)",
         "summary": (
@@ -2695,6 +2769,8 @@ PRESET_CATEGORIES: dict[str, str] = {
     "热血集中线": "线条与色块",
     "黑白漫画网点": "线条与色块",
     "立绘贴纸白边": "风格光学",
+    "抠图贴纸": "抠图与透明",
+    "抠图虚化": "抠图与透明",
     "XDoG动漫线稿": "线条与色块",
     "XDoG动漫手绘线稿": "线条与色块",
     "像素复古风": "风格光学",
@@ -2728,6 +2804,7 @@ CATEGORIES_LIST: list[str] = [
     "颜色明暗",
     "风格光学",
     "模型恢复",
+    "抠图与透明",
     "尺寸几何",
 ]
 
@@ -2745,6 +2822,8 @@ _BROWSE_NAMES = {
     "日系通透空气感 (Shinkai Airy)": "通道调色、高光扩散与边缘压暗",
     "热血集中线 (Manga Action Focus)": "叠加径向线条",
     "黑白漫画网点 (Manga Screentone)": "亮度转网点",
+    "抠图贴纸 (Cutout Sticker)": "抠图后加白边与投影",
+    "抠图虚化 (Cutout Bokeh)": "抠图后虚化背景",
     "立绘贴纸白边 (Die-cut Sticker)": "透明轮廓扩边与投影",
     "复古90年代胶片 (Retro 90s Film)": "色阶压缩、边缘压暗与噪声叠加",
     "动漫超分辨率 4x (Anime SR)": "插画模型四倍放大",
@@ -2812,6 +2891,18 @@ _OPERATION_EFFECTS = {
         "将 RGB 映射到有限调色板，可启用误差扩散。",
         "减少使用的颜色数量。",
         "原始颜色与渐变层次会丢失，可能出现色带或颗粒。",
+    ),
+    "matte": (
+        "AI 抠图",
+        "用固定的 ONNX 权重预测 alpha 通道，输出 RGBA 新产物。",
+        "不需要手工选区就能得到透明边缘。",
+        "极细发丝与半透明材质可能判断错误，需要重跑或换模型。",
+    ),
+    "background_blur": (
+        "背景虚化",
+        "按 alpha 通道把原图与高斯模糊层合成。",
+        "主体保持清晰，背景获得景深。",
+        "alpha 不准时主体边缘会留下清晰残边。",
     ),
     "dither": (
         "量化误差扩散",
@@ -2989,12 +3080,17 @@ _OPERATION_EFFECTS = {
         "像素级不可见水印不受影响。",
     ),
 }
+_OPERATION_USE_CASES = {
+    "matte": "得到一张带透明通道的新产物",
+    "background_blur": "让主体清晰、背景带景深",
+}
 for _op, (_title, _method, _benefit, _loss) in _OPERATION_EFFECTS.items():
     INTROS[_op] = {
         "title": _title,
         "summary": _method,
         "principle": _method,
         "scenarios": f"可能带来：{_benefit} 可能失去：{_loss}",
+        "use_case": _OPERATION_USE_CASES.get(_op, _method),
         "benefit": _benefit,
         "loss": _loss,
     }
@@ -3018,6 +3114,12 @@ for _key, _pipeline in PRESET_PIPELINES.items():
     }
     INTROS[_key] = _intro
     INTROS[_key.split(" (", 1)[0]] = _intro
+
+for _full, _short in (
+    ("抠图贴纸 (Cutout Sticker)", "抠图贴纸"),
+    ("抠图虚化 (Cutout Bokeh)", "抠图虚化"),
+):
+    INTROS[_full] = INTROS[_short]
 
 INTROS["元数据提纯"] = {
     "title": "元数据提纯",
@@ -3081,6 +3183,9 @@ _USE_CASES = {
     "focus_lines": "叠加径向集中线，做漫画冲击力",
     "黑白漫画网点": "把明暗转成漫画网点",
     "screentone": "把明暗转成漫画网点",
+    "抠图贴纸": "自动抠图，再加白边和投影，做贴纸效果",
+    "抠图虚化": "自动抠图，再把背景虚化",
+    "matte": "用本地模型预测 alpha 通道，输出透明产物",
     "立绘贴纸白边": "给透明立绘加白边和投影，做贴纸效果",
     "sticker_outline": "给透明立绘加白边和投影，做贴纸效果",
     "XDoG动漫线稿": "提取动漫线稿，强调轮廓和手绘感",

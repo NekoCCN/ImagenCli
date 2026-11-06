@@ -29,7 +29,7 @@ MAX_STEPS = 20
 MAX_INPUT_PIXELS = 32_000_000
 MAX_OUTPUT_PIXELS = 64_000_000
 MAX_WORKING_BYTES = 2 * 1024**3
-NONDETERMINISTIC_OPS = {"superres"}
+NONDETERMINISTIC_OPS = {"superres", "matte"}
 
 
 def _engine() -> dict[str, str]:
@@ -107,6 +107,12 @@ def validate(pipeline: Any) -> list[dict[str, Any]]:
                 for item in value:
                     check_finite(item)
         check_finite(params)
+        if name == "matte":
+            from imagen_cli.application.matting import MANIFEST as MATTING_MODELS
+
+            chosen = params.get("model", "birefnet-lite")
+            if chosen not in MATTING_MODELS:
+                raise ValueError(f"unknown matting model: {chosen}")
         normalized = {"op": name, "params": dict(params)}
         if "algorithm_version" in step:
             normalized["algorithm_version"] = revision
@@ -337,6 +343,14 @@ def check_budget(
             factor = MANIFEST[model]["scale"]
             width, height = width * factor, height * factor
             working_bytes = max(working_bytes, width * height * 16)
+        elif name == "matte":
+            from imagen_cli.application.matting import MANIFEST as MATTING
+
+            if params.get("model", "birefnet-lite") not in MATTING:
+                raise ValueError("unknown matting model")
+            # Output size is unchanged; the model's square input dominates instead.
+            side = int(MATTING[params.get("model", "birefnet-lite")]["input_size"])
+            working_bytes = max(working_bytes, side * side * 3 * 4 * 4)
         if width <= 0 or height <= 0:
             raise ValueError("target dimensions must be positive")
         peak_pixels = max(peak_pixels, width * height)

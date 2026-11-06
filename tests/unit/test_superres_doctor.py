@@ -92,3 +92,25 @@ def test_doctor_is_registered_with_both_backends():
     command, args, _ = _parse(["superres", "doctor", "--backend", "cuda"])
     assert command == "superres doctor"
     assert args == {"backend": "cuda"}
+
+
+def test_a_provider_that_fails_to_load_is_not_reported_as_ready(monkeypatch, tmp_path):
+    """CUDA can be listed and still fail at session time (missing libcublasLt)."""
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        superres, "available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    superres.weights_path(PINNED).write_bytes(b"weights")
+
+    def fake_upscale(image, **kwargs):
+        raise superres.ProviderUnavailable(
+            "backend cuda was requested but the session is using CPUExecutionProvider"
+        )
+
+    monkeypatch.setattr(superres, "upscale", fake_upscale)
+    data = superres.doctor(PINNED, backend="cuda")
+    assert data["status"] == "missing"
+    assert data["backend"] is None
+    assert data["inference"] is False
+    assert "CUDAExecutionProvider" in data["missing"]

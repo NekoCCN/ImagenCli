@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import tempfile
 import time
 from collections.abc import Callable
@@ -12,6 +11,21 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from PIL import Image
+
+from imagen_cli.application.model_weights import (
+    MAX_WEIGHT_BYTES,
+    download,
+    ensure_weight,
+    entry_row,
+    record_digest,
+    recorded_digest,
+    weight_path,
+    weight_state,
+    weights_directory,
+)
+from imagen_cli.application.model_weights import (
+    digest_path as shared_digest_path,
+)
 
 # Every downloadable entry is pinned to a SHA-256. Community ONNX conversions
 # are labelled as such; entries without a URL require the user to place weights.
@@ -96,7 +110,6 @@ PROVIDERS: dict[str, tuple[str, list[str]]] = {
     "cpu": ("CPUExecutionProvider", ["CPUExecutionProvider"]),
 }
 AUTO_ORDER = ("cuda", "coreml", "dml", "openvino", "cpu")
-MAX_WEIGHT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 class Runner(Protocol):
@@ -117,11 +130,34 @@ def _numpy() -> Any:
     return numpy
 
 
+def _preload_providers() -> None:
+    """Load pip-installed CUDA/cuDNN libraries before any session exists.
+
+    ``onnxruntime-gpu`` ships no CUDA runtime of its own and does not search the
+    ``nvidia-*`` wheels by default, so a session silently degrades to the CPU
+    provider even though ``get_available_providers()`` lists CUDA. The helper is
+    only defined on builds that can use it, and a system CUDA install still works
+    when it fails.
+    """
+    try:
+        import onnxruntime
+    except ImportError:  # pragma: no cover - depends on the extra
+        return
+    preload = getattr(onnxruntime, "preload_dlls", None)
+    if preload is None:
+        return
+    try:
+        preload(directory="")
+    except (OSError, RuntimeError, AttributeError):  # pragma: no cover - no nvidia wheels
+        return
+
+
 def available_providers() -> list[str]:
     try:
         import onnxruntime
     except ImportError:
         return []
+    _preload_providers()
     return list(onnxruntime.get_available_providers())
 
 
@@ -178,124 +214,50 @@ def _choose_provider(backend: str | None, device: str | None) -> list[str]:
     return ["CPUExecutionProvider"]
 
 
-def weights_directory() -> Path:
-    configured = os.environ.get("IMAGEN_MODEL_DIR")
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".cache" / "imagen" / "models"
-
-
 def weights_path(model: str, suffix: str = ".onnx") -> Path:
     if model not in MANIFEST:
         raise ValueError("unknown super-resolution model")
-    if suffix not in {".onnx", ".pt"}:
-        raise ValueError("weights suffix must be .onnx or .pt")
-    path = weights_directory() / f"{model}{suffix}"
-    for candidate in (path, path.with_suffix(".sha256"), path.with_suffix(".part")):
-        if any(part.is_symlink() for part in (candidate, *candidate.parents)):
-            raise ValueError("model paths must not contain symlinks")
-    return path
+    return weight_path(model, suffix)
 
 
 def digest_path(model: str, suffix: str = ".onnx") -> Path:
-    return weights_path(model, suffix).with_suffix(".sha256")
+    if model not in MANIFEST:
+        raise ValueError("unknown super-resolution model")
+    return shared_digest_path(model, suffix)
 
 
 def _recorded_digest(model: str, suffix: str) -> str | None:
-    path = digest_path(model, suffix)
-    if not path.is_file():
-        return None
-    try:
-        value = path.read_text(encoding="ascii").strip()
-    except (OSError, UnicodeDecodeError):
-        return None
-    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
-        return None
-    return value
+    return recorded_digest(model, suffix)
 
 
 def _record_digest(model: str, suffix: str, digest: str) -> None:
-    path = digest_path(model, suffix)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".part")
-    temporary.write_text(digest, encoding="ascii")
-    temporary.replace(path)
+    record_digest(model, suffix, digest)
 
 
 def _weight_state(path: Path, expected: str | None, verify: bool) -> str:
-    if not path.exists():
-        return "missing"
-    if not path.is_file() or path.stat().st_size > MAX_WEIGHT_BYTES:
-        return "corrupt"
-    if not verify:
-        return "ready" if expected is not None else "unverified"
-    if expected is None:
-        return "unverified"
-    return "ready" if hashlib.sha256(path.read_bytes()).hexdigest() == expected else "corrupt"
+    return weight_state(path, expected, verify, max_bytes=MAX_WEIGHT_BYTES)
 
 
 def _download(url: str, target: Path) -> None:
-    import httpx
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".part")
-    if target.exists():
-        return
-    with httpx.stream(
-        "GET", url, timeout=120.0, follow_redirects=True, trust_env=False
-    ) as response:
-        response.raise_for_status()
-        if response.headers.get("content-length") and int(
-            response.headers["content-length"]
-        ) > MAX_WEIGHT_BYTES:
-            raise ValueError("weights exceed the size limit")
-        with temporary.open("wb") as output:
-            for chunk in response.iter_bytes():
-                output.write(chunk)
-                if output.tell() > MAX_WEIGHT_BYTES:
-                    raise ValueError("weights exceed the size limit")
-    temporary.replace(target)
+    download(url, target)
 
 
 def ensure_weights(model: str, *, accept: bool = False, suffix: str = ".onnx",
                    download: Callable[[str, Path], None] | None = None) -> Path:
-    path = weights_path(model, suffix)
-    pinned = MANIFEST[model].get("sha256") if suffix == ".onnx" else None
-    if path.exists():
-        if not path.is_file() or path.stat().st_size > MAX_WEIGHT_BYTES:
-            raise ValueError("weights exceed the size limit or are not a regular file")
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        expected = pinned or _recorded_digest(model, suffix)
-        if expected is not None and expected != actual:
-            raise ValueError("weights digest mismatch")
-        if expected is None:
-            _record_digest(model, suffix, actual)
-        return path
-    url = MANIFEST[model].get("url")
-    if url is None:
-        raise ValueError(
-            f"weights are missing; place {path.name} in {path.parent} "
-            "(no maintained ONNX release is claimed)"
-        )
-    if not accept:
-        raise ValueError(
-            "weights are missing; rerun with accept=true after reviewing " + str(url)
-        )
-    import tempfile
+    if model not in MANIFEST:
+        raise ValueError("unknown super-resolution model")
+    return ensure_weight(
+        model,
+        MANIFEST[model].get("sha256") if suffix == ".onnx" else None,
+        MANIFEST[model].get("url"),
+        suffix=suffix,
+        accept=accept,
+        # Keep the module-level seam: callers and tests patch `superres._download`.
+        download_fn=download or _download,
+        label="ONNX",
+        max_bytes=MAX_WEIGHT_BYTES,
+    )
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.imagen-download-') as temporary:
-        staged = Path(temporary) / path.name
-        (download or _download)(str(url), staged)
-        if not staged.is_file() or staged.stat().st_size > MAX_WEIGHT_BYTES:
-            raise ValueError('weights exceed the size limit or are not a regular file')
-        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
-        if pinned is not None and digest != pinned:
-            raise ValueError('downloaded weights do not match the pinned digest')
-        # Hard-link publication refuses an existing file instead of overwriting it.
-        os.link(staged, path)
-    _record_digest(model, suffix, digest)
-    return path
 
 
 def _make_torch_runner(model: str, *, device: str | None,
@@ -357,6 +319,50 @@ def _preflight_onnx(data: bytes) -> None:
         raise ValueError(f"ONNX safety preflight failed: {error}") from error
 
 
+class ProviderUnavailable(ValueError):
+    """A requested execution provider was listed but did not load in the session."""
+
+
+def _require_provider(session: Any, backend: str | None) -> None:
+    """Refuse to label a run with a backend the session silently fell back from.
+
+    ``get_available_providers()`` lists a provider that can still fail to load at
+    session time (a missing libcublasLt is the common case). Reporting the
+    requested name then would claim GPU work that ran on the CPU.
+    """
+    if backend is None or backend not in PROVIDERS:
+        return
+    expected = PROVIDERS[backend][0]
+    used = list(session.get_providers())
+    if expected not in used or used[0] != expected:
+        raise ProviderUnavailable(
+            f"backend {backend} was requested but the session is using "
+            + (used[0] if used else "no provider")
+            + "; the requested provider failed to load"
+        )
+
+
+def session_run(session: Any, feeds: dict[str, Any], backend: str | None) -> Any:
+    """Run one inference, translating runtime-provider failures into our own error.
+
+    ONNX Runtime raises its own exception types from the C++ layer, which would
+    otherwise surface as an unclassified CLI failure. The two cases worth naming
+    are an out-of-memory GPU provider and any other provider-side abort.
+    """
+    try:
+        return session.run(None, feeds)[0]
+    except Exception as error:  # noqa: BLE001 - ORT raises its own pybind types
+        message = str(error)
+        if "Failed to allocate memory" in message or "available memory" in message.lower():
+            raise ValueError(
+                f"backend {backend or 'auto'} ran out of memory while running the model; "
+                "lower the tile size, use a smaller model, or choose the cpu backend"
+            ) from error
+        raise ValueError(
+            "inference failed in the execution provider: " + message.splitlines()[-1][:200]
+        ) from error
+
+
 def _make_runner(model: str, *, backend: str | None, device: str | None,
                  accept: bool) -> tuple[Runner, dict[str, Any]]:
     if backend == "torch":
@@ -376,6 +382,7 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
     _preflight_onnx(data)
     # Use the checked bytes, not a path that could change after preflight.
     session = onnxruntime.InferenceSession(data, providers=providers)
+    _require_provider(session, backend or device)
     inputs = session.get_inputs()
     if len(inputs) != 1:
         raise ValueError("super-resolution model must take one input")
@@ -400,9 +407,7 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
                 mode="edge",
             )
         chw = numpy.transpose(array / 255.0, (2, 0, 1))[None]
-        output = session.run(  # type: ignore[no-untyped-call, unused-ignore]
-            None, {name: chw}
-        )[0]
+        output = session_run(session, {name: chw}, backend or device)
         if not numpy.isfinite(output).all():
             raise ValueError("model output must contain only finite values")
         result = numpy.squeeze(output, axis=0)
@@ -515,27 +520,10 @@ def op(image: Image.Image, *, model: str = "realesrgan-x4plus",
 def catalog(*, verify: bool = False) -> dict[str, Any]:
     models = []
     for name, entry in sorted(MANIFEST.items()):
-        path = weights_path(name)
-        expected = entry.get("sha256") or _recorded_digest(name, ".onnx")
-        state = _weight_state(path, expected, verify)
-        if verify and state == "unverified" and path.is_file():
-            _record_digest(name, ".onnx", hashlib.sha256(path.read_bytes()).hexdigest())
-        models.append({
-            "model": name,
-            "task": entry.get("task", "upscale"),
-            "category": entry.get("category", "general"),
-            "usage": entry.get("usage"),
-            "scale": entry["scale"],
-            "license": entry["license"],
-            "source": entry["source"],
-            "note": entry.get("note"),
-            "downloadable": entry.get("url") is not None,
-            "downloaded": path.exists(),
-            "state": state,
-            "bytes": path.stat().st_size if path.exists() else None,
-            "sha256": entry.get("sha256"),
-            "multiple": entry.get("multiple", 1),
-        })
+        row = entry_row(name, entry, verify=verify)
+        row["task"] = entry.get("task", "upscale")
+        row["scale"] = entry["scale"]
+        models.append(row)
     return {**backend_report(), "models": models, "verified": verify}
 
 
@@ -617,10 +605,22 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
         return data
     with tempfile.TemporaryDirectory(prefix="imagen-doctor-") as _scratch:
         started = time.monotonic()
-        output, engine = upscale(
-            Image.new("RGB", (32, 32), (127, 127, 127)),
-            model=selected, backend=used, tile=32, overlap=0, accept=False,
-        )
+        try:
+            output, engine = upscale(
+                Image.new("RGB", (32, 32), (127, 127, 127)),
+                model=selected, backend=used, tile=32, overlap=0, accept=False,
+            )
+        except ValueError as error:
+            # A provider can be listed and still fail to load; name the broken
+            # layer instead of raising out of a diagnostic command.
+            if not isinstance(error, ProviderUnavailable):
+                raise
+            data["status"] = "missing"
+            data["backend"] = None
+            data["provider_used"] = None
+            data["missing"] = [_backend_provider(used)]
+            data["hint"] = str(error)
+            return data
         data["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     data["weights_verified"] = True
     data["inference"] = True

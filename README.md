@@ -169,6 +169,7 @@ The workbench has Import and Save as buttons. More (or `F10`) opens the remainin
 | Approve / execute / retry a plan | plan page: `a`, `enter`, `r` | `plan approve`, `plan execute`, `plan retry` |
 | Ordinary image processing | `t`; `p` edits parameters | `ops`, `transform`, `compare`, `sheet` |
 | Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark`, `superres doctor` |
+| Local matting / cutouts | transform page preset; `s` lists the model | `matting run`, `matting models`, `matting install`, `matting fetch`, `matting doctor`, `transform --preset '抠图贴纸 (Cutout Sticker)'` |
 | Watermark inspect / remove | command palette; no dedicated page | `watermark identify`, `watermark metadata`, `watermark visible`, `watermark erase`, `watermark invisible`, `watermark all`, `watermark classify`, `watermark batch`, `watermark video ...`, `watermark status` |
 | Remote GPU job | command palette; no dedicated page | `remote ...`, `watermark ... --remote NAME` |
 | Open image / folder | `o` / `O` | `asset open [--folder]` |
@@ -528,6 +529,25 @@ ImagenCli after installation. In a uv-managed source checkout, keep `--extra ai-
 The TUI command palette exposes the same backend and acceptance choices.
 Before trusting a backend for a full image, `imagen superres doctor --backend cuda` runs one tile on a 32×32 sample and reports which provider actually ran. It proves the backend, not output quality.
 
+## Local matting
+
+Matting predicts an alpha channel locally and writes a new RGBA artifact; the source is never modified. It is what makes the alpha-only operators usable: `sticker_outline` and `background_blur` both refuse an ordinary RGB artifact.
+
+```bash
+imagen matting models
+imagen matting install --model birefnet-lite --accept
+imagen matting run ARTIFACT_ID
+imagen transform ARTIFACT_ID --preset '抠图贴纸 (Cutout Sticker)'
+```
+
+`s` lists both model families in one table, with a Family column. The shipped default is `birefnet-lite`: an MIT-licensed BiRefNet_lite ONNX export with a 1024×1024 input. It holds soft edges on hair and fur for illustrations and photographs alike. Weights are never bundled; each entry is pinned to a SHA-256 and downloaded only with `--accept`.
+
+Non-commercial weights are deliberately absent from the catalog. Bria RMBG-2.0, for example, is CC BY-NC 4.0 and needs a separate commercial agreement, so it is not a drop-in default here.
+
+`--tile 0` runs the whole image in one pass; a positive value splits large images, and `--overlap` keeps tile seams out of hair edges. `--feather` blurs the alpha and `--edge-shift` moves the apparent boundary; both default to `0`.
+
+A matte is a prediction, not a guarantee. Thin strands, glass and semi-transparent material can be judged wrong, and an inaccurate matte leaves background colour on the edge.
+
 Run upscaling or same-size restoration through the dedicated model-processing command:
 
 ```bash
@@ -595,7 +615,7 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `erase` removes whatever lies inside each `--region x,y,width,height` box with the same CPU fill backends. Use it for marks the registry does not cover; the box must lie inside the image.
 - `invisible` regenerates pixels through an image model to disrupt invisible watermarks such as SynthID-class marks. It needs a GPU, changes fine detail, and lowers fidelity. There is no local SynthID pixel detector, so Imagen cannot certify that a hidden mark is gone.
 - `all` runs visible, invisible, and metadata removal in order. It needs the same license confirmation and GPU as `invisible`; when the invisible stage has no signal or no GPU it is skipped and the other stages still run.
-- Each pipeline carries its own license (`qwen-zimage`, `qwen21-zimage`, `sdxl-zimage`, `chroma-zimage`); review it before `--accept-license`. A run estimated above the memory cap returns `approval_required` with a budget digest; repeat the identical command with `--budget-approval DIGEST`.
+- Each pipeline carries its own license (`qwen-zimage`, `qwen21-zimage`, `sdxl-zimage`, `chroma-zimage`); the default is `sdxl-zimage`, the smallest stack. Review it before `--accept-license`. A run estimated above the memory cap returns `approval_required` with a budget digest; repeat the identical command with `--budget-approval DIGEST`.
 - `watermark setup --accept` creates the isolated environment with the `visible` extra. Add the extras you need, such as `--extras visible,qwen-zimage` for invisible work, `--extras visible,classify,source-classify` for classification, or `--extras visible,video,diffusion` for video, then restart Imagen. `watermark update --accept` builds and probes a new one, then switches; a failed update keeps the previous environment.
 
 ### Video
@@ -654,6 +674,38 @@ imagen remote add salad --endpoint https://GROUP.salad.cloud --credential-ref en
 ```
 
 Salad's Container Gateway requires the extra `--gateway-credential-ref env:SALAD_API_KEY`; the worker's own bearer token stays in `--credential-ref`. Publishing an image or creating cloud resources is outward-facing, so do it only after explicit authorization.
+
+`imagen deploy` manages both control planes from the checkout. `deploy status` is read-only and reports readiness, the registered remote, and drift warnings; `deploy update` prints a plan and needs `--accept`. Renaming a Salad group is create-then-delete: the new group must answer `/readyz` before `--yes` allows removing the old one. Credentials accept `env:NAME` or `private:NAME`; `imagen deploy secret set --name NAME --key-file PATH` stores one privately and prints only its reference.
+
+```bash
+imagen deploy status --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN
+imagen deploy update --vendor salad --name imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:TAG --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --accept
+```
+
+Build the two images explicitly, and push with a registry login when the package is private:
+
+```bash
+imagen deploy build --tag TAG --image ghcr.io/nekoccn/imagen-worker:TAG --accept
+imagen deploy build --tag TAG --image ghcr.io/nekoccn/imagen-worker-queue:TAG --image-target salad-queue --base-image ghcr.io/nekoccn/imagen-worker:TAG --salad-queue-worker-url-ref env:SALAD_QUEUE_WORKER_URL --accept
+imagen deploy build --tag TAG --image ghcr.io/PRIVATE/worker:TAG --push --registry-user-ref env:REGISTRY_USER --registry-password-ref private:registry-password --accept
+```
+
+`--image-target worker` builds the base worker; `--image-target salad-queue` builds the Salad queue image on top of it and needs the vendor Queue Worker URL, which is never baked in from a public URL. The registry password reaches `docker login` on stdin and is redacted from error output. `--matting-runtime gpu` installs the CUDA build plus the pip CUDA/cuDNN wheels instead of the CPU-only runtime.
+
+A push also rewrites the manifest so every layer carries the OCI media type. Docker's legacy builder labels its own layers with the Docker type on top of an OCI base image, and Modal's unpacker rejects that mixture with `unsupported mediatype`; the rewrite changes only the label, not the layer bytes.
+
+`deploy remove` deletes a Salad container group or stops the Modal app. It is the only command that destroys cloud state, so it needs both `--accept` and `--yes`; on Salad it reads the group first, so a mistyped name fails instead of silently reporting success:
+
+```bash
+imagen deploy remove --vendor salad --name imagen-worker-3090 --salad-key-ref env:SALAD_API_KEY --accept --yes
+imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes
+```
+
+Matting also runs on a registered worker. The image must have been built with matting enabled (`IMAGEN_MATTING=1`, the default); `/v1/meta` reports `capabilities.matte`, and a worker without it fails instead of falling back:
+
+```bash
+imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST
+```
 
 ## Agent skills
 

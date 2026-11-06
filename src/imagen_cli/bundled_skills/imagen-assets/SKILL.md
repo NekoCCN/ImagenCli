@@ -1,6 +1,6 @@
 ---
 name: imagen-assets
-version: 1.8.0
+version: 1.12.0
 description: Use when browsing or resuming Imagen sessions, importing or saving artifacts, applying local transforms, comparing images, upscaling, removing watermarks from images or video in single runs or directory batches, using a remote GPU endpoint, or reclaiming workspace disk space.
 ---
 
@@ -60,6 +60,27 @@ imagen superres run ARTIFACT_ID --model USER_SELECTED_MODEL --backend cpu --tile
 
 Do not download weights or install inference dependencies automatically. `superres run` needs `--model`; `--accept` authorizes downloading missing weights, so append it only after explicit authorization. Already downloaded weights do not require that flag in the CLI. The older `transform --op 'superres:model=NAME,...'` syntax remains compatible. Report permission/dependency errors. Never substitute ordinary resizing and claim successful model-based upscaling.
 
+## Local matting (alpha cutouts)
+
+Matting predicts an alpha channel with a pinned local ONNX model and always writes a new RGBA artifact; the source stays untouched. It is the operator that unlocks everything alpha-dependent, so run it first in a chain.
+
+```bash
+imagen matting models --agent
+imagen matting doctor --agent
+imagen matting run ARTIFACT_ID --agent
+imagen matting run ARTIFACT_ID --model birefnet-lite --feather 2 --agent
+imagen transform ARTIFACT_ID --op 'matte:model=birefnet-lite' --agent
+imagen transform ARTIFACT_ID --op 'matte:model=birefnet-lite' --agent
+```
+
+Two ready-made recipes chain matting with an alpha-only operator: one adds the sticker outline, one blurs the background. Their names are localized, so read them from `imagen ops --agent` and pass the exact key to `--preset` instead of guessing.
+
+`matting run` needs the `ai-onnx` runtime and downloaded weights. `matting models` reports licence, download state and digest; `matting install --model NAME --accept` installs the runtime and weights; `matting fetch NAME --accept` downloads weights only; `matting doctor` proves the requested backend with one real inference and never downloads anything. Do not download weights or install dependencies without explicit authorization.
+
+The shipped default is `birefnet-lite` (MIT, BiRefNet_lite ONNX export, 1024x1024 input). It keeps soft edges on hair and fur for both illustrations and photographs. Non-commercial weights are deliberately not in the catalog: do not add one, and do not describe a CC BY-NC model as a drop-in default. `--tile` splits large images (`0` means one pass), `--overlap` keeps tile seams out of hair edges, `--feather` blurs the alpha and `--edge-shift` moves the apparent boundary; leave both at `0` unless the user asks for a softer or tighter edge.
+
+`sticker_outline` and `background_blur` require an alpha channel, so they fail on an ordinary RGB artifact. That is what `matte` fixes. Never present a matte as a quality guarantee: thin strands, glass and semi-transparent material can be judged wrong, and a bad matte leaves background colour on the edge.
+
 ## Watermark inspection and removal
 
 Watermark work reads a published artifact and always writes a new artifact; the source stays untouched. Start with the read-only checks and report what they actually found instead of assuming a mark exists.
@@ -80,7 +101,7 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --agent
 
 `identify` and `metadata` without `--remove` publish nothing. `classify` is also read-only: by default it classifies a photo from pixels; with `--source` it classifies the likely source pipeline. Neither is provenance and neither detects SynthID. `metadata --remove` strips AI metadata (C2PA, EXIF, XMP, IPTC, PNG text) into a copy. `visible` removes registered visible marks with a CPU backend (`cv2`, `migan`, `lama`); `--mark NAME` targets one registered mark and `--sensitivity strict` keeps the high-precision gate. `erase` inpaints every `--region x,y,width,height` box, for marks the registry does not cover; boxes must lie inside the image. `invisible` regenerates pixels through an image model to disrupt invisible watermarks such as SynthID-class marks. `all` runs visible, invisible, and metadata removal in order and skips the invisible stage when there is no signal or no GPU. No local SynthID pixel detector exists, so never claim a hidden mark was verified as gone. Regeneration changes detail and lowers fidelity; never describe it as lossless, guaranteed, or a quality improvement. Metadata removal is not pixel-level watermark removal.
 
-`invisible` and `all` need a GPU and the isolated `remove-ai-watermarks` environment. `watermark status` reports readiness, version, capabilities, and the memory cap; `watermark setup` previews and `--accept` creates the environment. Add the extras the task needs: `--extras visible` for registered visible marks, `--extras visible,qwen-zimage` for invisible or `all`, `--extras visible,classify,source-classify` for classification, and `--extras visible,video,diffusion` for video. `watermark update --accept` builds and probes a new environment before switching, keeping the old one on failure. Each pipeline carries its own license: state it, then pass `--accept-license` only after the user confirms that pipeline. A run estimated above the memory cap returns `approval_required` with `data.budget.digest`; repeat the identical command with `--budget-approval DIGEST`. Use `--tile`, `--tile-size`, `--tile-overlap`, `--cpu-offload`, `--force`, `--strength`, `--seed`, `--humanize`, `--unsharp`, `--controlnet-conditioning-scale`, `--adaptive-polish`, `--text-manifest`, `--fidelity-anchor`, and `--max-resolution` only when the source or hardware needs them, and `--max-seconds` to bound the run.
+`invisible` and `all` need a GPU and the isolated `remove-ai-watermarks` environment. `watermark status` reports readiness, version, capabilities, and the memory cap; `watermark setup` previews and `--accept` creates the environment. Add the extras the task needs: `--extras visible` for registered visible marks, `--extras visible,qwen-zimage` for invisible or `all`, `--extras visible,classify,source-classify` for classification, and `--extras visible,video,diffusion` for video. `watermark update --accept` builds and probes a new environment before switching, keeping the old one on failure. Each pipeline carries its own license: state it, then pass `--accept-license` only after the user confirms that pipeline. The default is `sdxl-zimage`, the smallest stack; the shared Z-Image face stage loads only when a face is detected. A run estimated above the memory cap returns `approval_required` with `data.budget.digest`; repeat the identical command with `--budget-approval DIGEST`. Use `--tile`, `--tile-size`, `--tile-overlap`, `--cpu-offload`, `--force`, `--strength`, `--seed`, `--humanize`, `--unsharp`, `--controlnet-conditioning-scale`, `--adaptive-polish`, `--text-manifest`, `--fidelity-anchor`, and `--max-resolution` only when the source or hardware needs them, and `--max-seconds` to bound the run.
 
 ## Video watermarks
 
@@ -138,6 +159,62 @@ imagen remote job cancel REMOTE_JOB_ID --agent
 ```
 
 `remote job resume` re-reads a queued, running, or succeeded job and fetches its output; `remote job retry-interrupted` reuses the same digest only for an interrupted job; `remote job cancel` records the worker's answer. On `unknown` or `accepted_maybe`, stop and inspect the recorded job; do not resubmit, and do not open a new session to route around uncertainty. A sync endpoint answers inline within its own short limit; a queue or shared-volume endpoint is polled for up to `--max-seconds`. Create signing or gateway credentials outside Imagen and reference them only as `env:`, `keyring:`, or `private:`.
+
+## Deploying and updating the worker
+
+These commands manage the cloud side only; they never run a paid generation request. `deploy status` is read-only. `deploy update` and `deploy build` print a plan and return `approval_required` until the same command is rerun with `--accept`. Credentials accept `env:NAME` or `private:NAME`; values are never printed.
+
+```bash
+imagen deploy secret set --name salad-api-key --key-file PATH --agent
+imagen deploy status --vendor salad --name imagen-worker-3090 \
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN --agent
+imagen deploy update --vendor salad --name imagen-worker-3090 \
+  --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN \
+  --accept --agent
+imagen deploy update --vendor salad --name imagen-qwen-3090-low \
+  --rename imagen-worker-3090 --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
+  --salad-key-ref env:SALAD_API_KEY --worker-token-ref env:IMAGEN_WORKER_TOKEN \
+  --accept --yes --agent
+imagen deploy update --vendor modal --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
+  --modal-token-id-ref env:MODAL_TOKEN_ID \
+  --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --agent
+imagen deploy build --tag 0.1.20 --image ghcr.io/nekoccn/imagen-worker:0.1.20 \
+  --accept --agent
+imagen deploy build --tag 0.1.20 --image ghcr.io/nekoccn/imagen-worker-queue:0.1.20 \
+  --image-target salad-queue --base-image ghcr.io/nekoccn/imagen-worker:0.1.20 \
+  --salad-queue-worker-url-ref env:SALAD_QUEUE_WORKER_URL --accept --agent
+imagen deploy build --tag 0.1.20 --image ghcr.io/priv/worker:0.1.20 --push \
+  --registry-user-ref env:REGISTRY_USER --registry-password-ref private:registry-password \
+  --accept --agent
+imagen deploy remove --vendor salad --name imagen-worker-3090 \
+  --salad-key-ref env:SALAD_API_KEY --accept --yes --agent
+imagen deploy remove --vendor modal --modal-token-id-ref env:MODAL_TOKEN_ID \
+  --modal-token-secret-ref env:MODAL_TOKEN_SECRET --accept --yes --agent
+```
+
+`deploy update` on Salad replaces the image in place and waits for `/readyz`. Renaming is create-then-delete: the new group must answer `/readyz` before `--yes` authorizes deleting the old one; any failure keeps the old group. Modal app names are fixed, so `--name` and `--rename` apply to Salad only. `deploy status` reports image, state, `/readyz`, `/healthz`, worker metadata, the matching registered remote, and drift warnings such as `healthz_not_ok_readyz_ok`, `shared_volume_on_salad`, and `version_drift`. A Salad 503 on `/healthz` while `/readyz` is 200 is a gateway or readiness symptom, not proof the worker is down.
+
+`deploy build` runs Docker from a repository checkout and requires `--accept`; it is never part of `deploy update`. `--image-target worker` builds the base image and `--image-target salad-queue` builds the Salad queue image on top of it; the queue image needs `--salad-queue-worker-url-ref` because the vendor binary is not redistributable, so it is never baked in from a public URL. Pushing to a private registry needs both `--registry-user-ref` and `--registry-password-ref`; the password reaches `docker login` on stdin and is redacted from any error output.
+
+`deploy update` on Salad sends a JSON merge patch, not a `PUT`; `PUT` answers 405 on that path. A merge patch never resumes a stopped group, so the command starts it first and only then waits for readiness. `deploy status` and the readiness wait send `Salad-Api-Key` when the group has gateway auth enabled; without it every probe returns 403 and the wait can only time out.
+
+A pushed image has its manifest rewritten to the OCI layer media type. Docker's legacy builder mixes Docker and OCI labels, and Modal refuses that mixture with `unsupported mediatype`, so a build that pushes successfully can still fail to deploy without this rewrite.
+
+`deploy remove` is the only command that deletes cloud state and it needs both `--accept` and `--yes`. On Salad it checks the group exists, then issues the delete; a mistyped name fails instead of reporting success. On Modal it runs the verified `modal app stop`, which terminates running containers and leaves the app deployable again. A registered remote pointing at a removed group keeps failing until you re-register or remove it.
+
+## Remote matting
+
+Matting runs on a registered worker exactly like the watermark operations, including the digest approval. The worker image must have been built with matting enabled; `matting doctor` proves the local runtime, and `/v1/meta` reports `capabilities.matte` for a worker.
+
+```bash
+imagen matting run ARTIFACT_ID --remote worker --agent
+imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST --agent
+```
+
+A worker whose `capabilities.matte` is false cannot run the job; rebuild the image with `IMAGEN_MATTING=1` rather than retrying. Build a GPU image with `deploy build --matting-runtime gpu`; the default `cpu` runtime keeps the image small.
+
+A GPU worker is not automatically faster. Weights and activations cross the PCIe bus per tile, so a small image on a small card can be slower than the CPU; measure with `matting doctor` before claiming a speedup, and never present a GPU result as faster without a measurement. A card with less than roughly 8 GB also cannot hold BiRefNet-lite at 1024x1024 and fails with an out-of-memory error, which the CLI reports as a backend memory failure rather than a crash.
 
 ## Local jobs, progress, and cancellation
 

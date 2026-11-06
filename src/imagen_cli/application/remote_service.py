@@ -20,6 +20,7 @@ from imagen_cli import i18n, settings
 from imagen_cli.application import watermark_service
 from imagen_cli.contract import RESUMABLE, JobStatus, job_digest
 from imagen_cli.domain.primitive import new_id
+from imagen_cli.execution.configured import resolve_credential
 from imagen_cli.storage.artifacts import ArtifactStore
 from imagen_cli.storage.repositories import Repositories
 
@@ -84,22 +85,24 @@ def _endpoint(value: str) -> str:
     return value.rstrip("/")
 
 
-def _credential(reference: str) -> str:
-    if not reference.startswith("env:"):
-        raise ValueError("credential references must use env:NAME")
-    value = os.environ.get(reference.removeprefix("env:"))
-    if not value:
-        raise ValueError(f"credential {reference} is not set in this shell")
-    return value
+def _credential(reference: str, private_store: Any = None) -> str:
+    try:
+        return resolve_credential(reference, private_store=private_store)
+    except (OSError, ValueError) as error:
+        if reference.startswith("env:"):
+            raise ValueError(f"credential {reference} is not set in this shell") from error
+        raise ValueError(f"credential {reference} is unavailable") from error
 
 
-def _client(record: dict[str, Any], *, timeout: float = 30.0) -> httpx.Client:
+def _client(record: dict[str, Any], *, timeout: float = 30.0,
+            private_store: Any = None) -> httpx.Client:
     headers = {
-        "Authorization": "Bearer " + _credential(str(record["credential_ref"])),
+        "Authorization": "Bearer "
+        + _credential(str(record["credential_ref"]), private_store),
     }
     gateway = record.get("gateway_credential_ref")
     if gateway:
-        headers["Salad-Api-Key"] = _credential(str(gateway))
+        headers["Salad-Api-Key"] = _credential(str(gateway), private_store)
     return httpx.Client(
         base_url=str(record["endpoint"]), headers=headers, timeout=timeout,
         transport=TRANSPORT, follow_redirects=False,
@@ -118,9 +121,9 @@ def describe(record: dict[str, Any], name: str | None = None) -> dict[str, Any]:
     }
 
 
-def _meta(record: dict[str, Any]) -> dict[str, Any]:
+def _meta(record: dict[str, Any], private_store: Any = None) -> dict[str, Any]:
     try:
-        with _client(record) as client:
+        with _client(record, private_store=private_store) as client:
             response = client.get("/v1/meta")
     except httpx.HTTPError as error:
         raise RemoteError(
@@ -144,12 +147,13 @@ def _apply_meta(record: dict[str, Any], meta: dict[str, Any]) -> None:
         imagen_cli_version=meta.get("imagen_cli_version"),
         max_attempts=meta.get("max_attempts"),
         sync_max_seconds=meta.get("sync_max_seconds"),
+        capabilities=meta.get("capabilities"),
     )
 
 
-def status(name: str) -> dict[str, Any]:
+def status(name: str, *, private_store: Any = None) -> dict[str, Any]:
     record = dict(get(name))
-    meta = _meta(record)
+    meta = _meta(record, private_store)
     _apply_meta(record, meta)
     _store_record(name, record)
     return {**describe(record, name), "meta": meta}
@@ -157,19 +161,20 @@ def status(name: str) -> dict[str, Any]:
 
 
 def add(name: str, endpoint: str, credential_ref: str, *,
-        gateway_credential_ref: str | None = None) -> dict[str, Any]:
+        gateway_credential_ref: str | None = None,
+        private_store: Any = None) -> dict[str, Any]:
     if not REMOTE_NAME.fullmatch(name):
         raise ValueError("remote names use lowercase letters, digits and hyphens")
-    _credential(credential_ref)
+    _credential(credential_ref, private_store)
     if gateway_credential_ref:
-        _credential(gateway_credential_ref)
+        _credential(gateway_credential_ref, private_store)
     record = {
         "endpoint": _endpoint(endpoint),
         "credential_ref": credential_ref,
         "gateway_credential_ref": gateway_credential_ref,
         "added_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
-    meta = _meta(record)
+    meta = _meta(record, private_store)
     _apply_meta(record, meta)
     _store_record(name, record)
     return {**describe(record, name), "meta": meta}
@@ -218,8 +223,9 @@ def _remote_record(row: dict[str, Any]) -> dict[str, Any]:
     return dict(get(str(row["provider"])))
 
 
-def _job_status(row: dict[str, Any], provider_job_id: str) -> dict[str, Any]:
-    with _client(_remote_record(row)) as client:
+def _job_status(row: dict[str, Any], provider_job_id: str,
+                private_store: Any = None) -> dict[str, Any]:
+    with _client(_remote_record(row), private_store=private_store) as client:
         response = client.get(f"/v1/jobs/{provider_job_id}")
     if response.status_code == 404:
         return {"status": JobStatus.UNKNOWN.value, "reason": "state_not_found"}
@@ -238,14 +244,15 @@ def _artifact_fields(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def job_get(repositories: Repositories, job_id: str) -> dict[str, Any]:
+def job_get(repositories: Repositories, job_id: str,
+            private_store: Any = None) -> dict[str, Any]:
     row = repositories.get("remote_jobs", job_id)
     if row is None:
         raise ValueError("remote job was not found")
     live: dict[str, Any] | None = None
     if row.get("provider_job_id"):
         try:
-            live = _job_status(row, str(row["provider_job_id"]))
+            live = _job_status(row, str(row["provider_job_id"]), private_store)
         except RemoteError as error:
             live = {"status": error.status, "error": str(error)}
         if live.get("status") and live["status"] != row.get("status"):
@@ -264,11 +271,12 @@ def _publish_remote_output(repositories: Repositories, store: ArtifactStore,
 
 
 def _fetch_output(repositories: Repositories, store: ArtifactStore,
-                  row: dict[str, Any]) -> dict[str, Any] | None:
+                  row: dict[str, Any], private_store: Any = None,
+                  ) -> dict[str, Any] | None:
     provider_job_id = row.get("provider_job_id")
     if not provider_job_id:
         return None
-    with _client(_remote_record(row)) as client:
+    with _client(_remote_record(row), private_store=private_store) as client:
         response = client.get(f"/v1/jobs/{provider_job_id}/output")
     if response.status_code != 200:
         return None
@@ -276,7 +284,7 @@ def _fetch_output(repositories: Repositories, store: ArtifactStore,
 
 
 def job_resume(repositories: Repositories, store: ArtifactStore,
-               job_id: str) -> tuple[str, dict[str, Any]]:
+               job_id: str, private_store: Any = None) -> tuple[str, dict[str, Any]]:
     row = repositories.get("remote_jobs", job_id)
     if row is None:
         raise ValueError("remote job was not found")
@@ -286,12 +294,13 @@ def job_resume(repositories: Repositories, store: ArtifactStore,
         raise ValueError("only queued, running or succeeded jobs can resume")
     if row.get("artifact_id"):
         return "succeeded", {"job": row}
-    live = _job_status(row, str(row["provider_job_id"])) if row.get("provider_job_id") else {}
+    live = (_job_status(row, str(row["provider_job_id"]), private_store)
+            if row.get("provider_job_id") else {})
     if live.get("status") == JobStatus.SUCCEEDED.value:
         if row.get("operation") == "watermark.identify":
             row = _update_job(repositories, job_id, status=JobStatus.SUCCEEDED.value)
             return "succeeded", {"job": row, "report": live.get("report", {})}
-        artifact = _fetch_output(repositories, store, row)
+        artifact = _fetch_output(repositories, store, row, private_store)
         if artifact is None:
             return "unknown", {"job": row, "error": {
                 "type": "unknown", "detail": "the result is finished but the output is unavailable",
@@ -306,7 +315,8 @@ def job_resume(repositories: Repositories, store: ArtifactStore,
 
 
 def job_retry_interrupted(repositories: Repositories, store: ArtifactStore,
-                          job_id: str) -> tuple[str, dict[str, Any]]:
+                          job_id: str, private_store: Any = None,
+                          ) -> tuple[str, dict[str, Any]]:
     row = repositories.get("remote_jobs", job_id)
     if row is None:
         raise ValueError("remote job was not found")
@@ -320,7 +330,7 @@ def job_retry_interrupted(repositories: Repositories, store: ArtifactStore,
         raise ValueError("the source artifact bytes changed; the retry is refused")
     request = json.loads(str(row["request_canonical"]))
     record = _remote_record(row)
-    response = _post(record, request, data)
+    response = _post(record, request, data, private_store)
     job_id_new = response.get("job_id")
     status = response.get("status", JobStatus.QUEUED.value)
     row = _update_job(repositories, job_id,
@@ -329,14 +339,15 @@ def job_retry_interrupted(repositories: Repositories, store: ArtifactStore,
     return "accepted", {"job": row, "live": response}
 
 
-def job_cancel(repositories: Repositories, job_id: str) -> tuple[str, dict[str, Any]]:
+def job_cancel(repositories: Repositories, job_id: str,
+               private_store: Any = None) -> tuple[str, dict[str, Any]]:
     row = repositories.get("remote_jobs", job_id)
     if row is None:
         raise ValueError("remote job was not found")
     if not row.get("provider_job_id"):
         row = _update_job(repositories, job_id, status=JobStatus.CANCELED.value)
         return "succeeded", {"job": row}
-    with _client(_remote_record(row)) as client:
+    with _client(_remote_record(row), private_store=private_store) as client:
         response = client.delete(f"/v1/jobs/{row['provider_job_id']}")
     if response.status_code == 404:
         row = _update_job(repositories, job_id, status=JobStatus.UNKNOWN.value)
@@ -350,6 +361,15 @@ def job_cancel(repositories: Repositories, job_id: str) -> tuple[str, dict[str, 
 def _job_fields(record: dict[str, Any], name: str, operation: str, pipeline: str,
                 params: dict[str, Any], source_sha: str, upload_bytes: int,
                 max_seconds: int) -> dict[str, Any]:
+    if operation == "matte":
+        from imagen_cli.application import matting
+
+        model = str((params or {}).get("model") or "birefnet-lite")
+        license_label = "matting:" + model + ":" + str(
+            matting.MANIFEST.get(model, {}).get("license", "unknown")
+        )
+    else:
+        license_label = "raiw:" + (pipeline or "metadata")
     return {
         "schema_version": 1,
         "provider": name,
@@ -362,7 +382,7 @@ def _job_fields(record: dict[str, Any], name: str, operation: str, pipeline: str
         "upload_bytes": upload_bytes,
         "max_seconds": max_seconds,
         "worker_image_digest": str(record.get("worker_digest") or "unknown"),
-        "license": "raiw:" + (pipeline or "metadata"),
+        "license": license_label,
     }
 
 
@@ -413,10 +433,27 @@ def run_operation(
     accept_license: bool = False,
     memory_mb: int | None = None,
     budget_approval: str | None = None,
+    private_store: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     from PIL import Image
 
     record = dict(get(remote_name))
+    if operation == "matte":
+        from imagen_cli.application import matting
+
+        model = str((params or {}).get("model") or "birefnet-lite")
+        if model not in matting.MANIFEST:
+            raise ValueError(f"unknown matting model: {model}")
+        params = {**(params or {}), "model": model}
+        # Refuse before touching the source or uploading: an image without the
+        # runtime or the pinned weights accepts the route and then fails the
+        # job, which costs a round trip and leaves a failed row behind.
+        capabilities = record.get("capabilities")
+        if isinstance(capabilities, dict) and capabilities.get("matte") is False:
+            raise ValueError(
+                f"remote {remote_name} reports capabilities.matte = false; rebuild its "
+                "image with IMAGEN_MATTING=1 instead of uploading the job"
+            )
     row = repositories.get("artifacts", artifact)
     path = store.get(artifact)
     if row is None or path is None or row["save_state"] != "published":
@@ -431,7 +468,7 @@ def run_operation(
     session_id = None if operation in {"watermark.identify", "watermark.classify"} \
         else watermark_service._session(repositories, artifact, session)
     if operation in {"watermark.invisible", "watermark.all"}:
-        pipeline = pipeline or "qwen-zimage"
+        pipeline = pipeline or "sdxl-zimage"
         params = {**(params or {}), "pipeline": pipeline}
         if not accept_license:
             raise watermark_service.WatermarkError(
@@ -515,7 +552,7 @@ def run_operation(
         payload={"remote": remote_name},
     )
     response = _submit(record, operation, params or {}, data,
-                       digest, requested, max_seconds)
+                       digest, requested, max_seconds, private_store)
     updates: dict[str, Any] = {"status": _contract_status(response.get("status"))}
     if response.get("job_id"):
         updates["provider_job_id"] = str(response["job_id"])
@@ -559,7 +596,8 @@ def _contract_status(value: Any) -> str:
 
 def _submit(record: dict[str, Any], operation: str,
             params: dict[str, Any], data: bytes, input_sha256: str,
-            request_digest: str, max_seconds: int) -> dict[str, Any]:
+            request_digest: str, max_seconds: int, private_store: Any = None,
+            ) -> dict[str, Any]:
     submission = {
         "schema_version": 1,
         "operation": operation,
@@ -568,16 +606,16 @@ def _submit(record: dict[str, Any], operation: str,
         "params": params,
         "input_sha256": input_sha256,
     }
-    return _post(record, submission, data)
+    return _post(record, submission, data, private_store)
 
 
 def _post(record: dict[str, Any], submission: dict[str, Any],
-          data: bytes) -> dict[str, Any]:
+          data: bytes, private_store: Any = None) -> dict[str, Any]:
     max_seconds = int(submission["max_seconds"])
     sync_mode = record.get("state_mode") == "single-replica-sync"
     timeout = max_seconds + 30 if sync_mode else 60
     try:
-        with _client(record, timeout=timeout) as client:
+        with _client(record, timeout=timeout, private_store=private_store) as client:
             try:
                 response = client.post(
                     "/v1/jobs", data={"job": json.dumps(submission)},
