@@ -173,7 +173,7 @@ def _make_runner(
     std = numpy.asarray(entry["std"], dtype=numpy.float32)
 
     def run(tile: Image.Image) -> Any:
-        resized = tile.convert("RGB").resize((side, side), Image.Resampling.BILINEAR)
+        resized = tile.convert("RGB").resize((side, side), Image.Resampling.BICUBIC)
         array = numpy.asarray(resized, dtype=numpy.float32) / 255.0
         array = (array - mean) / std
         chw = numpy.transpose(array, (2, 0, 1))[None].astype(numpy.float32)
@@ -191,9 +191,10 @@ def _make_runner(
             raise ValueError("matting model output must be a single-channel map")
         return _sigmoid(logits)
 
+    actual_provider = session.get_providers()[0]
     engine = {
-        "backend": backend or providers[0].replace("ExecutionProvider", "").lower(),
-        "provider": session.get_providers()[0],
+        "backend": backend or actual_provider.replace("ExecutionProvider", "").lower(),
+        "provider": actual_provider,
         "dtype": "fp32",
         "weights_sha256": digest,
         "input_size": side,
@@ -210,7 +211,10 @@ def _sigmoid(values: Any) -> Any:
 def _to_alpha(matte: Any, size: tuple[int, int]) -> Image.Image:
     numpy = _numpy()
     scaled = numpy.clip(matte * 255.0, 0, 255).astype(numpy.uint8)
-    return Image.fromarray(scaled, "L").resize(size, Image.Resampling.BILINEAR)
+    image = Image.fromarray(scaled, "L")
+    if image.size != size:
+        return image.resize(size, Image.Resampling.BILINEAR)
+    return image
 
 
 def _polish(alpha: Image.Image, *, feather: int, edge_shift: float) -> Image.Image:
@@ -291,7 +295,7 @@ def matte(
                unit="tiles", operation="matte")
     numpy.maximum(weight, 1e-6, out=weight)
     combined = numpy.clip(accumulator / weight, 0, 1)
-    alpha = _to_alpha(combined, rgb.size).filter(ImageFilter.GaussianBlur(0.5))
+    alpha = _to_alpha(combined, rgb.size)
     alpha = _polish(alpha, feather=feather, edge_shift=edge_shift)
     result = rgb.convert("RGBA")
     result.putalpha(alpha)

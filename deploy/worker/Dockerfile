@@ -23,7 +23,7 @@ ARG IMAGEN_MATTING_MODEL=birefnet-lite
 # "gpu" installs the CUDA build plus the pip CUDA/cuDNN wheels it needs; "cpu"
 # keeps the image small. onnxruntime-gpu still falls back to the CPU provider on
 # a host without a usable driver, so a GPU image is not host-specific.
-ARG IMAGEN_MATTING_RUNTIME=cpu
+ARG IMAGEN_MATTING_RUNTIME=gpu
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \

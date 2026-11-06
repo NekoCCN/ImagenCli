@@ -79,7 +79,8 @@ def test_restoration_models_preserve_dimensions_and_alpha(model):
     assert entry["task"] in {"denoise", "dejpeg"}
 
 
-def test_unknown_model_and_backend_are_refused():
+def test_unknown_model_and_backend_are_refused(monkeypatch):
+    monkeypatch.setattr(superres, "available_providers", lambda: ["CPUExecutionProvider"])
     image = Image.new("RGB", (4, 4))
     with pytest.raises(ValueError, match="unknown super-resolution model"):
         superres.upscale(image, model="nope", runner=nearest_runner)

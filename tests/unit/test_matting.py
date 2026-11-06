@@ -276,3 +276,47 @@ def test_matting_doctor_names_a_provider_that_failed_to_load(tmp_path, monkeypat
     assert data["status"] == "missing"
     assert data["inference"] is False
     assert data["missing"] == ["CUDAExecutionProvider"]
+
+
+def test_matte_leaves_sharp_alpha_by_default_without_unconditional_blur():
+    def step_runner(tile: Image.Image) -> np.ndarray:
+        arr = np.zeros((1024, 1024), dtype=np.float32)
+        arr[:, 512:] = 1.0
+        return arr
+
+    source = Image.new("RGB", (1024, 1024), (100, 100, 100))
+    result, _ = matting.matte(
+        source, tile=1024, overlap=0, feather=0, edge_shift=0.0, runner=step_runner,
+    )
+    alpha = np.asarray(result.getchannel("A"))
+    assert alpha[512, 511] == 0
+    assert alpha[512, 512] == 255
+
+
+
+def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
+    class FakeSession:
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+        def get_inputs(self):
+            class Input:
+                name = "input_image"
+            return [Input()]
+
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        matting, "available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    monkeypatch.setattr(matting, "_preflight", lambda data: None)
+    matting.weights_path("birefnet-lite").write_bytes(b"w")
+    monkeypatch.setitem(matting.MANIFEST["birefnet-lite"], "sha256", None)
+
+    _, engine = matting._make_runner(
+        "birefnet-lite", backend=None, accept=True,
+        session_factory=lambda *args, **kwargs: FakeSession(),
+    )
+    assert engine["provider"] == "CPUExecutionProvider"
+    assert engine["backend"] == "cpu"
+

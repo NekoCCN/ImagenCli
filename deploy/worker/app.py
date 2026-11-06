@@ -108,6 +108,37 @@ def _capabilities(config: WorkerConfig) -> dict[str, bool]:
         return {}
 
 
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001 - optional backend
+        return False
+
+
+def _matting_providers() -> list[str]:
+    try:
+        from imagen_cli.application import matting
+
+        return list(matting.available_providers())
+    except Exception:  # noqa: BLE001 - optional backend
+        return []
+
+
+def _detect_providers() -> tuple[str, ...]:
+    providers: list[str] = []
+    if _cuda_available():
+        providers.append("cuda")
+    for provider in _matting_providers():
+        name = provider.replace("ExecutionProvider", "").lower()
+        if name and name not in providers:
+            providers.append(name)
+    if not providers:
+        providers.append("cpu")
+    return tuple(providers)
+
+
 def _operations(config: WorkerConfig) -> list[str]:
     allowed = SYNC_OPERATIONS if config.state_mode == "single-replica-sync" \
         else SYNC_OPERATIONS | ASYNC_OPERATIONS
@@ -213,7 +244,7 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
             "raiw_version": config.raiw_version,
             "state_mode": config.state_mode,
             "auth": "bearer",
-            "providers": list(config.providers),
+            "providers": list(config.providers or _detect_providers()),
             "gpu": config.gpu,
             "worker_digest": config.worker_digest,
             "max_attempts": config.max_attempts if config.state_mode == "queue" else 1,
@@ -382,6 +413,12 @@ def from_environment() -> FastAPI:
             "project": os.environ.get("SALAD_QUEUE_PROJECT", ""),
             "name": os.environ["SALAD_QUEUE_NAME"],
         }
+    raw_providers = os.environ.get("IMAGEN_WORKER_PROVIDERS")
+    providers = (
+        tuple(item for item in raw_providers.split(",") if item)
+        if raw_providers is not None
+        else _detect_providers()
+    )
     return create_app(WorkerConfig(
         token=os.environ["IMAGEN_WORKER_TOKEN"],
         state_mode=os.environ.get("IMAGEN_WORKER_STATE_MODE", "shared-volume"),
@@ -389,9 +426,7 @@ def from_environment() -> FastAPI:
         worker_version=os.environ.get("IMAGEN_WORKER_VERSION", "0.0.0"),
         imagen_cli_version=os.environ.get("IMAGEN_CLI_VERSION", "unknown"),
         raiw_version=os.environ.get("IMAGEN_RAIW_VERSION"),
-        providers=tuple(
-            item for item in os.environ.get("IMAGEN_WORKER_PROVIDERS", "cuda").split(",") if item
-        ),
+        providers=providers,
         gpu=os.environ.get("IMAGEN_MODAL_GPU"),
         worker_digest=os.environ.get("IMAGEN_WORKER_DIGEST"),
         queue=queue,

@@ -29,8 +29,19 @@ CPU = float(os.environ.get("IMAGEN_MODAL_CPU", "1"))
 FORCE_BUILD = os.environ.get("IMAGEN_MODAL_FORCE_BUILD", "").lower() in {"1", "true", "yes"}
 
 # The container reads IMAGEN_MODAL_GPU only to report the card in /v1/meta.
-image = modal.Image.from_registry(WORKER_IMAGE, force_build=FORCE_BUILD).env(
-    {"IMAGEN_MODAL_GPU": GPU}
+image = (
+    modal.Image.from_registry(WORKER_IMAGE, force_build=FORCE_BUILD)
+    .run_commands(
+        "pip uninstall -y onnxruntime",
+        "pip install --no-cache-dir 'onnxruntime-gpu[cuda,cudnn]>=1.20'",
+    )
+    .add_local_file(
+        "src/imagen_cli/application/matting.py",
+        "/usr/local/lib/python3.12/site-packages/imagen_cli/application/matting.py",
+        copy=True,
+    )
+    .add_local_file("deploy/worker/app.py", "/app/app.py", copy=True)
+    .env({"IMAGEN_MODAL_GPU": GPU})
 )
 app = modal.App("imagen-worker")
 

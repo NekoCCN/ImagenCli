@@ -310,3 +310,20 @@ def test_sync_mode_advertises_only_operations_it_will_accept(tmp_path):
     meta = client.get("/v1/meta", headers=AUTH).json()
     assert "matte" in meta["operations"]
     assert "watermark.invisible" not in meta["operations"]
+
+
+def test_from_environment_detects_cpu_when_no_cuda(monkeypatch, tmp_path):
+    from deploy.worker import app
+
+    monkeypatch.setenv("IMAGEN_WORKER_TOKEN", "secret")
+    monkeypatch.setenv("IMAGEN_JOBS_ROOT", str(tmp_path / "jobs"))
+    monkeypatch.delenv("IMAGEN_WORKER_PROVIDERS", raising=False)
+    monkeypatch.setattr(app, "_cuda_available", lambda: False)
+    monkeypatch.setattr(app, "_matting_providers", lambda: ["CPUExecutionProvider"])
+
+    test_app = app.from_environment()
+    client = TestClient(test_app)
+    meta = client.get("/v1/meta", headers={"Authorization": "Bearer secret"}).json()
+    assert "cuda" not in meta["providers"]
+    assert "cpu" in meta["providers"]
+
