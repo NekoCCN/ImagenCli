@@ -26,8 +26,12 @@ GPU = os.environ.get("IMAGEN_MODAL_GPU", "L4")
 MEMORY_MB = int(os.environ.get("IMAGEN_MODAL_MEMORY_MB", "2048"))
 CPU = float(os.environ.get("IMAGEN_MODAL_CPU", "1"))
 
+FORCE_BUILD = os.environ.get("IMAGEN_MODAL_FORCE_BUILD", "").lower() in {"1", "true", "yes"}
+
 # The container reads IMAGEN_MODAL_GPU only to report the card in /v1/meta.
-image = modal.Image.from_registry(WORKER_IMAGE).env({"IMAGEN_MODAL_GPU": GPU})
+image = modal.Image.from_registry(WORKER_IMAGE, force_build=FORCE_BUILD).env(
+    {"IMAGEN_MODAL_GPU": GPU}
+)
 app = modal.App("imagen-worker")
 
 hf_cache = modal.Volume.from_name("imagen-hf-cache", create_if_missing=True)
