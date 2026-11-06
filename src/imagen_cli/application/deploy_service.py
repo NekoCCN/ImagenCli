@@ -615,7 +615,6 @@ def _token_endpoint(registry: str) -> tuple[str, str]:
 
 def _registry_token(registry: str, repository: str, scope: str) -> str:
     """Fetch a registry bearer token, using docker's stored credentials."""
-    import base64
     import json as jsonlib
     import urllib.request
 
@@ -628,9 +627,7 @@ def _registry_token(registry: str, repository: str, scope: str) -> str:
         config = {}
     encoded = (config.get("auths") or {}).get(registry, {}).get("auth")
     if encoded:
-        user, _, password = base64.b64decode(encoded).decode().split(":", 1)[1].partition(":")
-        credentials = {"Authorization": "Basic " + base64.b64encode(
-            f"{user}:{password}".encode()).decode()}
+        credentials = {"Authorization": "Basic " + encoded.strip()}
     host, service = _token_endpoint(registry)
     request = urllib.request.Request(
         f"{host}/token?scope=repository:{repository}:{scope}&service={service}",

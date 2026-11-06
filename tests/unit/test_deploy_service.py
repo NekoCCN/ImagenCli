@@ -650,6 +650,40 @@ def test_manifest_normalization_is_a_noop_for_pure_oci(monkeypatch):
     assert len(calls) == 1
 
 
+def test_registry_token_uses_docker_config_basic_auth(tmp_path, monkeypatch):
+    """Stored Docker auth is base64(user:pass) and sends as HTTP Basic."""
+    import base64
+    import json
+    docker_dir = tmp_path / ".docker"
+    docker_dir.mkdir()
+    (docker_dir / "config.json").write_text(json.dumps({
+        "auths": {
+            "ghcr.io": {"auth": base64.b64encode(b"user:pass").decode()}
+        }
+    }))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"token": "my-token"}'
+
+    captured = []
+    def urlopen(request, timeout=0):
+        captured.append(request)
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    token = deploy_service._registry_token("ghcr.io", "owner/repo", "pull")
+    assert token == "my-token"
+    assert len(captured) == 1
+    expected_auth = "Basic " + base64.b64encode(b"user:pass").decode()
+    assert captured[0].headers.get("Authorization") == expected_auth
+
+
 def test_salad_update_uses_a_merge_patch(salad):
     """Salad answers 405 to PUT on a group; only PATCH updates it in place."""
     status, _ = deploy_service.update(
