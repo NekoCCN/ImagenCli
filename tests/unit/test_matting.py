@@ -295,6 +295,9 @@ def test_matte_leaves_sharp_alpha_by_default_without_unconditional_blur():
 
 
 def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
     class FakeSession:
         def get_providers(self):
             return ["CPUExecutionProvider"]
@@ -304,7 +307,12 @@ def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
                 name = "input_image"
             return [Input()]
 
+    fake_session = FakeSession()
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(
+        get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        InferenceSession=lambda *args, **kwargs: fake_session,
+    ))
     monkeypatch.setattr(
         matting, "available_providers",
         lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
@@ -315,7 +323,7 @@ def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
 
     _, engine = matting._make_runner(
         "birefnet-lite", backend=None, accept=True,
-        session_factory=lambda *args, **kwargs: FakeSession(),
+        session_factory=lambda *args, **kwargs: fake_session,
     )
     assert engine["provider"] == "CPUExecutionProvider"
     assert engine["backend"] == "cpu"
