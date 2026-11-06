@@ -294,7 +294,7 @@ def test_modal_deploy_injects_tokens_and_redacts_them(monkeypatch, tmp_path):
     )
     assert status == "succeeded"
     argv, kwargs = runner.calls[0]
-    assert argv == ["/bin/modal", "deploy", "deploy/modal_app.py"]
+    assert argv == ["/bin/modal", "deploy", str(Path("deploy/modal_app.py"))]
     assert kwargs["env"]["MODAL_TOKEN_ID"] == "id-secret"
     assert kwargs["env"]["MODAL_TOKEN_SECRET"] == "secret-value"
     assert kwargs["env"]["IMAGEN_WORKER_IMAGE"].endswith("0.1.20")
@@ -306,6 +306,7 @@ def test_modal_deploy_failure_reports_the_step(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "deploy").mkdir()
     (tmp_path / "deploy" / "modal_app.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(deploy_service.shutil, "which", lambda name: "/bin/modal")
     monkeypatch.setattr(deploy_service, "RUNNER", FakeRunner(returncode=1, stderr="boom"))
     status, data = deploy_service.update(
         "modal", image="ghcr.io/nekoccn/imagen-worker:0.1.20", accept=True,
@@ -398,7 +399,7 @@ def test_build_supports_the_salad_queue_target(monkeypatch, tmp_path):
     assert status == "succeeded"
     argv = runner.calls[0][0]
     assert argv[:4] == ["docker", "build", "-f",
-                        "deploy/salad/queue-worker.Dockerfile"]
+                        str(Path("deploy/salad/queue-worker.Dockerfile"))]
     assert "--build-arg" in argv
     assert "SALAD_QUEUE_WORKER_URL=https://example.test/queue-worker" in argv
     assert "-t" in argv and "img-queue:0.1.20" in argv
@@ -542,6 +543,7 @@ def test_modal_stop_requires_both_gates(monkeypatch):
 
 def test_modal_stop_runs_the_verified_cli(monkeypatch):
     runner = FakeRunner()
+    monkeypatch.setattr(deploy_service.shutil, "which", lambda name: "/bin/modal")
     monkeypatch.setattr(deploy_service, "RUNNER", runner)
     monkeypatch.setenv("MODAL_TOKEN_ID", "tok-id")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "tok-secret")
@@ -553,7 +555,7 @@ def test_modal_stop_runs_the_verified_cli(monkeypatch):
     assert status == "succeeded"
     assert data["stopped"] is True
     argv, kwargs = runner.calls[0]
-    assert Path(argv[0]).name == "modal" or argv[:3] == [sys.executable, "-m", "modal"]
+    assert Path(argv[0]).stem == "modal" or argv[:3] == [sys.executable, "-m", "modal"]
     assert argv[-4:] == ["app", "stop", "-y", "imagen-worker"]
     # Tokens travel in the child environment, never in argv or output.
     assert kwargs["env"]["MODAL_TOKEN_SECRET"] == "tok-secret"
@@ -562,6 +564,7 @@ def test_modal_stop_runs_the_verified_cli(monkeypatch):
 
 def test_modal_stop_failure_redacts_tokens(monkeypatch):
     runner = FakeRunner(returncode=1, stderr="bad token tok-secret")
+    monkeypatch.setattr(deploy_service.shutil, "which", lambda name: "/bin/modal")
     monkeypatch.setattr(deploy_service, "RUNNER", runner)
     monkeypatch.setenv("MODAL_TOKEN_ID", "tok-id")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "tok-secret")
