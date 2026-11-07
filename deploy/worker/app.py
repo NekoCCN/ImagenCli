@@ -59,16 +59,20 @@ class VolumeStore:
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
+        self._lock = threading.Lock()
 
     def _directory(self, job_id: str) -> Path:
         return self.root / job_id
 
     def write(self, job_id: str, record: dict[str, Any], output: bytes | None) -> None:
-        directory = self._directory(job_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        self._replace(directory / "record.json", json.dumps(record).encode())
-        if output is not None:
-            self._replace(directory / "output.bin", output)
+        # Windows 不允许替换仍被读取的文件，读写使用同一把锁。
+        with self._lock:
+            directory = self._directory(job_id)
+            directory.mkdir(parents=True, exist_ok=True)
+            if output is not None:
+                self._replace(directory / "output.bin", output)
+            # 先保存输出，再发布成功记录，避免状态可见时结果文件还不存在。
+            self._replace(directory / "record.json", json.dumps(record).encode("utf-8"))
 
     @staticmethod
     def _replace(target: Path, data: bytes) -> None:
@@ -84,11 +88,13 @@ class VolumeStore:
             temporary.unlink(missing_ok=True)
 
     def read(self, job_id: str) -> dict[str, Any]:
-        path = self._directory(job_id) / "record.json"
-        return cast(dict[str, Any], json.loads(path.read_text()))
+        with self._lock:
+            path = self._directory(job_id) / "record.json"
+            return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
     def output(self, job_id: str) -> bytes:
-        return (self._directory(job_id) / "output.bin").read_bytes()
+        with self._lock:
+            return (self._directory(job_id) / "output.bin").read_bytes()
 
 
 def _capabilities(config: WorkerConfig) -> dict[str, bool]:

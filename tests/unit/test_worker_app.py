@@ -5,6 +5,8 @@ import hashlib
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +68,59 @@ def wait_for(client, job_id):
             return record
         time.sleep(0.02)
     return record
+
+
+def test_volume_write_waits_for_an_active_record_reader(tmp_path, monkeypatch):
+    store = VolumeStore(tmp_path)
+    store.write(JOB_ID, {"status": "queued"}, None)
+    reading = threading.Event()
+    release = threading.Event()
+    writing = threading.Event()
+    original = Path.read_text
+
+    def slow_read(path, *args, **kwargs):
+        if path.name != "record.json":
+            return original(path, *args, **kwargs)
+        with path.open(encoding="utf-8") as handle:
+            reading.set()
+            assert release.wait(5)
+            return handle.read()
+
+    def write():
+        writing.set()
+        store.write(JOB_ID, {"status": "succeeded"}, PNG)
+
+    monkeypatch.setattr(Path, "read_text", slow_read)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reader = pool.submit(store.read, JOB_ID)
+        try:
+            assert reading.wait(2)
+            writer = pool.submit(write)
+            assert writing.wait(2)
+            with pytest.raises(TimeoutError):
+                writer.result(timeout=0.1)
+        finally:
+            release.set()
+        assert reader.result(timeout=2) == {"status": "queued"}
+        writer.result(timeout=2)
+    assert store.read(JOB_ID) == {"status": "succeeded"}
+    assert store.output(JOB_ID) == PNG
+
+
+def test_volume_does_not_publish_success_if_output_cannot_be_saved(tmp_path, monkeypatch):
+    store = VolumeStore(tmp_path)
+    store.write(JOB_ID, {"status": "queued"}, None)
+    replace = store._replace
+
+    def fail_output(target, data):
+        if target.name == "output.bin":
+            raise OSError("disk full")
+        replace(target, data)
+
+    monkeypatch.setattr(store, "_replace", fail_output)
+    with pytest.raises(OSError, match="disk full"):
+        store.write(JOB_ID, {"status": "succeeded"}, PNG)
+    assert store.read(JOB_ID) == {"status": "queued"}
 
 
 def test_health_and_readiness_are_public_and_meta_needs_auth(tmp_path):
