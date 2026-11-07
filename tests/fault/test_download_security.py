@@ -1,5 +1,6 @@
 """Provider result URLs are fetched only from public HTTPS addresses."""
 
+import io
 import socket
 import threading
 
@@ -118,6 +119,22 @@ def test_body_is_returned_from_the_pinned_public_address(monkeypatch):
     assert b"cookie" not in requests[0].lower()
 
 
+@pytest.mark.parametrize("framing", ["length", "chunked", "close"])
+@pytest.mark.parametrize("body", [b"", b"x" * 65537], ids=["empty", "multiple-reads"])
+def test_complete_responses_at_the_byte_limit_are_accepted(monkeypatch, framing, body):
+    if framing == "length":
+        payload = _response(body)
+    elif framing == "chunked":
+        chunks = f"{len(body):x}\r\n".encode() + body + b"\r\n" if body else b""
+        payload = (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                   + chunks + b"0\r\n\r\n")
+    else:
+        payload = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n" + body
+    seen, _ = _wire(monkeypatch, [payload])
+    assert download.fetch("https://images.example/a.png", max_bytes=len(body)) == body
+    assert len(seen) == 1
+
+
 def test_redirect_chain_is_followed_but_limited_to_three_hops(monkeypatch):
     hop = _response(b"", status="302 Found", extra="Location: /next\r\n")
     seen, _ = _wire(monkeypatch, [hop, hop, hop, _response(b"final")])
@@ -190,3 +207,119 @@ def test_permanent_failure_is_not_retried(monkeypatch):
     with pytest.raises(ValueError):
         download.fetch("https://images.example/a.png")
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("payload", [
+    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nshor",
+    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nshor",
+])
+def test_incomplete_response_is_rejected_after_bounded_retries(monkeypatch, payload):
+    seen, _ = _wire(monkeypatch, [payload] * 3)
+    with pytest.raises(download.DownloadError, match="incomplete download response"):
+        download.fetch("https://images.example/a.png")
+    assert len(seen) == 3
+
+
+@pytest.mark.parametrize("payload", [
+    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nshor",
+    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nshor",
+])
+def test_incomplete_response_is_retried_without_returning_partial_bytes(monkeypatch, payload):
+    seen, _ = _wire(monkeypatch, [payload, _response(b"complete")])
+    assert download.fetch("https://images.example/a.png") == b"complete"
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize("length", ["-1", "invalid"])
+def test_invalid_content_length_is_rejected_without_retry(monkeypatch, length):
+    payload = f"HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\nbody".encode()
+    seen, _ = _wire(monkeypatch, [payload])
+    with pytest.raises(download.DownloadError, match="invalid content length"):
+        download.fetch("https://images.example/a.png")
+    assert len(seen) == 1
+
+
+def test_dns_time_counts_toward_the_download_deadline(monkeypatch):
+    now = [0.0]
+    seen, _ = _wire(monkeypatch, [_response(b"complete")])
+
+    def resolve(host, port):
+        now[0] = 2.0
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(download, "monotonic", lambda: now[0])
+    monkeypatch.setattr(download, "_resolve", resolve)
+    with pytest.raises(download.DownloadError, match="deadline exceeded"):
+        download.fetch("https://images.example/a.png", timeout=1.0)
+    assert seen == []
+
+
+def test_connect_time_counts_toward_the_download_deadline(monkeypatch):
+    now = [0.0]
+    _, requests = _wire(monkeypatch, [_response(b"complete")])
+    connect = download._pinned_socket
+
+    def slow_connect(*args):
+        sock = connect(*args)
+        now[0] = 2.0
+        return sock
+
+    monkeypatch.setattr(download, "monotonic", lambda: now[0])
+    monkeypatch.setattr(download, "_pinned_socket", slow_connect)
+    with pytest.raises(download.DownloadError, match="deadline exceeded"):
+        download.fetch("https://images.example/a.png", timeout=1.0)
+    assert requests == [b""]
+
+
+@pytest.mark.parametrize("framing", [b"Content-Length: 20\r\n", b""])
+def test_slow_body_cannot_extend_the_deadline_by_trickling_bytes(monkeypatch, framing):
+    now = [0.0]
+
+    class SlowStream(io.RawIOBase):
+        header = b"HTTP/1.1 200 OK\r\n" + framing + b"Connection: close\r\n\r\n"
+        remaining = 20
+        timeout = 1.0
+
+        def readable(self):
+            return True
+
+        def readinto(self, buffer):
+            if self.header:
+                data, self.header = self.header[:len(buffer)], self.header[len(buffer):]
+            elif self.remaining:
+                # 模拟每次收到一个字节：总时长增加，但每次都小于空闲超时。
+                now[0] += min(0.25, self.timeout)
+                if self.timeout < 0.25:
+                    raise TimeoutError
+                data = b"x"
+                self.remaining -= 1
+            else:
+                return 0
+            buffer[:len(data)] = data
+            return len(data)
+
+    stream = SlowStream()
+
+    class SlowSocket:
+        closed = False
+
+        def makefile(self, *args):
+            return io.BufferedReader(stream)
+
+        def settimeout(self, timeout):
+            stream.timeout = timeout
+
+        def sendall(self, data):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    sock = SlowSocket()
+    monkeypatch.setattr(download, "monotonic", lambda: now[0])
+    monkeypatch.setattr(download, "_resolve", lambda *args: ["93.184.216.34"])
+    monkeypatch.setattr(download, "_pinned_socket", lambda *args: sock)
+    with pytest.raises(download.DownloadError):
+        download.fetch("https://images.example/a.png", timeout=1.0)
+    assert now[0] <= 1.0
+    assert sock.closed
