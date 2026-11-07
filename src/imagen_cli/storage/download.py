@@ -88,15 +88,21 @@ def _target(url: str) -> tuple[str, int, str]:
     return parts.hostname, 443, path
 
 
-def _request(host: str, port: int, path: str, deadline: float, max_bytes: int) -> tuple[
-    int, str | None, bytes
-]:
+def _remaining(deadline: float) -> float:
     remaining = deadline - monotonic()
     if remaining <= 0:
         raise DownloadError("download deadline exceeded")
+    return remaining
+
+
+def _request(host: str, port: int, path: str, deadline: float, max_bytes: int) -> tuple[
+    int, str | None, bytes
+]:
+    _remaining(deadline)
     addresses = _resolve(host, port)
     if not addresses or any(not _public_ip(value) for value in addresses):
         raise DownloadError("host resolves outside the public internet")
+    remaining = _remaining(deadline)
     import http.client
 
     try:
@@ -105,9 +111,14 @@ def _request(host: str, port: int, path: str, deadline: float, max_bytes: int) -
         raise TransientDownloadError("download failed") from error
     conn = http.client.HTTPSConnection(host, port, timeout=remaining)
     conn.sock = sock
+    response = None
     try:
+        sock.settimeout(_remaining(deadline))
         conn.request("GET", path, headers={"Connection": "close"})
-        response = conn.getresponse()
+        sock.settimeout(_remaining(deadline))
+        # 保留套接字直至读完正文；getresponse 会提前关闭 Connection: close 的连接。
+        response = http.client.HTTPResponse(sock, method="GET")
+        response.begin()
         if response.status in _STATUS_REDIRECTS:
             return response.status, response.getheader("Location"), b""
         if response.status >= 500:
@@ -115,28 +126,37 @@ def _request(host: str, port: int, path: str, deadline: float, max_bytes: int) -
         if response.status != 200:
             raise DownloadError(f"unexpected download status {response.status}")
         length = response.getheader("Content-Length")
+        declared = None
         if length is not None:
             try:
                 declared = int(length)
             except ValueError:
                 raise DownloadError("invalid content length") from None
+            if declared < 0:
+                raise DownloadError("invalid content length")
             if declared > max_bytes:
                 raise DownloadError("download exceeds the byte limit")
         body = bytearray()
         while True:
-            if monotonic() > deadline:
-                raise DownloadError("download deadline exceeded")
-            chunk = response.read(65536)
+            sock.settimeout(_remaining(deadline))
+            # 每次只取已到达的数据，避免 read 为填满缓冲区而持续等待慢速响应。
+            chunk = response.read1(min(65536, max_bytes - len(body) + 1))
             if not chunk:
+                if not response.chunked and declared is not None and len(body) != declared:
+                    raise TransientDownloadError("incomplete download response")
                 return response.status, None, bytes(body)
             if len(body) + len(chunk) > max_bytes:
                 raise DownloadError("download exceeds the byte limit")
             body.extend(chunk)
+    except http.client.IncompleteRead as error:
+        raise TransientDownloadError("incomplete download response") from error
     except http.client.HTTPException as error:
         raise DownloadError("malformed download response") from error
     except OSError as error:
         raise TransientDownloadError("download failed") from error
     finally:
+        if response is not None:
+            response.close()
         conn.close()
 
 
