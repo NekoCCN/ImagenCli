@@ -414,3 +414,16 @@ def test_classify_returns_a_report_and_no_output(tmp_path):
     assert data["status"] == "succeeded"
     assert data["report"] == {"pixels": "photo"}
     assert "output" not in data
+
+
+def test_cuda_is_available_without_torch(monkeypatch):
+    import sys
+
+    from deploy.worker import app as worker_app
+
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(worker_app, "_onnx_cuda_available", lambda: True)
+    assert worker_app._cuda_available() is True
+
+    monkeypatch.setattr(worker_app, "_onnx_cuda_available", lambda: False)
+    assert worker_app._cuda_available() is False

@@ -116,13 +116,25 @@ def _capabilities(config: WorkerConfig) -> dict[str, bool]:
         return {}
 
 
+def _onnx_cuda_available() -> bool:
+    """True when onnxruntime itself can use CUDA, torch or no torch."""
+    try:
+        import onnxruntime
+
+        return "CUDAExecutionProvider" in onnxruntime.get_available_providers()
+    except Exception:  # noqa: BLE001 - optional backend
+        return False
+
+
 def _cuda_available() -> bool:
     try:
         import torch
 
-        return bool(torch.cuda.is_available())
-    except Exception:  # noqa: BLE001 - optional backend
-        return False
+        if torch.cuda.is_available():
+            return True
+    except Exception:  # noqa: BLE001 - torch is optional
+        pass
+    return _onnx_cuda_available()
 
 
 def _matting_providers() -> list[str]:

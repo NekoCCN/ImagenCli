@@ -140,6 +140,19 @@ def _preflight(data: bytes) -> None:
     _preflight_onnx(data)
 
 
+def _require_provider(session: Any, backend: str | None) -> None:
+    """Refuse a backend the session fell back from, naming the fix."""
+    from imagen_cli.application.superres import ProviderUnavailable
+    from imagen_cli.application.superres import _require_provider as check
+
+    try:
+        check(session, backend)
+    except ProviderUnavailable as error:
+        raise ValueError(
+            f"{error}; run: imagen matting install --backend {backend} --accept"
+        ) from error
+
+
 def _make_runner(
     model: str, *, backend: str | None, accept: bool,
     session_factory: Callable[..., Any] | None = None,
@@ -169,8 +182,6 @@ def _make_runner(
     make_session = session_factory or onnxruntime.InferenceSession
     session = make_session(data, providers=providers)
     if backend is not None:
-        from imagen_cli.application.superres import _require_provider
-
         _require_provider(session, backend)
     inputs = session.get_inputs()
     if len(inputs) != 1:

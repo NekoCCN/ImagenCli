@@ -117,6 +117,7 @@ def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]
             feather=int(params.get("feather") or 0),
             edge_shift=float(params.get("edge_shift") or 0.0),
             accept=False,
+            precision=str(params.get("precision") or "auto"),
         )
     result.save(output, format="PNG")
     return {"status": "succeeded", "report": {"engine": engine, "model": model}}

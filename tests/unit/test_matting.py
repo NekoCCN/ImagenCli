@@ -328,3 +328,69 @@ def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
     assert engine["provider"] == "CPUExecutionProvider"
     assert engine["backend"] == "cpu"
 
+
+
+def test_matting_run_advertises_precision():
+    from imagen_cli.cli.registry import discover
+
+    schema = discover("matting run")["input_schema"]
+    assert schema["properties"]["precision"]["enum"] == ["auto", "fp32", "fp16"]
+
+
+def test_matting_run_carries_precision_into_the_transform(tmp_path, monkeypatch):
+    from imagen_cli.application.container import Container
+    from imagen_cli.cli.commands import postprocess
+
+    captured = {}
+
+    def fake(repositories, store, artifact, **kwargs):
+        captured.update(kwargs, artifact=artifact)
+        return "succeeded", {}
+
+    monkeypatch.setattr(postprocess, "transform_", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.execute("matting run", {
+            "artifact": "art_" + "a" * 32, "precision": "fp16",
+        })
+    assert captured["model_params"]["precision"] == "fp16"
+    assert captured["op_name"] == "matte"
+
+
+def test_matting_run_carries_precision_to_a_remote(tmp_path, monkeypatch):
+    from imagen_cli.application import remote_service
+    from imagen_cli.application.container import Container
+
+    captured = {}
+
+    def fake(repositories, store, artifact, remote, operation, **kwargs):
+        captured.update(kwargs, operation=operation)
+        return "accepted", {"job": {"id": "job_1"}}
+
+    monkeypatch.setattr(remote_service, "run_operation", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.execute("matting run", {
+            "artifact": "art_" + "a" * 32, "remote": "modal", "precision": "fp32",
+        })
+    assert captured["operation"] == "matte"
+    assert captured["params"]["precision"] == "fp32"
+
+
+def test_matting_cuda_without_a_provider_names_the_install_command(monkeypatch):
+    from imagen_cli.application import matting
+
+    monkeypatch.setattr(matting, "available_providers", lambda: ["CPUExecutionProvider"])
+    monkeypatch.setattr(
+        matting, "_choose_providers",
+        lambda backend: ["CPUExecutionProvider"],
+    )
+
+    class Session:
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+        def get_inputs(self):
+            raise AssertionError("a refused provider must not be probed further")
+
+    monkeypatch.setattr(matting, "ensure_weights", lambda model, accept=False: None)
+    with pytest.raises(ValueError, match="install --backend cuda"):
+        matting._require_provider(Session(), "cuda")

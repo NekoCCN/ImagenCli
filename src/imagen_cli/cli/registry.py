@@ -590,6 +590,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "overlap": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64},
             "feather": {"type": "integer", "minimum": 0, "maximum": 64, "default": 0},
             "edge_shift": {"type": "number", "minimum": -0.5, "maximum": 0.5, "default": 0},
+            "precision": {"enum": ["auto", "fp32", "fp16"], "default": "auto"},
             "accept": {"type": "boolean", "default": False},
             "session": text,
             "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},

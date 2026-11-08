@@ -42,3 +42,23 @@ def _chinese_ui_for_legacy_tests(monkeypatch, tmp_path):
     i18n.reset_language()
     yield
     i18n.reset_language()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip GPU tests on a machine without a CUDA provider, even under `-m cuda`."""
+    if not any("cuda" in item.keywords for item in items):
+        return
+    try:
+        # Imported dynamically: the runtime is an optional extra, so a static
+        # import here would fail type checking and collection on a base install.
+        from importlib import import_module
+
+        providers = import_module("onnxruntime").get_available_providers()
+    except Exception:  # noqa: BLE001 - an absent runtime means no GPU either
+        providers = []
+    if "CUDAExecutionProvider" in providers:
+        return
+    skip = pytest.mark.skip(reason="no CUDA provider available here")
+    for item in items:
+        if "cuda" in item.keywords:
+            item.add_marker(skip)

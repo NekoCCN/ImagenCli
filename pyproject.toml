@@ -56,7 +56,13 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: separately authorized paid provider tests", "performance: explicit performance benchmarks"]
+# live/performance/cuda selection is by marker; `-m` here would override the
+# `-m cuda` a GPU run needs. tests/conftest.py skips cuda tests without a provider.
+markers = [
+  "live: separately authorized paid provider tests",
+  "performance: explicit performance benchmarks",
+  "cuda: needs a usable CUDA provider; excluded by default",
+]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 
 [tool.ruff]

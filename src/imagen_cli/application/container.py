@@ -803,7 +803,8 @@ class Container:
 
                 matting_params: dict[str, Any] = {
                     key: args[key] for key in
-                    ("model", "backend", "tile", "overlap", "feather", "edge_shift", "accept")
+                    ("model", "backend", "tile", "overlap", "feather", "edge_shift",
+                     "accept", "precision")
                     if key in args
                 }
                 remote_name = args.get("remote")
@@ -813,7 +814,7 @@ class Container:
                     remote_params = {
                         key: matting_params[key]
                         for key in ("model", "backend", "tile", "overlap",
-                                    "feather", "edge_shift")
+                                    "feather", "edge_shift", "precision")
                         if key in matting_params
                     }
                     try:
