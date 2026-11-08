@@ -14,6 +14,7 @@ from imagen_cli.application import matting, model_weights, superres
 
 def _fake_runner(size: int = 1024):
     """Stand-in for a model: a soft vertical ramp, so tiling seams are visible."""
+
     def run(tile: Image.Image) -> np.ndarray:
         ramp = np.linspace(-2.0, 2.0, size, dtype=np.float32)
         return np.tile(ramp, (size, 1))
@@ -56,8 +57,9 @@ def test_weights_are_pinned_and_digest_checked(tmp_path, monkeypatch):
 def test_download_records_the_digest(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     payload = b"matting weights for a test"
-    monkeypatch.setitem(matting.MANIFEST["birefnet-lite"], "sha256",
-                        hashlib.sha256(payload).hexdigest())
+    monkeypatch.setitem(
+        matting.MANIFEST["birefnet-lite"], "sha256", hashlib.sha256(payload).hexdigest()
+    )
 
     def download(url: str, target) -> None:
         target.write_bytes(payload)
@@ -137,7 +139,9 @@ def test_matte_output_feeds_the_alpha_only_operators():
     from imagen_cli.application import media_ops
 
     result, _engine = matting.matte(
-        Image.new("RGB", (32, 32), (200, 20, 20)), tile=32, overlap=0,
+        Image.new("RGB", (32, 32), (200, 20, 20)),
+        tile=32,
+        overlap=0,
         runner=_fake_runner(),
     )
     outlined = media_ops.OPS["sticker_outline"](result, width=2)
@@ -198,8 +202,9 @@ def test_worker_reports_matte_capability_only_when_weights_exist(tmp_path, monke
     assert worker_cli._matting_ready() is False
 
     payload = b"weights"
-    monkeypatch.setitem(matting.MANIFEST["birefnet-lite"], "sha256",
-                        hashlib.sha256(payload).hexdigest())
+    monkeypatch.setitem(
+        matting.MANIFEST["birefnet-lite"], "sha256", hashlib.sha256(payload).hexdigest()
+    )
     matting.weights_path("birefnet-lite").write_bytes(payload)
     assert worker_cli._matting_ready() is True
 
@@ -229,13 +234,15 @@ def test_worker_matte_runs_the_local_operator(tmp_path, monkeypatch):
         return result, {"provider": "CPUExecutionProvider"}
 
     monkeypatch.setattr(matting, "matte", fake_matte)
-    response = worker_cli.handle({
-        "schema_version": 1,
-        "operation": "matte",
-        "input": str(source),
-        "output": str(output),
-        "params": {"model": "birefnet-lite", "feather": 3},
-    })
+    response = worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "matte",
+            "input": str(source),
+            "output": str(output),
+            "params": {"model": "birefnet-lite", "feather": 3},
+        }
+    )
     assert response["status"] == "succeeded"
     assert calls["feather"] == 3
     assert calls["accept"] is False
@@ -247,13 +254,15 @@ def test_worker_matte_refuses_an_unknown_model(tmp_path, monkeypatch):
 
     source = tmp_path / "in.png"
     Image.new("RGB", (8, 8)).save(source)
-    response = worker_cli.handle({
-        "schema_version": 1,
-        "operation": "matte",
-        "input": str(source),
-        "output": str(tmp_path / "out.png"),
-        "params": {"model": "not-a-model"},
-    })
+    response = worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "matte",
+            "input": str(source),
+            "output": str(tmp_path / "out.png"),
+            "params": {"model": "not-a-model"},
+        }
+    )
     assert response["status"] == "failed"
     assert "unknown matting model" in response["error"]["message"]
 
@@ -263,7 +272,8 @@ def test_matting_doctor_names_a_provider_that_failed_to_load(tmp_path, monkeypat
 
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     monkeypatch.setattr(
-        matting, "available_providers",
+        matting,
+        "available_providers",
         lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
     matting.weights_path("birefnet-lite").write_bytes(b"weights")
@@ -287,12 +297,16 @@ def test_matte_leaves_sharp_alpha_by_default_without_unconditional_blur():
 
     source = Image.new("RGB", (1024, 1024), (100, 100, 100))
     result, _ = matting.matte(
-        source, tile=1024, overlap=0, feather=0, edge_shift=0.0, runner=step_runner,
+        source,
+        tile=1024,
+        overlap=0,
+        feather=0,
+        edge_shift=0.0,
+        runner=step_runner,
     )
     alpha = np.asarray(result.getchannel("A"))
     assert alpha[512, 511] == 0
     assert alpha[512, 512] == 255
-
 
 
 def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
@@ -306,16 +320,22 @@ def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
         def get_inputs(self):
             class Input:
                 name = "input_image"
+
             return [Input()]
 
     fake_session = FakeSession()
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
-    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(
-        get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
-        InferenceSession=lambda *args, **kwargs: fake_session,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            InferenceSession=lambda *args, **kwargs: fake_session,
+        ),
+    )
     monkeypatch.setattr(
-        matting, "available_providers",
+        matting,
+        "available_providers",
         lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
     monkeypatch.setattr(matting, "_preflight", lambda data: None)
@@ -323,12 +343,13 @@ def test_make_runner_backend_reflects_actual_provider(tmp_path, monkeypatch):
     monkeypatch.setitem(matting.MANIFEST["birefnet-lite"], "sha256", None)
 
     _, engine = matting._make_runner(
-        "birefnet-lite", backend=None, accept=True,
+        "birefnet-lite",
+        backend=None,
+        accept=True,
         session_factory=lambda *args, **kwargs: fake_session,
     )
     assert engine["provider"] == "CPUExecutionProvider"
     assert engine["backend"] == "cpu"
-
 
 
 def test_matting_run_advertises_precision():
@@ -350,9 +371,13 @@ def test_matting_run_carries_precision_into_the_transform(tmp_path, monkeypatch)
 
     monkeypatch.setattr(postprocess, "transform_", fake)
     with Container(workspace=str(tmp_path / "ws")) as container:
-        container.execute("matting run", {
-            "artifact": "art_" + "a" * 32, "precision": "fp16",
-        })
+        container.execute(
+            "matting run",
+            {
+                "artifact": "art_" + "a" * 32,
+                "precision": "fp16",
+            },
+        )
     assert captured["model_params"]["precision"] == "fp16"
     assert captured["op_name"] == "matte"
 
@@ -369,9 +394,14 @@ def test_matting_run_carries_precision_to_a_remote(tmp_path, monkeypatch):
 
     monkeypatch.setattr(remote_service, "run_operation", fake)
     with Container(workspace=str(tmp_path / "ws")) as container:
-        container.execute("matting run", {
-            "artifact": "art_" + "a" * 32, "remote": "modal", "precision": "fp32",
-        })
+        container.execute(
+            "matting run",
+            {
+                "artifact": "art_" + "a" * 32,
+                "remote": "modal",
+                "precision": "fp32",
+            },
+        )
     assert captured["operation"] == "matte"
     assert captured["params"]["precision"] == "fp32"
 
@@ -381,7 +411,8 @@ def test_matting_cuda_without_a_provider_names_the_install_command(monkeypatch):
 
     monkeypatch.setattr(matting, "available_providers", lambda: ["CPUExecutionProvider"])
     monkeypatch.setattr(
-        matting, "_choose_providers",
+        matting,
+        "_choose_providers",
         lambda backend: ["CPUExecutionProvider"],
     )
 
@@ -400,8 +431,7 @@ def test_matting_cuda_without_a_provider_names_the_install_command(monkeypatch):
 def test_the_matte_op_accepts_precision():
     from imagen_cli.application.postprocess_service import validate
 
-    steps = validate([{"op": "matte", "params": {"model": "birefnet-lite",
-                                                "precision": "fp16"}}])
+    steps = validate([{"op": "matte", "params": {"model": "birefnet-lite", "precision": "fp16"}}])
     assert steps[0]["params"]["precision"] == "fp16"
 
 
@@ -410,7 +440,8 @@ def test_doctor_reports_a_broken_provider_instead_of_raising(monkeypatch):
     from imagen_cli.application.superres import ProviderUnavailable
 
     monkeypatch.setattr(
-        matting, "available_providers",
+        matting,
+        "available_providers",
         lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
 
@@ -429,7 +460,8 @@ def test_doctor_turns_an_allocation_failure_into_a_fp16_hint(monkeypatch):
     from imagen_cli.application import matting
 
     monkeypatch.setattr(
-        matting, "available_providers",
+        matting,
+        "available_providers",
         lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
 
@@ -456,9 +488,16 @@ def test_auto_retries_when_the_session_cannot_allocate(monkeypatch, tmp_path):
     monkeypatch.setattr(matting, "ensure_weights", lambda model, accept=False: weights)
     monkeypatch.setattr(matting, "_preflight", lambda data: None)
     monkeypatch.setattr(matting, "_choose_providers", lambda backend: ["CPUExecutionProvider"])
-    monkeypatch.setitem(matting.MANIFEST, "stub", {
-        "sha256": None, "input_size": 8, "mean": (0, 0, 0), "std": (1, 1, 1),
-    })
+    monkeypatch.setitem(
+        matting.MANIFEST,
+        "stub",
+        {
+            "sha256": None,
+            "input_size": 8,
+            "mean": (0, 0, 0),
+            "std": (1, 1, 1),
+        },
+    )
     monkeypatch.setattr(matting, "_require_provider", lambda session, backend: None)
     from imagen_cli.application import matting_fp16
 
@@ -467,9 +506,7 @@ def test_auto_retries_when_the_session_cannot_allocate(monkeypatch, tmp_path):
 
     def failing_session(factory, data, *, providers, backend):
         opened.append(backend)
-        raise ValueError(
-            f"backend {backend or 'auto'} ran out of memory while loading the model"
-        )
+        raise ValueError(f"backend {backend or 'auto'} ran out of memory while loading the model")
 
     monkeypatch.setattr(superres, "_open_session", failing_session)
     with pytest.raises(ValueError, match="out of memory"):
@@ -480,9 +517,15 @@ def test_auto_retries_when_the_session_cannot_allocate(monkeypatch, tmp_path):
 def test_matting_run_parses_precision_from_argv():
     from imagen_cli.cli.entrypoint import _parse
 
-    command, raw, _ = _parse([
-        "matting", "run", "art_" + "a" * 32, "--precision", "fp16",
-    ])
+    command, raw, _ = _parse(
+        [
+            "matting",
+            "run",
+            "art_" + "a" * 32,
+            "--precision",
+            "fp16",
+        ]
+    )
     assert command == "matting run"
     assert isinstance(raw, dict)
     assert raw["precision"] == "fp16"

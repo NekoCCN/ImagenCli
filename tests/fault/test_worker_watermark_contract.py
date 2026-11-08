@@ -45,21 +45,31 @@ def _client(tmp_path: Any, mode: str = "single-replica-sync") -> TestClient:
     root = tmp_path / "jobs"
     root.mkdir(parents=True, exist_ok=True)
     config = WorkerConfig(
-        token="secret", state_mode=mode, jobs_root=root,
-        worker_version="1.2.3", imagen_cli_version="0.1.17",
-        raiw_version="0.53.0", providers=("cuda",), gpu="L4",
+        token="secret",
+        state_mode=mode,
+        jobs_root=root,
+        worker_version="1.2.3",
+        imagen_cli_version="0.1.17",
+        raiw_version="0.53.0",
+        providers=("cuda",),
+        gpu="L4",
     )
     return TestClient(create_app(config))
 
 
-def _post(client, operation: str, *, params: dict[str, Any] | None = None,
-          data: bytes | None = None) -> Any:
+def _post(
+    client, operation: str, *, params: dict[str, Any] | None = None, data: bytes | None = None
+) -> Any:
     payload = {
-        "schema_version": 1, "operation": operation, "job_digest": DIGEST,
-        "max_seconds": 30, "params": params or {},
+        "schema_version": 1,
+        "operation": operation,
+        "job_digest": DIGEST,
+        "max_seconds": 30,
+        "params": params or {},
     }
     return client.post(
-        "/v1/jobs", headers=AUTH,
+        "/v1/jobs",
+        headers=AUTH,
         data={"job": json.dumps(payload)},
         files={"input": ("in.png", data or _png(), "image/png")},
     )
@@ -76,14 +86,28 @@ class Mark:
     def detect(self, image: Any, *, provenance: bool = False) -> Any:
         return types.SimpleNamespace(detected=self.detected, confidence=self.confidence)
 
-    def remove(self, image: Any, *, backend: str = "auto", provenance: bool = False,
-               force: bool = False, detection: Any = None) -> tuple[Any, Any]:
+    def remove(
+        self,
+        image: Any,
+        *,
+        backend: str = "auto",
+        provenance: bool = False,
+        force: bool = False,
+        detection: Any = None,
+    ) -> tuple[Any, Any]:
         return object(), types.SimpleNamespace(backend=backend)
 
 
-def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = True,
-             metadata_survivors: tuple[str, ...] = (), leftovers: tuple[str, ...] = (),
-             classify_available: bool = True, raise_in: str | None = None) -> dict[str, Any]:
+def _install(
+    monkeypatch,
+    *,
+    record: dict[str, Any],
+    visible_detected: bool = True,
+    metadata_survivors: tuple[str, ...] = (),
+    leftovers: tuple[str, ...] = (),
+    classify_available: bool = True,
+    raise_in: str | None = None,
+) -> dict[str, Any]:
     """Install a fake ``remove_ai_watermarks`` package keyed by submodule name."""
 
     def guard(name: str) -> None:
@@ -145,8 +169,9 @@ def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = Tr
         record["mark"] = key
         return Mark(detected=visible_detected)
 
-    def resolve_trust(key: str, *, sensitivity: str = "auto", provenance: Any = None,
-                      strict_keys: Any = ()) -> str:
+    def resolve_trust(
+        key: str, *, sensitivity: str = "auto", provenance: Any = None, strict_keys: Any = ()
+    ) -> str:
         record["trust"] = (key, sensitivity)
         return "strict" if sensitivity == "strict" else "auto"
 
@@ -155,11 +180,21 @@ def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = Tr
 
     eraser = _module("remove_ai_watermarks.region_eraser")
 
-    def erase(image: Any, *, boxes: list[tuple[int, int, int, int]], backend: str = "cv2",
-              dilate: int = 3, cv2_method: str = "telea") -> Any:
+    def erase(
+        image: Any,
+        *,
+        boxes: list[tuple[int, int, int, int]],
+        backend: str = "cv2",
+        dilate: int = 3,
+        cv2_method: str = "telea",
+    ) -> Any:
         guard("erase")
-        record["erase"] = {"boxes": list(boxes), "backend": backend,
-                           "dilate": dilate, "cv2_method": cv2_method}
+        record["erase"] = {
+            "boxes": list(boxes),
+            "backend": backend,
+            "dilate": dilate,
+            "cv2_method": cv2_method,
+        }
         return object()
 
     eraser.erase = erase
@@ -177,25 +212,42 @@ def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = Tr
         guard("visible")
         record["visible"] = kwargs
         Image.new("RGB", (16, 16), (7, 8, 9)).save(output, format="PNG")
-        marks = [types.SimpleNamespace(label="logo", status="cleaned",
-                                       confidence_before=0.9, confidence_after=0.1)]
+        marks = [
+            types.SimpleNamespace(
+                label="logo", status="cleaned", confidence_before=0.9, confidence_after=0.1
+            )
+        ]
         return types.SimpleNamespace(status="cleaned", marks=marks)
 
-    def remove_all(source: Any, output: Any, *, backend: str = "auto",
-                   sensitivity: str = "auto", invisible: Any = None, force: bool = False,
-                   progress: Any = None) -> Any:
+    def remove_all(
+        source: Any,
+        output: Any,
+        *,
+        backend: str = "auto",
+        sensitivity: str = "auto",
+        invisible: Any = None,
+        force: bool = False,
+        progress: Any = None,
+    ) -> Any:
         guard("all")
-        record["all"] = {"backend": backend, "sensitivity": sensitivity,
-                         "invisible": invisible, "force": force}
+        record["all"] = {
+            "backend": backend,
+            "sensitivity": sensitivity,
+            "invisible": invisible,
+            "force": force,
+        }
         if progress is not None:
             progress("visible", "start")
             progress("invisible", "done")
         Image.new("RGB", (16, 16), (9, 9, 9)).save(output, format="PNG")
         return types.SimpleNamespace(
-            visible_label="logo", visible_status="cleaned",
-            visible_marks=[types.SimpleNamespace(label="logo", status="cleaned",
-                                                 confidence_before=0.9,
-                                                 confidence_after=0.1)],
+            visible_label="logo",
+            visible_status="cleaned",
+            visible_marks=[
+                types.SimpleNamespace(
+                    label="logo", status="cleaned", confidence_before=0.9, confidence_after=0.1
+                )
+            ],
             invisible={"status": "succeeded"},
         )
 
@@ -244,6 +296,7 @@ def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = Tr
             record[name] = kwargs
             Image.new("RGB", (16, 16), (12, 12, 12)).save(output, format="PNG")
             return types.SimpleNamespace(output=str(output), status="cleaned")
+
         return write
 
     video.identify_video = lambda source, check_visible=True: {"visible": bool(check_visible)}
@@ -307,8 +360,7 @@ def test_metadata_publishes_a_clean_copy(tmp_path: Path, monkeypatch: Any) -> No
 def test_visible_forwards_backend_and_sensitivity(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
-    _post(client, "watermark.visible",
-          params={"backend": "lama", "sensitivity": "strict"})
+    _post(client, "watermark.visible", params={"backend": "lama", "sensitivity": "strict"})
     assert record["visible"] == {"backend": "lama", "sensitivity": "strict"}
 
 
@@ -335,9 +387,11 @@ def test_visible_no_mark_reports_no_watermark(tmp_path: Path, monkeypatch: Any) 
 def test_erase_translates_region_strings_into_int_boxes(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
-    data = _post(client, "watermark.erase",
-                 params={"regions": ["0,0,8,8", " 4, 4, 2, 2 "],
-                         "dilate": 5, "inpaint_method": "ns"}).json()
+    data = _post(
+        client,
+        "watermark.erase",
+        params={"regions": ["0,0,8,8", " 4, 4, 2, 2 "], "dilate": 5, "inpaint_method": "ns"},
+    ).json()
     assert data["status"] == "succeeded"
     assert record["erase"]["boxes"] == [(0, 0, 8, 8), (4, 4, 2, 2)]
     assert record["erase"]["dilate"] == 5
@@ -369,10 +423,18 @@ def test_all_maps_the_invisible_options_and_records_stages(
 ) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path, mode="shared-volume")
-    _, job_id = _submit_async(client, "watermark.all", params={
-        "pipeline": "sdxl-zimage", "backend": "cv2", "sensitivity": "auto",
-        "tile": True, "tile_size": 512, "seed": 7,
-    })
+    _, job_id = _submit_async(
+        client,
+        "watermark.all",
+        params={
+            "pipeline": "sdxl-zimage",
+            "backend": "cv2",
+            "sensitivity": "auto",
+            "tile": True,
+            "tile_size": 512,
+            "seed": 7,
+        },
+    )
     data = _wait(client, job_id)
     assert data["status"] == "succeeded"
     assert record["invisible_options"]["pipeline"] == "sdxl-zimage"
@@ -389,8 +451,9 @@ def test_invisible_uses_the_engine_with_the_requested_pipeline(
 ) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path, mode="shared-volume")
-    _, job_id = _submit_async(client, "watermark.invisible",
-                              params={"pipeline": "sdxl-zimage", "cpu_offload": True})
+    _, job_id = _submit_async(
+        client, "watermark.invisible", params={"pipeline": "sdxl-zimage", "cpu_offload": True}
+    )
     record_ = _wait(client, job_id)
     assert record_["status"] == "succeeded"
     assert record["engine"] == {"pipeline": "sdxl-zimage", "cpu_offload": True}
@@ -423,44 +486,61 @@ def test_output_sha256_matches_the_bytes_the_worker_wrote(tmp_path: Path, monkey
     assert written.startswith(b"\x89PNG")
 
 
-def test_video_operations_map_to_their_own_raiw_functions(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
+def test_video_operations_map_to_their_own_raiw_functions(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     source = tmp_path / "in.png"
     source.write_bytes(_png())
     output = tmp_path / "out.png"
 
-    worker_cli.handle({
-        "schema_version": 1, "operation": "watermark.video.visible", "input": str(source),
-        "output": str(output), "params": {"mark": "logo", "backend": "cv2"},
-    })
+    worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "watermark.video.visible",
+            "input": str(source),
+            "output": str(output),
+            "params": {"mark": "logo", "backend": "cv2"},
+        }
+    )
     assert record["video_visible"]["mark"] == "logo"
 
-    worker_cli.handle({
-        "schema_version": 1, "operation": "watermark.video.all", "input": str(source),
-        "output": str(output), "params": {"include_invisible": True, "noise_std": 0.02},
-    })
+    worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "watermark.video.all",
+            "input": str(source),
+            "output": str(output),
+            "params": {"include_invisible": True, "noise_std": 0.02},
+        }
+    )
     assert record["video_all"]["include_invisible"] is True
     assert record["video_all"]["noise_std"] == 0.02
 
-    worker_cli.handle({
-        "schema_version": 1, "operation": "watermark.video.invisible",
-        "input": str(source), "output": str(output),
-        "params": {"model": "m", "device": "cuda"},
-    })
+    worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "watermark.video.invisible",
+            "input": str(source),
+            "output": str(output),
+            "params": {"model": "m", "device": "cuda"},
+        }
+    )
     assert record["video_invisible"]["model"] == "m"
     assert record["video_invisible"]["device"] == "cuda"
 
 
-def _submit_async(client: Any, operation: str,
-                  *, params: dict[str, Any] | None = None) -> tuple[Any, str]:
+def _submit_async(
+    client: Any, operation: str, *, params: dict[str, Any] | None = None
+) -> tuple[Any, str]:
     payload = {
-        "schema_version": 1, "operation": operation, "job_digest": DIGEST,
-        "max_seconds": 600, "params": params or {},
+        "schema_version": 1,
+        "operation": operation,
+        "job_digest": DIGEST,
+        "max_seconds": 600,
+        "params": params or {},
     }
     response = client.post(
-        "/v1/jobs", headers=AUTH,
+        "/v1/jobs",
+        headers=AUTH,
         data={"job": json.dumps(payload)},
         files={"input": ("in.png", _png(), "image/png")},
     )
@@ -480,9 +560,7 @@ def _wait(client, job_id: str) -> dict[str, Any]:
     return record
 
 
-def test_matte_reports_an_unsupported_precision_by_name(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
+def test_matte_reports_an_unsupported_precision_by_name(tmp_path: Path, monkeypatch: Any) -> None:
     import types
 
     from imagen_cli.application import matting_fp16
@@ -498,17 +576,20 @@ def test_matte_reports_an_unsupported_precision_by_name(
     monkeypatch.setattr(matting_fp16, "ensure_fp16", unsupported)
     source = tmp_path / "in.png"
     source.write_bytes(_png())
-    response = worker_cli.handle({
-        "schema_version": 1, "operation": "matte", "input": str(source),
-        "output": str(tmp_path / "out.png"), "params": {"precision": "fp16"},
-    })
+    response = worker_cli.handle(
+        {
+            "schema_version": 1,
+            "operation": "matte",
+            "input": str(source),
+            "output": str(tmp_path / "out.png"),
+            "params": {"precision": "fp16"},
+        }
+    )
     assert response["status"] == "failed"
     assert response["error"]["type"] == "unsupported_in_this_image"
 
 
-def test_probe_reports_classify_false_when_its_weights_are_missing(
-    monkeypatch: Any
-) -> None:
+def test_probe_reports_classify_false_when_its_weights_are_missing(monkeypatch: Any) -> None:
     """A route existing is not a capability: the module says is_available() == False."""
     _install(monkeypatch, record={}, classify_available=False)
     probe = worker_cli.handle({"schema_version": 1, "operation": "probe"})
@@ -516,9 +597,7 @@ def test_probe_reports_classify_false_when_its_weights_are_missing(
     assert probe["capabilities"]["source_classify"] is False
 
 
-def test_probe_reports_classify_true_when_the_module_is_available(
-    monkeypatch: Any
-) -> None:
+def test_probe_reports_classify_true_when_the_module_is_available(monkeypatch: Any) -> None:
     _install(monkeypatch, record={}, classify_available=True)
     probe = worker_cli.handle({"schema_version": 1, "operation": "probe"})
     assert probe["capabilities"]["classify"] is True

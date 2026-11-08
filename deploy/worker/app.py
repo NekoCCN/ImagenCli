@@ -27,8 +27,14 @@ from imagen_cli.contract import JobStatus, reject_client_paths
 
 SCHEMA_VERSION = 1
 STATE_MODES = {"shared-volume", "queue", "single-replica-sync"}
-SYNC_OPERATIONS = {"watermark.identify", "watermark.metadata", "watermark.visible",
-                   "watermark.erase", "watermark.classify", "matte"}
+SYNC_OPERATIONS = {
+    "watermark.identify",
+    "watermark.metadata",
+    "watermark.visible",
+    "watermark.erase",
+    "watermark.classify",
+    "matte",
+}
 # Long diffusion rebuilds: only a queue or shared-volume endpoint can carry them.
 ASYNC_OPERATIONS = {"watermark.invisible", "watermark.all"}
 # Read-only operations return a report and never write an output file.
@@ -160,8 +166,11 @@ def _detect_providers() -> tuple[str, ...]:
 
 
 def _operations(config: WorkerConfig) -> list[str]:
-    allowed = SYNC_OPERATIONS if config.state_mode == "single-replica-sync" \
+    allowed = (
+        SYNC_OPERATIONS
+        if config.state_mode == "single-replica-sync"
         else SYNC_OPERATIONS | ASYNC_OPERATIONS
+    )
     return sorted(allowed)
 
 
@@ -173,15 +182,18 @@ def _default_execute(job: dict[str, Any], source: bytes) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="imagen-worker-") as directory:
         input_path = Path(directory) / ("input" + extension)
         input_path.write_bytes(source)
-        response = handle({
-            "schema_version": SCHEMA_VERSION,
-            "imagen_cli_version": job.get("imagen_cli_version"),
-            "operation": operation,
-            "params": job.get("params") or {},
-            "input": str(input_path),
-            "output": str(Path(directory) / ("output" + extension))
-            if operation not in READ_ONLY_OPERATIONS else None,
-        })
+        response = handle(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "imagen_cli_version": job.get("imagen_cli_version"),
+                "operation": operation,
+                "params": job.get("params") or {},
+                "input": str(input_path),
+                "output": str(Path(directory) / ("output" + extension))
+                if operation not in READ_ONLY_OPERATIONS
+                else None,
+            }
+        )
         output = None
         if operation not in READ_ONLY_OPERATIONS:
             candidate = Path(directory) / ("output" + extension)
@@ -231,13 +243,17 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
                 if attempt == 0:
                     time.sleep(0.05)
         if job_id in known:
-            return {**known[job_id], "status": JobStatus.UNKNOWN.value,
-                    "reason": "volume_unavailable"}
+            return {
+                **known[job_id],
+                "status": JobStatus.UNKNOWN.value,
+                "reason": "volume_unavailable",
+            }
         return None
 
     def _missing() -> JSONResponse:
         return JSONResponse(
-            {"status": JobStatus.UNKNOWN.value, "reason": "state_not_found"}, status_code=404,
+            {"status": JobStatus.UNKNOWN.value, "reason": "state_not_found"},
+            status_code=404,
         )
 
     @app.get("/healthz")
@@ -269,7 +285,8 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
             "worker_digest": config.worker_digest,
             "max_attempts": config.max_attempts if config.state_mode == "queue" else 1,
             "sync_max_seconds": config.sync_max_seconds
-            if config.state_mode == "single-replica-sync" else None,
+            if config.state_mode == "single-replica-sync"
+            else None,
         }
         if config.queue:
             data["queue"] = config.queue
@@ -277,7 +294,8 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
 
     @app.post("/v1/jobs", dependencies=[Depends(authorize)])
     def submit(  # noqa: A002
-        job: str = Form(...), input: UploadFile = File(...),  # noqa: B008
+        job: str = Form(...),
+        input: UploadFile = File(...),  # noqa: B008
     ) -> Any:
         try:
             payload = json.loads(job)
@@ -327,16 +345,21 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
                         pass
                 body["output"] = output
             return JSONResponse(
-                body, status_code=200 if config.state_mode == "single-replica-sync" else 202,
+                body,
+                status_code=200 if config.state_mode == "single-replica-sync" else 202,
             )
         if not busy.acquire(blocking=False):
             raise HTTPException(status_code=429, detail="one job at a time")
         job_id = "job_" + os.urandom(16).hex()
         record: dict[str, Any] = {
-            "job_id": job_id, "status": JobStatus.QUEUED.value,
-            "operation": operation, "job_digest": digest,
-            "max_seconds": max_seconds, "params": payload.get("params") or {},
-            "attempts": 1, "max_attempts": config.max_attempts,
+            "job_id": job_id,
+            "status": JobStatus.QUEUED.value,
+            "operation": operation,
+            "job_digest": digest,
+            "max_seconds": max_seconds,
+            "params": payload.get("params") or {},
+            "attempts": 1,
+            "max_attempts": config.max_attempts,
             "created_at": time.time(),
         }
         known[job_id] = record
@@ -365,8 +388,10 @@ def create_app(config: WorkerConfig, execute: Executor | None = None) -> FastAPI
                 store.write(job_id, record, output)
                 return output
             except Exception as error:  # noqa: BLE001 - worker failures are structured
-                record.update(status=JobStatus.FAILED.value,
-                              error={"type": type(error).__name__, "message": str(error)})
+                record.update(
+                    status=JobStatus.FAILED.value,
+                    error={"type": type(error).__name__, "message": str(error)},
+                )
                 store.write(job_id, record, None)
                 return None
             finally:
@@ -439,15 +464,17 @@ def from_environment() -> FastAPI:
         if raw_providers is not None
         else _detect_providers()
     )
-    return create_app(WorkerConfig(
-        token=os.environ["IMAGEN_WORKER_TOKEN"],
-        state_mode=os.environ.get("IMAGEN_WORKER_STATE_MODE", "shared-volume"),
-        jobs_root=Path(os.environ.get("IMAGEN_JOBS_ROOT", "/jobs")),
-        worker_version=os.environ.get("IMAGEN_WORKER_VERSION", "0.0.0"),
-        imagen_cli_version=os.environ.get("IMAGEN_CLI_VERSION", "unknown"),
-        raiw_version=os.environ.get("IMAGEN_RAIW_VERSION"),
-        providers=providers,
-        gpu=os.environ.get("IMAGEN_MODAL_GPU"),
-        worker_digest=os.environ.get("IMAGEN_WORKER_DIGEST"),
-        queue=queue,
-    ))
+    return create_app(
+        WorkerConfig(
+            token=os.environ["IMAGEN_WORKER_TOKEN"],
+            state_mode=os.environ.get("IMAGEN_WORKER_STATE_MODE", "shared-volume"),
+            jobs_root=Path(os.environ.get("IMAGEN_JOBS_ROOT", "/jobs")),
+            worker_version=os.environ.get("IMAGEN_WORKER_VERSION", "0.0.0"),
+            imagen_cli_version=os.environ.get("IMAGEN_CLI_VERSION", "unknown"),
+            raiw_version=os.environ.get("IMAGEN_RAIW_VERSION"),
+            providers=providers,
+            gpu=os.environ.get("IMAGEN_MODAL_GPU"),
+            worker_digest=os.environ.get("IMAGEN_WORKER_DIGEST"),
+            queue=queue,
+        )
+    )
