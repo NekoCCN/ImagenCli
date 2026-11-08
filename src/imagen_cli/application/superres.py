@@ -342,6 +342,40 @@ def _require_provider(session: Any, backend: str | None) -> None:
         )
 
 
+_OUT_OF_MEMORY_MARKERS = ("failed to allocate", "out of memory", "available memory")
+
+
+def is_out_of_memory(error: BaseException) -> bool:
+    """True when the provider could not allocate, whatever wording it used.
+
+    The measured message is ``Failed to allocate buffer of size <n>``; older
+    paths say ``Failed to allocate memory`` or ``available memory``. Matching the
+    allocator wording is the only handler available: runtime exceptions carry no
+    structured error code across the pybind boundary.
+    """
+    if "outofmemory" in type(error).__name__.lower():
+        return True
+    message = str(error).lower()
+    return any(marker in message for marker in _OUT_OF_MEMORY_MARKERS)
+
+
+def _open_session(factory: Any, data: bytes, *, providers: list[str],
+                  backend: str | None) -> Any:
+    """Build a session, naming a construction-time allocation failure properly."""
+    try:
+        return factory(data, providers=providers)
+    except Exception as error:  # noqa: BLE001 - ORT raises its own pybind types
+        if is_out_of_memory(error):
+            raise ValueError(
+                f"backend {backend or 'auto'} ran out of memory while loading the model; "
+                "lower the tile size, use a smaller model, or choose the cpu backend"
+            ) from error
+        raise ValueError(
+            "the execution provider could not load the model: "
+            + str(error).splitlines()[-1][:200]
+        ) from error
+
+
 def session_run(session: Any, feeds: dict[str, Any], backend: str | None) -> Any:
     """Run one inference, translating runtime-provider failures into our own error.
 
@@ -353,7 +387,7 @@ def session_run(session: Any, feeds: dict[str, Any], backend: str | None) -> Any
         return session.run(None, feeds)[0]
     except Exception as error:  # noqa: BLE001 - ORT raises its own pybind types
         message = str(error)
-        if "Failed to allocate memory" in message or "available memory" in message.lower():
+        if is_out_of_memory(error):
             raise ValueError(
                 f"backend {backend or 'auto'} ran out of memory while running the model; "
                 "lower the tile size, use a smaller model, or choose the cpu backend"
@@ -381,7 +415,10 @@ def _make_runner(model: str, *, backend: str | None, device: str | None,
         raise ValueError("weights digest mismatch")
     _preflight_onnx(data)
     # Use the checked bytes, not a path that could change after preflight.
-    session = onnxruntime.InferenceSession(data, providers=providers)
+    session = _open_session(
+        onnxruntime.InferenceSession, data, providers=providers,
+        backend=backend or device,
+    )
     _require_provider(session, backend or device)
     inputs = session.get_inputs()
     if len(inputs) != 1:

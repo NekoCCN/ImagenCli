@@ -161,11 +161,11 @@ def test_pinned_models_require_accept_before_download(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="accept=true"):
         superres.ensure_weights("realesrgan-x4plus")
+    def download(url, target):
+        target.write_bytes(b"wrong")
+
     with pytest.raises(ValueError, match="pinned digest"):
-        superres.ensure_weights(
-            "realesrgan-x4plus", accept=True,
-            download=lambda url, target: target.write_bytes(b"wrong"),
-        )
+        superres.ensure_weights("realesrgan-x4plus", accept=True, download=download)
 
 
 def test_download_is_verified_before_publication(tmp_path, monkeypatch):
@@ -432,3 +432,46 @@ def test_malformed_model_is_rejected_before_ort(onnx_boundary, monkeypatch):
     with pytest.raises(ValueError, match="ONNX.*preflight"):
         make_local_runner()
     assert "session" not in onnx_boundary.events
+
+
+def test_is_out_of_memory_covers_the_measured_message():
+    from imagen_cli.application import superres
+
+    assert superres.is_out_of_memory(
+        RuntimeError("Failed to allocate buffer of size 822083584"))
+    assert superres.is_out_of_memory(RuntimeError("out of memory"))
+    assert superres.is_out_of_memory(RuntimeError("CUDA error: available memory is 0"))
+    assert not superres.is_out_of_memory(ValueError("weights digest mismatch"))
+
+
+def test_session_run_names_a_buffer_allocation_as_out_of_memory():
+    from imagen_cli.application import superres
+
+    class Session:
+        def run(self, *args, **kwargs):
+            raise RuntimeError("Failed to allocate buffer of size 822083584")
+
+    with pytest.raises(ValueError, match="ran out of memory"):
+        superres.session_run(Session(), {}, "cuda")
+
+
+def test_a_session_that_cannot_allocate_is_named_as_out_of_memory():
+    from imagen_cli.application import superres
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("Failed to allocate buffer of size 822083584")
+
+    with pytest.raises(ValueError, match="ran out of memory while loading the model"):
+        superres._open_session(broken, b"", providers=["CPUExecutionProvider"],
+                               backend="cuda")
+
+
+def test_a_session_that_fails_for_another_reason_keeps_its_message():
+    from imagen_cli.application import superres
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("libcublasLt.so.13: cannot open shared object file")
+
+    with pytest.raises(ValueError, match="libcublasLt"):
+        superres._open_session(broken, b"", providers=["CPUExecutionProvider"],
+                               backend="cuda")
