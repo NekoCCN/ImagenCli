@@ -75,8 +75,28 @@ def _cuda() -> bool:
         return False
 
 
+def _usable(module: str) -> bool:
+    """A module that reports `is_available()` decides for itself; absence is False."""
+    try:
+        imported = __import__(module, fromlist=["is_available"])
+    except Exception:  # noqa: BLE001 - a missing extra is a capability gap
+        return False
+    checker = getattr(imported, "is_available", None)
+    if checker is None:
+        return True
+    try:
+        return bool(checker())
+    except Exception:  # noqa: BLE001 - a broken checker is not a capability
+        return False
+
+
 def _probe() -> dict[str, Any]:
     capabilities = _capabilities()
+    for name, module in (
+        ("classify", "remove_ai_watermarks.classify"),
+        ("source_classify", "remove_ai_watermarks.source_classify"),
+    ):
+        capabilities[name] = bool(capabilities.get(name)) and _usable(module)
     capabilities["matte"] = _matting_ready()
     return {
         "status": "succeeded",
@@ -110,8 +130,6 @@ def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]
     model = str(params.get("model", "birefnet-lite"))
     if model not in matting.MANIFEST:
         raise ValueError(f"unknown matting model: {model}")
-    from imagen_cli.application.matting_fp16 import UnsupportedInThisImage
-
     with Image.open(source) as opened:
         opened.load()
         try:
@@ -126,7 +144,11 @@ def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]
                 accept=False,
                 precision=str(params.get("precision") or "auto"),
             )
-        except UnsupportedInThisImage as error:
+        except Exception as error:  # noqa: BLE001 - matched by name across image versions
+            # An image built before matting_fp16 existed has no such class, so the
+            # name is matched instead of imported: fp32 matte must keep working there.
+            if type(error).__name__ != "UnsupportedInThisImage":
+                raise
             raise UnsupportedPrecision(str(error)) from error
     result.save(output, format="PNG")
     return {"status": "succeeded", "report": {"engine": engine, "model": model}}

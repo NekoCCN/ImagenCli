@@ -19,7 +19,7 @@ from typing import Any
 import modal
 
 WORKER_IMAGE = os.environ.get(
-    "IMAGEN_WORKER_IMAGE", "ghcr.io/nekoccn/imagen-worker:0.1.17-raiw0.53.0"
+    "IMAGEN_WORKER_IMAGE", "ghcr.io/nekoccn/imagen-worker:0.1.20-matte"
 )
 
 GPU = os.environ.get("IMAGEN_MODAL_GPU", "L4")
@@ -44,6 +44,16 @@ image = (
     .add_local_file(
         "src/imagen_cli/remote/worker_cli.py",
         "/usr/local/lib/python3.12/site-packages/imagen_cli/remote/worker_cli.py",
+        copy=True,
+    )
+    .add_local_file(
+        "src/imagen_cli/application/superres.py",
+        "/usr/local/lib/python3.12/site-packages/imagen_cli/application/superres.py",
+        copy=True,
+    )
+    .add_local_file(
+        "src/imagen_cli/application/matting_fp16.py",
+        "/usr/local/lib/python3.12/site-packages/imagen_cli/application/matting_fp16.py",
         copy=True,
     )
     .env({"IMAGEN_MODAL_GPU": GPU})

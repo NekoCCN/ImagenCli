@@ -11,6 +11,7 @@ import io
 import json
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,13 +35,13 @@ def _module(name: str) -> Any:
     return types.ModuleType(name)
 
 
-def _png(size=(16, 16)) -> bytes:
+def _png(size: tuple[int, int] = (16, 16)) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", size, (10, 20, 30)).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
-def _client(tmp_path, mode="single-replica-sync") -> TestClient:
+def _client(tmp_path: Any, mode: str = "single-replica-sync") -> TestClient:
     root = tmp_path / "jobs"
     root.mkdir(parents=True, exist_ok=True)
     config = WorkerConfig(
@@ -51,7 +52,8 @@ def _client(tmp_path, mode="single-replica-sync") -> TestClient:
     return TestClient(create_app(config))
 
 
-def _post(client, operation, *, params=None, data=None):
+def _post(client, operation: str, *, params: dict[str, Any] | None = None,
+          data: bytes | None = None) -> Any:
     payload = {
         "schema_version": 1, "operation": operation, "job_digest": DIGEST,
         "max_seconds": 30, "params": params or {},
@@ -67,23 +69,24 @@ class Mark:
     label = "logo"
     key = "logo"
 
-    def __init__(self, detected=True, confidence=0.93):
+    def __init__(self, detected: bool = True, confidence: float = 0.93) -> None:
         self.detected = detected
         self.confidence = confidence
 
-    def detect(self, image, *, provenance=False):
+    def detect(self, image: Any, *, provenance: bool = False) -> Any:
         return types.SimpleNamespace(detected=self.detected, confidence=self.confidence)
 
-    def remove(self, image, *, backend="auto", provenance=False, force=False,
-               detection=None):
+    def remove(self, image: Any, *, backend: str = "auto", provenance: bool = False,
+               force: bool = False, detection: Any = None) -> tuple[Any, Any]:
         return object(), types.SimpleNamespace(backend=backend)
 
 
-def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(),
-             leftovers=(), classify_available=True, raise_in=None):
+def _install(monkeypatch, *, record: dict[str, Any], visible_detected: bool = True,
+             metadata_survivors: tuple[str, ...] = (), leftovers: tuple[str, ...] = (),
+             classify_available: bool = True, raise_in: str | None = None) -> dict[str, Any]:
     """Install a fake ``remove_ai_watermarks`` package keyed by submodule name."""
 
-    def guard(name):
+    def guard(name: str) -> None:
         if raise_in == name:
             raise RuntimeError("boom")
         return None
@@ -92,7 +95,7 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     identify_mod = _module("remove_ai_watermarks.identify")
 
-    def identify(source):
+    def identify(source: Any) -> Any:
         guard("identify")
         report = types.SimpleNamespace(
             to_dict=lambda schema_version=1: {"platform": "google", "schema": schema_version}
@@ -103,17 +106,17 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     metadata_mod = _module("remove_ai_watermarks.metadata")
 
-    def has_ai_metadata(source):
+    def has_ai_metadata(source: Any) -> bool:
         guard("metadata")
         return True
 
-    def strip_and_verify(source, output):
+    def strip_and_verify(source: Any, output: Any) -> tuple[Any, tuple[str, ...]]:
         guard("metadata")
         if not metadata_survivors:
             Image.new("RGB", (16, 16), (1, 2, 3)).save(output, format="PNG")
         return output, tuple(metadata_survivors)
 
-    def strip_written_output(output):
+    def strip_written_output(output: Any) -> tuple[str, ...]:
         return tuple(leftovers)
 
     metadata_mod.has_ai_metadata = has_ai_metadata
@@ -122,12 +125,12 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     image_io = _module("remove_ai_watermarks.image_io")
 
-    def read_bgr_and_alpha(source):
+    def read_bgr_and_alpha(source: Any) -> tuple[Any, None]:
         guard("image_io")
         with Image.open(source) as opened:
             return opened.convert("RGB").copy(), None
 
-    def write_bgr_with_alpha(output, image, alpha):
+    def write_bgr_with_alpha(output: Any, image: Any, alpha: Any) -> bool:
         guard("image_io")
         Image.new("RGB", (16, 16), (4, 5, 6)).save(output, format="PNG")
         return True
@@ -138,11 +141,12 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     registry = _module("remove_ai_watermarks.watermark_registry")
 
-    def get_mark(key):
+    def get_mark(key: str) -> Mark:
         record["mark"] = key
         return Mark(detected=visible_detected)
 
-    def resolve_trust(key, *, sensitivity="auto", provenance=None, strict_keys=()):
+    def resolve_trust(key: str, *, sensitivity: str = "auto", provenance: Any = None,
+                      strict_keys: Any = ()) -> str:
         record["trust"] = (key, sensitivity)
         return "strict" if sensitivity == "strict" else "auto"
 
@@ -151,7 +155,8 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     eraser = _module("remove_ai_watermarks.region_eraser")
 
-    def erase(image, *, boxes, backend="cv2", dilate=3, cv2_method="telea"):
+    def erase(image: Any, *, boxes: list[tuple[int, int, int, int]], backend: str = "cv2",
+              dilate: int = 3, cv2_method: str = "telea") -> Any:
         guard("erase")
         record["erase"] = {"boxes": list(boxes), "backend": backend,
                            "dilate": dilate, "cv2_method": cv2_method}
@@ -161,14 +166,14 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     api = _module("remove_ai_watermarks.api")
 
-    def visible_provenance(source):
+    def visible_provenance(source: Any) -> dict[str, Any]:
         return {}
 
     class InvisibleOptions:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Any) -> None:
             record["invisible_options"] = kwargs
 
-    def remove_visible_detailed(source, output, **kwargs):
+    def remove_visible_detailed(source: Any, output: Any, **kwargs: Any) -> Any:
         guard("visible")
         record["visible"] = kwargs
         Image.new("RGB", (16, 16), (7, 8, 9)).save(output, format="PNG")
@@ -176,8 +181,9 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
                                        confidence_before=0.9, confidence_after=0.1)]
         return types.SimpleNamespace(status="cleaned", marks=marks)
 
-    def remove_all(source, output, *, backend="auto", sensitivity="auto",
-                   invisible=None, force=False, progress=None):
+    def remove_all(source: Any, output: Any, *, backend: str = "auto",
+                   sensitivity: str = "auto", invisible: Any = None, force: bool = False,
+                   progress: Any = None) -> Any:
         guard("all")
         record["all"] = {"backend": backend, "sensitivity": sensitivity,
                          "invisible": invisible, "force": force}
@@ -201,10 +207,10 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     classify_mod = _module("remove_ai_watermarks.classify")
 
-    def available():
+    def available() -> bool:
         return classify_available
 
-    def classify_pixels(source):
+    def classify_pixels(source: Any) -> Any:
         guard("classify")
         return types.SimpleNamespace(to_dict=lambda: {"pixels": "photo"})
 
@@ -220,10 +226,10 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
     engine_mod = _module("remove_ai_watermarks.invisible_engine")
 
     class InvisibleEngine:
-        def __init__(self, *, pipeline, cpu_offload=False):
+        def __init__(self, *, pipeline: str, cpu_offload: bool = False) -> None:
             record["engine"] = {"pipeline": pipeline, "cpu_offload": cpu_offload}
 
-        def remove_watermark(self, source, output, **options):
+        def remove_watermark(self, source: Any, output: Any, **options: Any) -> None:
             guard("invisible")
             record["invisible"] = options
             Image.new("RGB", (16, 16), (11, 11, 11)).save(output, format="PNG")
@@ -232,8 +238,8 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
 
     video = _module("remove_ai_watermarks.video")
 
-    def _video_writer(name):
-        def write(source, output, **kwargs):
+    def _video_writer(name: str) -> Any:
+        def write(source: Any, output: Any, **kwargs: Any) -> Any:
             guard("video")
             record[name] = kwargs
             Image.new("RGB", (16, 16), (12, 12, 12)).save(output, format="PNG")
@@ -266,7 +272,7 @@ def _install(monkeypatch, *, record, visible_detected=True, metadata_survivors=(
     return record
 
 
-def test_identify_reads_without_producing_an_output(tmp_path, monkeypatch):
+def test_identify_reads_without_producing_an_output(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
     response = _post(client, "watermark.identify")
@@ -277,7 +283,10 @@ def test_identify_reads_without_producing_an_output(tmp_path, monkeypatch):
     assert record.get("mark") is None
 
 
-def test_metadata_refuses_to_publish_when_metadata_survives(tmp_path, monkeypatch):
+def test_metadata_refuses_to_publish_when_metadata_survives(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
     _install(monkeypatch, record={}, metadata_survivors=("xmp",))
     client = _client(tmp_path)
     data = _post(client, "watermark.metadata").json()
@@ -286,7 +295,7 @@ def test_metadata_refuses_to_publish_when_metadata_survives(tmp_path, monkeypatc
     assert "output" not in data
 
 
-def test_metadata_publishes_a_clean_copy(tmp_path, monkeypatch):
+def test_metadata_publishes_a_clean_copy(tmp_path: Path, monkeypatch: Any) -> None:
     _install(monkeypatch, record={})
     client = _client(tmp_path)
     data = _post(client, "watermark.metadata").json()
@@ -295,7 +304,7 @@ def test_metadata_publishes_a_clean_copy(tmp_path, monkeypatch):
     assert data["output"]["media_type"] == "image/png"
 
 
-def test_visible_forwards_backend_and_sensitivity(tmp_path, monkeypatch):
+def test_visible_forwards_backend_and_sensitivity(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
     _post(client, "watermark.visible",
@@ -303,7 +312,7 @@ def test_visible_forwards_backend_and_sensitivity(tmp_path, monkeypatch):
     assert record["visible"] == {"backend": "lama", "sensitivity": "strict"}
 
 
-def test_visible_named_mark_resolves_trust_and_cleans(tmp_path, monkeypatch):
+def test_visible_named_mark_resolves_trust_and_cleans(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
     data = _post(client, "watermark.visible", params={"mark": "logo"}).json()
@@ -313,7 +322,7 @@ def test_visible_named_mark_resolves_trust_and_cleans(tmp_path, monkeypatch):
     assert data["report"]["marks"][0]["status"] == "cleaned"
 
 
-def test_visible_no_mark_reports_no_watermark(tmp_path, monkeypatch):
+def test_visible_no_mark_reports_no_watermark(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={}, visible_detected=False)
     client = _client(tmp_path)
     data = _post(client, "watermark.visible", params={"mark": "logo"}).json()
@@ -323,7 +332,7 @@ def test_visible_no_mark_reports_no_watermark(tmp_path, monkeypatch):
     assert record["mark"] == "logo"
 
 
-def test_erase_translates_region_strings_into_int_boxes(tmp_path, monkeypatch):
+def test_erase_translates_region_strings_into_int_boxes(tmp_path: Path, monkeypatch: Any) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path)
     data = _post(client, "watermark.erase",
@@ -335,7 +344,10 @@ def test_erase_translates_region_strings_into_int_boxes(tmp_path, monkeypatch):
     assert record["erase"]["cv2_method"] == "ns"
 
 
-def test_classify_without_the_extra_explains_the_setup_command(tmp_path, monkeypatch):
+def test_classify_without_the_extra_explains_the_setup_command(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
     _install(monkeypatch, record={}, classify_available=False)
     client = _client(tmp_path)
     data = _post(client, "watermark.classify").json()
@@ -343,7 +355,7 @@ def test_classify_without_the_extra_explains_the_setup_command(tmp_path, monkeyp
     assert "setup --extras" in data["error"]["message"]
 
 
-def test_classify_returns_pixels_report(tmp_path, monkeypatch):
+def test_classify_returns_pixels_report(tmp_path: Path, monkeypatch: Any) -> None:
     _install(monkeypatch, record={})
     client = _client(tmp_path)
     data = _post(client, "watermark.classify").json()
@@ -351,7 +363,10 @@ def test_classify_returns_pixels_report(tmp_path, monkeypatch):
     assert "output" not in data
 
 
-def test_all_maps_the_invisible_options_and_records_stages(tmp_path, monkeypatch):
+def test_all_maps_the_invisible_options_and_records_stages(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path, mode="shared-volume")
     _, job_id = _submit_async(client, "watermark.all", params={
@@ -368,7 +383,10 @@ def test_all_maps_the_invisible_options_and_records_stages(tmp_path, monkeypatch
     assert data["report"]["visible_marks"][0]["label"] == "logo"
 
 
-def test_invisible_uses_the_engine_with_the_requested_pipeline(tmp_path, monkeypatch):
+def test_invisible_uses_the_engine_with_the_requested_pipeline(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
     record = _install(monkeypatch, record={})
     client = _client(tmp_path, mode="shared-volume")
     _, job_id = _submit_async(client, "watermark.invisible",
@@ -378,7 +396,7 @@ def test_invisible_uses_the_engine_with_the_requested_pipeline(tmp_path, monkeyp
     assert record["engine"] == {"pipeline": "sdxl-zimage", "cpu_offload": True}
 
 
-def test_a_raising_raiw_becomes_a_structured_failure(tmp_path, monkeypatch):
+def test_a_raising_raiw_becomes_a_structured_failure(tmp_path: Path, monkeypatch: Any) -> None:
     _install(monkeypatch, record={}, raise_in="erase")
     client = _client(tmp_path)
     data = _post(client, "watermark.erase", params={"regions": ["0,0,4,4"]}).json()
@@ -386,7 +404,7 @@ def test_a_raising_raiw_becomes_a_structured_failure(tmp_path, monkeypatch):
     assert data["error"] == {"type": "RuntimeError", "message": "boom"}
 
 
-def test_the_response_never_contains_a_traceback(tmp_path, monkeypatch):
+def test_the_response_never_contains_a_traceback(tmp_path: Path, monkeypatch: Any) -> None:
     _install(monkeypatch, record={}, raise_in="identify")
     client = _client(tmp_path)
     body = _post(client, "watermark.identify").text
@@ -394,7 +412,7 @@ def test_the_response_never_contains_a_traceback(tmp_path, monkeypatch):
     assert 'File "' not in body
 
 
-def test_output_sha256_matches_the_bytes_the_worker_wrote(tmp_path, monkeypatch):
+def test_output_sha256_matches_the_bytes_the_worker_wrote(tmp_path: Path, monkeypatch: Any) -> None:
     _install(monkeypatch, record={})
     client = _client(tmp_path)
     data = _post(client, "watermark.metadata").json()
@@ -405,7 +423,9 @@ def test_output_sha256_matches_the_bytes_the_worker_wrote(tmp_path, monkeypatch)
     assert written.startswith(b"\x89PNG")
 
 
-def test_video_operations_map_to_their_own_raiw_functions(tmp_path, monkeypatch):
+def test_video_operations_map_to_their_own_raiw_functions(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     record = _install(monkeypatch, record={})
     source = tmp_path / "in.png"
     source.write_bytes(_png())
@@ -433,7 +453,8 @@ def test_video_operations_map_to_their_own_raiw_functions(tmp_path, monkeypatch)
     assert record["video_invisible"]["device"] == "cuda"
 
 
-def _submit_async(client, operation, *, params=None):
+def _submit_async(client: Any, operation: str,
+                  *, params: dict[str, Any] | None = None) -> tuple[Any, str]:
     payload = {
         "schema_version": 1, "operation": operation, "job_digest": DIGEST,
         "max_seconds": 600, "params": params or {},
@@ -447,7 +468,7 @@ def _submit_async(client, operation, *, params=None):
     return response, body["job_id"]
 
 
-def _wait(client, job_id):
+def _wait(client, job_id: str) -> dict[str, Any]:
     import time
 
     record: dict[str, Any] = {}
@@ -459,7 +480,9 @@ def _wait(client, job_id):
     return record
 
 
-def test_matte_reports_an_unsupported_precision_by_name(tmp_path, monkeypatch):
+def test_matte_reports_an_unsupported_precision_by_name(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     import types
 
     from imagen_cli.application import matting_fp16
@@ -469,7 +492,7 @@ def test_matte_reports_an_unsupported_precision_by_name(tmp_path, monkeypatch):
     fake_runtime.get_available_providers = lambda: ["CPUExecutionProvider"]  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_runtime)
 
-    def unsupported(model):
+    def unsupported(model: str) -> None:
         raise matting_fp16.UnsupportedInThisImage("no onnxconverter-common here")
 
     monkeypatch.setattr(matting_fp16, "ensure_fp16", unsupported)
@@ -481,3 +504,21 @@ def test_matte_reports_an_unsupported_precision_by_name(tmp_path, monkeypatch):
     })
     assert response["status"] == "failed"
     assert response["error"]["type"] == "unsupported_in_this_image"
+
+
+def test_probe_reports_classify_false_when_its_weights_are_missing(
+    monkeypatch: Any
+) -> None:
+    """A route existing is not a capability: the module says is_available() == False."""
+    _install(monkeypatch, record={}, classify_available=False)
+    probe = worker_cli.handle({"schema_version": 1, "operation": "probe"})
+    assert probe["capabilities"]["classify"] is False
+    assert probe["capabilities"]["source_classify"] is False
+
+
+def test_probe_reports_classify_true_when_the_module_is_available(
+    monkeypatch: Any
+) -> None:
+    _install(monkeypatch, record={}, classify_available=True)
+    probe = worker_cli.handle({"schema_version": 1, "operation": "probe"})
+    assert probe["capabilities"]["classify"] is True
