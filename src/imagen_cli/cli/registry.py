@@ -120,6 +120,7 @@ COMMANDS = {
                 ("watermark video invisible", "用共享噪声场重建视频像素以破坏 SynthID 类水印"),
                 ("watermark video batch", "按目录处理视频并写入新目录；不覆盖源目录"),
                 ("watermark invisible", "用扩散重建移除不可见水印；需 GPU；超内存预算先确认"),
+                ("watermark resample", "降采样后用超分重建像素；只破坏像素统计，不证明水印已移除"),
                 ("watermark status", "报告隔离 raiw 环境、版本、能力与内存上限；不打印密钥"),
                 ("watermark setup", "预览或创建隔离 raiw 环境；需 --accept 才安装"),
                 ("watermark update", "新建并验证隔离 raiw 环境后切换；失败保留旧环境；需 --accept"),
@@ -259,6 +260,8 @@ _SUMMARY_EN = {
     "overwrites the source directory",
     "watermark invisible": "Regenerate pixels to disrupt invisible watermarks; needs a GPU; "
     "an over-budget run asks first",
+    "watermark resample": "Downscale then upscale to rebuild pixels; new artifact, and "
+    "no claim that the watermark is gone",
     "watermark status": "Report the isolated raiw environment, version, capabilities and "
     "memory limit; prints no secret",
     "watermark setup": "Preview or create the isolated raiw environment; installs only "
@@ -384,6 +387,13 @@ def _creation_schema(operation: str | None = None) -> dict[str, Any]:
     if operation is not None:
         properties["operation"] = {"const": operation}
     return schema
+
+
+def _superres_models() -> list[str]:
+    """The upscaling catalog, read lazily so importing the registry stays cheap."""
+    from imagen_cli.application.superres import MANIFEST
+
+    return sorted(MANIFEST)
 
 
 def _input_schema(name: str) -> dict[str, Any]:
@@ -641,6 +651,18 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
             "source": {"type": "boolean", "default": False},
+        }
+        required = ("artifact",)
+    elif name == "watermark resample":
+        properties = {
+            "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "model": {"enum": sorted(_superres_models()), "default": "realesrgan-x2plus"},
+            "factor": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "backend": {"enum": ["auto", "cuda", "openvino", "cpu"], "default": "auto"},
+            "tile": {"type": "integer", "minimum": 128, "default": 256},
+            "overlap": {"type": "integer", "minimum": 0, "maximum": 128, "default": 16},
+            "session": text,
+            "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         }
         required = ("artifact",)
     elif name == "watermark batch":
@@ -1400,6 +1422,15 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "remote_job": {"type": "string"},
             },
             ("report",),
+        )
+    if command.name == "watermark resample":
+        return _object(
+            {
+                "artifact": {"type": "object"},
+                "source": {"type": "string"},
+                "report": {"type": "object"},
+            },
+            ("artifact",),
         )
     if command.name in {"watermark metadata", "watermark visible", "watermark erase",
                         "watermark invisible", "watermark all"}:

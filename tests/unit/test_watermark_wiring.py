@@ -149,3 +149,47 @@ def test_setup_and_update_carry_the_requested_extras(monkeypatch, tmp_path):
     assert "remove-ai-watermarks[visible,qwen-zimage]>=0.53,<0.54" in plan["packages"]
     with pytest.raises(ValueError, match="extra"):
         watermark_service.setup(accept=False, extras="visible,../../evil")
+
+
+def test_resample_is_discoverable_with_its_own_schema():
+    schema = discover("watermark resample")["input_schema"]
+    assert schema["required"] == ["artifact"]
+    assert schema["properties"]["model"]["default"] == "realesrgan-x2plus"
+    assert "remote" not in schema["properties"]
+
+
+def test_resample_rejects_remote(tmp_path):
+    from jsonschema import ValidationError
+
+    # The schema has no `remote`, so the request dies before any work starts.
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        with pytest.raises(ValidationError):
+            container.execute("watermark resample", {
+                "artifact": ARTIFACT, "remote": "modal",
+            })
+
+
+def test_resample_carries_its_choices_into_the_local_path(tmp_path, monkeypatch):
+    from imagen_cli.application import watermark_resample
+
+    captured = {}
+
+    def fake(repositories, store, artifact, **kwargs):
+        captured.update(kwargs, artifact=artifact)
+        return "succeeded", {"artifact": {"id": "art_x"}, "source": artifact,
+                             "report": {}}
+
+    monkeypatch.setattr(watermark_resample, "run", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        status, _ = container.execute("watermark resample", {
+            "artifact": ARTIFACT, "model": "realesrgan-x2plus", "factor": 0.25,
+            "backend": "cuda", "tile": 512, "overlap": 8, "session": SESSION,
+        })
+    assert status == "succeeded"
+    assert captured["artifact"] == ARTIFACT
+    assert captured["model"] == "realesrgan-x2plus"
+    assert captured["factor"] == 0.25
+    assert captured["backend"] == "cuda"
+    assert captured["tile"] == 512
+    assert captured["overlap"] == 8
+    assert captured["session"] == SESSION

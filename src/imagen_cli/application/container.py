@@ -551,7 +551,11 @@ class Container:
         if command.startswith("watermark "):
             from jsonschema import validate
 
-            from imagen_cli.application import remote_service, watermark_service
+            from imagen_cli.application import (
+                remote_service,
+                watermark_resample,
+                watermark_service,
+            )
             from imagen_cli.application.postprocess_service import BudgetApprovalRequired
             from imagen_cli.cli.registry import discover
 
@@ -563,7 +567,7 @@ class Container:
             }
 
             def failed(error: Any) -> tuple[str, dict[str, Any]]:
-                status = failures.get(error.status, error.status)
+                status = str(failures.get(error.status, error.status))
                 return status, {"error": {"type": status, "detail": str(error)},
                                 **error.data}
 
@@ -642,6 +646,35 @@ class Container:
                 except (ValueError, watermark_service.WatermarkError) as error:
                     if isinstance(error, watermark_service.WatermarkError):
                         return failed(error)
+                    return "validation_error", {"error": {
+                        "type": "validation_error", "detail": str(error),
+                    }}
+            if command == "watermark resample":
+                if args.get("remote"):
+                    return "validation_error", {"error": {
+                        "type": "validation_error",
+                        "detail": "watermark resample runs locally; it does not accept --remote",
+                    }}
+                try:
+                    return watermark_resample.run(
+                        self.repositories, self.artifact_store, args["artifact"],
+                        session=args.get("session"),
+                        model=args.get("model", "realesrgan-x2plus"),
+                        factor=args.get("factor"),
+                        backend=args.get("backend"),
+                        tile=args.get("tile", 256),
+                        overlap=args.get("overlap", 16),
+                        budget_approval=args.get("budget_approval"),
+                        progress=self.progress,
+                    )
+                except BudgetApprovalRequired as error:
+                    return "approval_required", {
+                        "budget": error.report,
+                        "error": {"type": "approval_required", "detail": str(error)},
+                    }
+                except watermark_service.WatermarkError as error:
+                    return failed(error)
+                except ValueError as error:
                     return "validation_error", {"error": {
                         "type": "validation_error", "detail": str(error),
                     }}
