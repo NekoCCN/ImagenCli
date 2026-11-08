@@ -128,7 +128,7 @@ def _onnx_cuda_available() -> bool:
 
 def _cuda_available() -> bool:
     try:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports] - optional dependency
 
         if torch.cuda.is_available():
             return True
