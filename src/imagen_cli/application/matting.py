@@ -143,6 +143,7 @@ def _preflight(data: bytes) -> None:
 def _make_runner(
     model: str, *, backend: str | None, accept: bool,
     session_factory: Callable[..., Any] | None = None,
+    precision: str | None = None,
 ) -> tuple[Runner, dict[str, Any]]:
     numpy = _numpy()
     try:
@@ -150,12 +151,20 @@ def _make_runner(
     except ImportError as error:  # pragma: no cover - depends on the extra
         raise ValueError(_RUNTIME_MISSING) from error
     providers = _choose_providers(backend)
-    path = ensure_weights(model, accept=accept)
-    data = path.read_bytes()
-    digest = hashlib.sha256(data).hexdigest()
-    pinned = MANIFEST[model].get("sha256")
-    if pinned is not None and digest != pinned:
-        raise ValueError("weights digest mismatch")
+    if precision == "fp16":
+        from imagen_cli.application import matting_fp16
+
+        # The derivation verifies the pinned fp32 digest before it writes anything.
+        path = matting_fp16.ensure_fp16(model)[0]
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+    else:
+        path = ensure_weights(model, accept=accept)
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        pinned = MANIFEST[model].get("sha256")
+        if pinned is not None and digest != pinned:
+            raise ValueError("weights digest mismatch")
     _preflight(data)
     make_session = session_factory or onnxruntime.InferenceSession
     session = make_session(data, providers=providers)
@@ -195,7 +204,8 @@ def _make_runner(
     engine = {
         "backend": backend or actual_provider.replace("ExecutionProvider", "").lower(),
         "provider": actual_provider,
-        "dtype": "fp32",
+        "dtype": "fp16" if precision == "fp16" else "fp32",
+        "precision": "fp16" if precision == "fp16" else "fp32",
         "weights_sha256": digest,
         "input_size": side,
     }
@@ -248,24 +258,68 @@ def matte(
     accept: bool = False,
     runner: Runner | None = None,
     progress: Any = None,
+    precision: str = "auto",
 ) -> tuple[Image.Image, dict[str, Any]]:
-    """Return an RGBA copy of ``image`` with a predicted alpha channel."""
+    """Return an RGBA copy of ``image`` with a predicted alpha channel.
+
+    ``precision`` is ``auto`` (fp32, retrying once in fp16 when the card cannot
+    allocate), ``fp32`` (never falls back) or ``fp16`` (derives half precision
+    up front). An injected ``runner`` is used exactly as given.
+    """
     from imagen_cli.application.progress import current_progress, report
 
     progress = progress if progress is not None else current_progress.get()
-    numpy = _numpy()
     if model not in MANIFEST:
         raise ValueError("unknown matting model")
     if tile and (tile < 16 or not 0 <= overlap < tile):
         raise ValueError("invalid tile geometry")
-    engine: dict[str, Any] = {}
-    if runner is None:
-        report(progress, "loading_model", operation=model)
-        runner, engine = _make_runner(model, backend=backend, accept=accept)
+    if precision not in {"auto", "fp32", "fp16"}:
+        raise ValueError("precision must be auto, fp32 or fp16")
     side = int(MANIFEST[model].get("input_size", 1024))
     if tile <= 0:
         tile = side
     rgb = image.convert("RGB")
+    if runner is not None:
+        combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
+        engine: dict[str, Any] = {"precision": "injected"}
+    else:
+        report(progress, "loading_model", operation=model)
+        chosen = None if precision == "auto" else precision
+        runner, engine = _make_runner(model, backend=backend, accept=accept,
+                                      precision=chosen)
+        try:
+            combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
+        except ValueError as error:
+            # Only `auto` retries, only on an allocation failure, and only once.
+            if chosen is not None or not _is_out_of_memory(error):
+                raise
+            try:
+                runner, engine = _make_runner(model, backend=backend, accept=accept,
+                                              precision="fp16")
+                combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
+            except Exception:  # noqa: BLE001 - report the original allocation failure
+                raise error from None
+    alpha = _to_alpha(combined, rgb.size)
+    alpha = _polish(alpha, feather=feather, edge_shift=edge_shift)
+    result = rgb.convert("RGBA")
+    result.putalpha(alpha)
+    engine["tile"] = tile
+    engine["overlap"] = overlap
+    return result, engine
+
+
+def _is_out_of_memory(error: BaseException) -> bool:
+    from imagen_cli.application.superres import is_out_of_memory
+
+    return is_out_of_memory(error)
+
+
+def _tiles_to_alpha(runner: Runner, rgb: Image.Image, tile: int, overlap: int,
+                    progress: Any) -> Any:
+    """Run every tile and blend the pieces through a cosine window."""
+    from imagen_cli.application.progress import report
+
+    numpy = _numpy()
     height, width = rgb.size[1], rgb.size[0]
     accumulator = numpy.zeros((height, width), dtype=numpy.float32)
     weight = numpy.zeros((height, width), dtype=numpy.float32)
@@ -294,14 +348,7 @@ def matte(
         report(progress, "processing", completed=index, total=len(tiles),
                unit="tiles", operation="matte")
     numpy.maximum(weight, 1e-6, out=weight)
-    combined = numpy.clip(accumulator / weight, 0, 1)
-    alpha = _to_alpha(combined, rgb.size)
-    alpha = _polish(alpha, feather=feather, edge_shift=edge_shift)
-    result = rgb.convert("RGBA")
-    result.putalpha(alpha)
-    engine["tile"] = tile
-    engine["overlap"] = overlap
-    return result, engine
+    return numpy.clip(accumulator / weight, 0, 1)
 
 
 def _cosine_window(width: int, height: int, overlap: int) -> Any:
@@ -462,6 +509,8 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
         "model": None,
         "weights_verified": False,
         "inference": False,
+        "precision_used": None,
+        "fp16_cached": False,
         "latency_ms": None,
         "output_sha256": None,
         "status": "ready" if used else "missing",
@@ -481,6 +530,8 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
                 "no ONNX provider is available; run: imagen matting install --backend cpu --accept"
             )
         return data
+    from imagen_cli.application import matting_fp16
+
     selected = model
     if selected is None:
         for name in sorted(MANIFEST):
@@ -490,6 +541,9 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
     elif selected not in MANIFEST:
         raise ValueError("unknown matting model")
     data["model"] = selected
+    data["fp16_cached"] = bool(selected) and matting_fp16.derived_path(
+        str(selected)
+    ).is_file()
     if selected is None:
         data["hint"] = "no downloaded weights; run: imagen matting install --model NAME --accept"
         return data
@@ -512,11 +566,16 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
         data["backend"] = None
         data["provider_used"] = None
         data["missing"] = [_backend_provider(used)]
-        data["hint"] = str(error)
+        data["hint"] = (
+            str(error) + "; on a small card try --precision fp16, which derives a "
+            "half-precision copy, or use the cpu backend"
+            if _is_out_of_memory(error) else str(error)
+        )
         return data
     data["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     data["weights_verified"] = True
     data["inference"] = True
+    data["precision_used"] = engine.get("precision")
     data["provider_used"] = engine.get("provider", data["provider_used"])
     data["weights_sha256"] = engine.get("weights_sha256")
     data["output_sha256"] = hashlib.sha256(_output.tobytes()).hexdigest()
