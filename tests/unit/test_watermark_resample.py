@@ -147,3 +147,16 @@ def test_resample_requires_the_budget_digest_when_too_large(published, monkeypat
         model="realesrgan-x2plus", runner=_doubler, budget_approval=digest,
     )
     assert data["report"]["budget_approval"] == digest
+
+
+@pytest.mark.cuda
+def test_resample_runs_on_the_cuda_provider(published):
+    container, _, _, source = published
+    status, data = watermark_resample.run(
+        container.repositories, container.artifact_store, source.id,
+        model="realesrgan-x2plus", backend="cuda",
+    )
+    assert status == "succeeded"
+    assert data["report"]["engine"]["provider"] == "CUDAExecutionProvider"
+    plan = data["report"]["plan"]
+    assert plan["output_size"] == plan["input_size"]
