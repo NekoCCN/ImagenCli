@@ -392,7 +392,8 @@ def test_poll_timeout_keeps_the_job_id(monkeypatch):
 
     monkeypatch.setattr(remote_service.time, "monotonic", monotonic)
     monkeypatch.setattr(remote_service.time, "sleep", lambda seconds: None)
-    payload = remote_service._poll(Client(), JOB, 5)
+    # Deliberate duck-typed double: _poll only calls get().
+    payload = remote_service._poll(Client(), JOB, 5)  # pyright: ignore[reportArgumentType]
     assert payload["status"] == "unknown"
     assert payload["job_id"] == JOB
 
@@ -526,7 +527,10 @@ def test_matte_is_refused_before_upload_when_the_worker_cannot_do_it(monkeypatch
             raise AssertionError("the source must not be read before the refusal")
 
     with pytest.raises(ValueError, match="capabilities.matte"):
-        rs.run_operation(Repos(), Store(), "art_x", "worker", "matte")
+        # Deliberate doubles: the refusal must happen before either is used.
+        rs.run_operation(
+            Repos(), Store(), "art_x", "worker", "matte",  # pyright: ignore[reportArgumentType]
+        )
 
 
 def test_classify_returns_a_report_and_publishes_nothing(remote, published):
