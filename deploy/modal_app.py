@@ -56,7 +56,12 @@ image = (
         "/usr/local/lib/python3.12/site-packages/imagen_cli/application/matting_fp16.py",
         copy=True,
     )
-    .env({"IMAGEN_MODAL_GPU": GPU})
+    # Overridable so an acceptance run can force the inline, bounded state mode.
+    .env({
+        "IMAGEN_MODAL_GPU": GPU,
+        **({"IMAGEN_WORKER_STATE_MODE": os.environ["IMAGEN_WORKER_STATE_MODE"]}
+           if os.environ.get("IMAGEN_WORKER_STATE_MODE") else {}),
+    })
 )
 app = modal.App("imagen-worker")
 
