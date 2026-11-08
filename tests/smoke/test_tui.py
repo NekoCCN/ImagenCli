@@ -1688,7 +1688,7 @@ def test_superres_screen_lists_every_local_model_family(deps, monkeypatch, tmp_p
 
     deps_value, _ = deps
     expected = catalog()["models"]
-    matting_models = matting.catalog()["models"]
+    matting_models = matting.catalog(include_api=False)["models"]
 
     async def run():
         app = WorkbenchApp(deps_value)

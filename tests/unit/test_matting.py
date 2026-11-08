@@ -529,3 +529,51 @@ def test_matting_run_parses_precision_from_argv():
     assert command == "matting run"
     assert isinstance(raw, dict)
     assert raw["precision"] == "fp16"
+
+
+def test_catalog_lists_local_and_api_families(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
+    report = matting.catalog()
+    local = [row for row in report["models"] if row["backend"] == "local"]
+    api = [row for row in report["models"] if row["backend"] == "api:replicate"]
+    assert {row["model"] for row in local} == set(matting.MANIFEST)
+    assert "sprited/birefnet-toonout" in {row["model"] for row in api}
+    # A hosted model has no weight file, so weight-only fields must stay absent.
+    for row in api:
+        assert "downloadable" not in row
+        assert "sha256" not in row
+        assert row["cost_note"]
+        assert row["available"] is True
+
+
+def test_catalog_reports_api_unavailable_without_a_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
+    monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+    api = [row for row in matting.catalog()["models"]
+           if row["backend"] == "api:replicate"]
+    assert api and all(row["available"] is False for row in api)
+
+
+def test_doctor_reports_api_readiness_without_network(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
+    report = matting.doctor("sprited/birefnet-toonout")
+    assert report["backend"] == "api:replicate"
+    assert report["api_key_ready"] is True
+    assert report["status"] == "ready"
+    assert report["inference"] is False
+
+
+def test_doctor_flags_missing_key_for_an_api_model(monkeypatch):
+    monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+    report = matting.doctor("sprited/birefnet-toonout")
+    assert report["api_key_ready"] is False
+    assert report["status"] == "unsupported_capability"
+    assert "REPLICATE_API_TOKEN" in report["hint"]
+
+
+def test_doctor_flags_the_video_stub(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
+    report = matting.doctor("sprited/birefnet-video")
+    assert report["implemented"] is False
+    assert report["status"] == "unsupported_capability"

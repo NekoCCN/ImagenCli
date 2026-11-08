@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -404,14 +405,41 @@ def backend_report() -> dict[str, Any]:
     }
 
 
-def catalog(*, verify: bool = False) -> dict[str, Any]:
+def _api_ready() -> bool:
+    """A missing token is reported, never guessed at; no request is made here."""
+    return bool(os.environ.get("REPLICATE_API_TOKEN", "").strip())
+
+
+def catalog(*, verify: bool = False, include_api: bool = True) -> dict[str, Any]:
+    import imagen_cli.application.matting_api as matting_api
+
     models = []
     for name, entry in sorted(MANIFEST.items()):
         row = entry_row(name, entry, verify=verify)
         row["task"] = "matting"
         # Matting keeps the source dimensions; the column exists for both families.
         row["scale"] = 1
+        row["backend"] = "local"
         models.append(row)
+    # Hosted API models sit in the same listing so nobody mistakes one family for all.
+    # The weight panels pass include_api=False: a hosted model has no file to manage.
+    for name, entry in sorted(matting_api.MODELS.items()) if include_api else ():
+        models.append({
+            "model": name,
+            "task": "matting",
+            "category": entry["category"],
+            "usage": entry["note"],
+            "license": entry["license"],
+            "source": entry["source"],
+            "note": entry["note"],
+            "backend": "api:replicate",
+            "available": _api_ready(),
+            "implemented": entry["implemented"],
+            "billing": entry["billing"],
+            "cost_note": entry["cost_note"],
+            "version": entry["version"],
+            "scale": 1,
+        })
     return {**backend_report(), "models": models, "verified": verify}
 
 
@@ -505,6 +533,33 @@ def install(
 
 def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]:
     """Prove the requested backend with one tile; never downloads or saves an artifact."""
+    import imagen_cli.application.matting_api as matting_api
+
+    if model is not None and "/" in model:
+        entry = matting_api.MODELS.get(model)
+        if entry is None:
+            raise ValueError("unknown matting model")
+        ready = _api_ready()
+        return {
+            "model": model,
+            "task": "matting",
+            "backend": "api:replicate",
+            "license": entry["license"],
+            "source": entry["source"],
+            "version": entry["version"],
+            "billing": entry["billing"],
+            "cost_note": entry["cost_note"],
+            "implemented": entry["implemented"],
+            "api_key_ready": ready,
+            "inference": False,
+            "status": "ready" if ready and entry["implemented"]
+            else "unsupported_capability",
+            "hint": None if ready and entry["implemented"] else (
+                "this model is listed but not implemented" if not entry["implemented"]
+                else "set REPLICATE_API_TOKEN in this shell to use hosted matting"
+            ),
+        }
+
     from imagen_cli.application.superres import (
         _backend_provider,
         _doctor_backend,

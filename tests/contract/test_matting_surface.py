@@ -85,9 +85,11 @@ def test_tui_panel_reads_the_same_two_catalogs():
     """The panel is the CLI catalog plus the matting catalog, not a third list."""
     from imagen_cli.cli.tui.app import _family_cell, _weights_cells
 
+    # The panel manages local weights, so it lists exactly the local rows; hosted
+    # API models have no file to install and are surfaced by `matting models`.
     expected = [
         *((row, "superres") for row in superres.catalog()["models"]),
-        *((row, "matting") for row in matting.catalog()["models"]),
+        *((row, "matting") for row in matting.catalog(include_api=False)["models"]),
     ]
     rendered = []
     for row, family in expected:

@@ -1007,9 +1007,11 @@ class ParamEditScreen(Modal[list[dict[str, Any]] | None]):
                         type(val) is type(option) and val == option for option in meta.choices
                     ):
                         raise ValueError(t("choose a valid value", "请选择有效值"))
-                    if meta.min_value is not None and val < meta.min_value:
+                    if (isinstance(val, (int, float)) and not isinstance(val, bool)
+                            and meta.min_value is not None and val < meta.min_value):
                         raise ValueError(f">= {meta.min_value}")
-                    if meta.max_value is not None and val > meta.max_value:
+                    if (isinstance(val, (int, float)) and not isinstance(val, bool)
+                            and meta.max_value is not None and val > meta.max_value):
                         raise ValueError(f"<= {meta.max_value}")
                 if inp.value != initial:
                     new_pipeline[step_idx].setdefault("params", {})[k] = val
@@ -1693,7 +1695,7 @@ class SuperresScreen(Modal[bool]):
 
     def refresh_rows(self) -> None:
         report = superres.catalog()
-        matting_report = matting.catalog()
+        matting_report = matting.catalog(include_api=False)
         self.rows = [
             *((row, "superres") for row in report["models"]),
             *((row, "matting") for row in matting_report["models"]),
