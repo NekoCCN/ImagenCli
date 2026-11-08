@@ -203,3 +203,43 @@ def test_error_text_scrubs_credentials():
 def test_data_uri_round_trips_payload():
     uri = replicate.data_uri(b"abc", media_type="image/webp")
     assert uri == "data:image/webp;base64,YWJj"
+
+
+def test_throttled_submission_waits_for_retry_after():
+    """New accounts allow 6 predictions a minute: one 429 must not fail the run."""
+    calls = {"count": 0}
+    slept: list[float] = []
+
+    def throttled(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429, headers={"retry-after": "3"},
+                                  json={"detail": "throttled"})
+        return httpx.Response(201, json={"id": "p9", "status": "starting"})
+
+    routes: dict[tuple[str, str], Route] = {
+        ("POST", "/v1/predictions"): throttled,
+        ("GET", "/v1/predictions/p9"): httpx.Response(
+            200, json={"id": "p9", "status": "succeeded", "output": ["https://x/o.png"]}
+        ),
+    }
+    result = replicate.predict(
+        "o/m", {}, token="t", version="v1", transport=_router(routes),
+        timeout=60.0, sleep=slept.append,
+    )
+    assert calls["count"] == 2
+    assert slept[0] == 3.0
+    assert result.output == ("https://x/o.png",)
+
+
+def test_throttling_gives_up_when_the_budget_runs_out():
+    routes: dict[tuple[str, str], Route] = {
+        ("POST", "/v1/predictions"): httpx.Response(
+            429, headers={"retry-after": "60"}, json={"detail": "throttled"}),
+    }
+    with pytest.raises(replicate.ReplicateError) as caught:
+        replicate.predict(
+            "o/m", {}, token="t", version="v1", transport=_router(routes),
+            timeout=30.0, sleep=lambda _s: None,
+        )
+    assert caught.value.kind == "rate_limited"

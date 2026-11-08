@@ -32,6 +32,9 @@ _TERMINAL = frozenset({"succeeded", "failed", "canceled"})
 _PENDING = frozenset({"starting", "processing"})
 
 # Bounded on purpose: an unbounded tail lets a crafted error body backtrack.
+#: How many throttled submissions to retry before giving up.
+_RATE_LIMIT_RETRIES = 5
+
 _SECRET = re.compile(r"(?:r8_|sk-)[A-Za-z0-9_-]{1,256}")
 
 
@@ -46,10 +49,12 @@ class ReplicateError(Exception):
     ``rate_limited``, ``timeout``, ``canceled``, ``failed``.
     """
 
-    def __init__(self, kind: str, detail: str, *, retriable: bool = False) -> None:
+    def __init__(self, kind: str, detail: str, *, retriable: bool = False,
+                 retry_after: float | None = None) -> None:
         self.kind = kind
         self.detail = _scrub(detail)
         self.retriable = retriable
+        self.retry_after = retry_after
         super().__init__(f"{kind}: {self.detail}")
 
 
@@ -77,14 +82,25 @@ def _normalize_output(value: Any) -> tuple[str, ...]:
     return (str(value),)
 
 
-def _map_status(code: int, body: str) -> ReplicateError:
+def _retry_after(response: httpx.Response) -> float | None:
+    header = response.headers.get("retry-after")
+    if header is None:
+        return None
+    try:
+        return max(0.0, float(header))
+    except ValueError:
+        return None
+
+
+def _map_status(code: int, body: str, response: httpx.Response | None = None) -> ReplicateError:
     detail = _scrub(body)[:400] or f"HTTP {code}"
     if code in (401, 403):
         return ReplicateError("authentication_error", detail)
     if code == 402:
         return ReplicateError("insufficient_credit", detail)
     if code == 429:
-        return ReplicateError("rate_limited", detail, retriable=True)
+        return ReplicateError("rate_limited", detail, retriable=True,
+                              retry_after=_retry_after(response) if response else None)
     return ReplicateError("failed", detail, retriable=code >= 500)
 
 
@@ -109,7 +125,7 @@ def _submit(client: httpx.Client, model: str, version: str | None,
         response = client.post(f"/v1/models/{model}/predictions",
                                json={"input": dict(inputs)})
     if response.status_code >= 400:
-        raise _map_status(response.status_code, response.text)
+        raise _map_status(response.status_code, response.text, response)
     return dict(response.json())
 
 
@@ -140,13 +156,28 @@ def predict(
     ``timeout`` bounds the total time spent waiting, not a single HTTP request.
     """
     with _client(token, transport) as client:
-        submitted = _to_prediction(_submit(client, model, version, inputs))
+        # New accounts are throttled hard (6 predictions/minute), so a single 429
+        # must not end the request: wait out Retry-After inside the same budget.
+        waited = 0.0
+        attempts = 0
+        while True:
+            try:
+                submitted = _to_prediction(_submit(client, model, version, inputs))
+                break
+            except ReplicateError as error:
+                if error.kind != "rate_limited" or attempts >= _RATE_LIMIT_RETRIES:
+                    raise
+                delay = error.retry_after if error.retry_after is not None else poll_max
+                if waited + delay > timeout:
+                    raise
+                sleep(delay)
+                waited += delay
+                attempts += 1
         if not submitted.id:
             raise ReplicateError("failed", "prediction has no id")
         if submitted.status in _TERMINAL:
             return _finish(submitted)
 
-        waited = 0.0
         interval = poll_interval
         while True:
             if waited + interval > timeout:

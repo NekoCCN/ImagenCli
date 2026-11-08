@@ -70,7 +70,7 @@ MODELS: dict[str, dict[str, Any]] = {
         "note": "Official variant set; this command always uses variant=general, "
                 "precision=fp32, output_format=cutout",
         "implemented": True,
-        "version": None,
+        "version": "21f2c4a9159af128ab9b9126401eebe7f8c5310841ed628b74a4c462df00da67",
         "parameter_style": "mask",
         "parameters": {
             "resolution": {"type": "integer", "minimum": 512, "maximum": 2048,
@@ -91,7 +91,7 @@ MODELS: dict[str, dict[str, Any]] = {
         "source": "https://replicate.com/men1scus/birefnet",
         "note": "The most-used BiRefNet packaging; takes 'WIDTHxHEIGHT' resolution",
         "implemented": True,
-        "version": None,
+        "version": "f74986db0355b58403ed20963af156525e2891ea3c2d499bfbfb2a28cd87c5d7",
         "parameter_style": "resolution_label",
         "parameters": {
             "resolution": {"type": "integer", "minimum": 512, "maximum": 2048,
@@ -108,7 +108,7 @@ MODELS: dict[str, dict[str, Any]] = {
         "note": "Portrait-tuned BiRefNet; only the image is sent, the model's own "
                 "defaults decide masks and sizing",
         "implemented": True,
-        "version": None,
+        "version": "67e9d8d9e625ad68308740f5a0ed2b7dd1b5a94daa6c46eca1d08ea9313f4486",
         "parameter_style": "none",
         "parameters": {},
         "billing": "per-run",

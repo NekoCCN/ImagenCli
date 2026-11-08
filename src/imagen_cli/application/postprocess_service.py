@@ -311,12 +311,15 @@ def check_budget(
             elif name in {"pad", "perspective"}:
                 width, height = target_width or width, target_height or height
             elif target_width is not None or target_height is not None:
-                width, height = (
-                    target_width if target_width is not None
-                    else round(width * target_height / height),
-                    target_height if target_height is not None
-                    else round(height * target_width / width),
-                )
+                # At least one dimension is given; the other keeps the aspect ratio.
+                # Non-integer dimensions were rejected above, so int() is exact here.
+                new_width = target_width if isinstance(target_width, int) else None
+                new_height = target_height if isinstance(target_height, int) else None
+                if new_width is None:
+                    new_width = round(width * (new_height or 0) / height)
+                if new_height is None:
+                    new_height = round(height * new_width / width)
+                width, height = new_width, new_height
         elif name in {"block_scale", "scale2x"}:
             factor = params.get("factor", 2)
             if type(factor) is not int or factor <= 0:
