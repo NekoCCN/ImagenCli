@@ -85,6 +85,12 @@ mypy_path = "src"
 strict = true
 plugins = ["pydantic.mypy"]
 
+# Optional runtime packages that ship no stubs; the absence of the extra must not
+# change whether `mypy src` passes.
+[[tool.mypy.overrides]]
+module = ["onnxconverter_common.*", "onnx.*", "onnxruntime.*"]
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = ["onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "torch", "torch.*", "keyring",
           "remove_ai_watermarks", "remove_ai_watermarks.*", "modal", "modal.*"]

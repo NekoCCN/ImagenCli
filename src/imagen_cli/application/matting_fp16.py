@@ -74,7 +74,7 @@ def _default_convert(source: Path, target: Path) -> None:
     try:
         # Optional ai-onnx extra: absent images run fp32 instead.
         import onnx  # pyright: ignore[reportMissingImports]
-        from onnxconverter_common import float16  # type: ignore[import-not-found]
+        from onnxconverter_common import float16
     except ImportError as error:
         raise UnsupportedInThisImage(
             "fp16 derivation needs onnxconverter-common and onnx; this image runs "
@@ -106,11 +106,12 @@ def ensure_fp16(
             cached = None
         # The derived digest is part of the fingerprint: a truncated or edited
         # copy re-derives instead of becoming a permanent, unfixable cache hit.
-        if isinstance(cached, dict) and cached.get("source_sha256") == digest and all(
-            cached.get(key) == value for key, value in _fingerprint().items()
-        ) and cached.get("derived_sha256") == hashlib.sha256(
-            derived.read_bytes()
-        ).hexdigest():
+        if (
+            isinstance(cached, dict)
+            and cached.get("source_sha256") == digest
+            and all(cached.get(key) == value for key, value in _fingerprint().items())
+            and cached.get("derived_sha256") == hashlib.sha256(derived.read_bytes()).hexdigest()
+        ):
             return derived, {"derived": False, "fingerprint": cached}
 
     convert = convert or _default_convert
@@ -132,6 +133,5 @@ def ensure_fp16(
         "derived_sha256": hashlib.sha256(derived.read_bytes()).hexdigest(),
         **_fingerprint(),
     }
-    fingerprint_file.write_text(json.dumps(wanted, sort_keys=True, indent=2),
-                                encoding="utf-8")
+    fingerprint_file.write_text(json.dumps(wanted, sort_keys=True, indent=2), encoding="utf-8")
     return derived, {"derived": True, "fingerprint": wanted}
