@@ -834,7 +834,7 @@ class Container:
                         accept_api=args.get("accept_api"),
                         key_ref=str(args.get("replicate_key_ref")
                                    or "env:REPLICATE_API_TOKEN"),
-                        timeout=float(args.get("timeout") or 300),
+                        timeout=float(args.get("timeout") or 900),
                     )
                 matting_params: dict[str, Any] = {
                     key: args[key] for key in

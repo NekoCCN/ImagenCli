@@ -68,6 +68,8 @@ def test_api_model_routes_to_the_api_path(tmp_path, monkeypatch):
     assert captured["resolution"] == 1024
     assert captured["accept_api"] == "b" * 64
     assert captured["key_ref"] == "env:REPLICATE_API_TOKEN"
+    # The schema default is 900s; a vendor queue must not be cut at 300.
+    assert captured["timeout"] == 900.0
 
 
 def test_local_model_still_uses_the_local_pipeline(tmp_path, monkeypatch):
