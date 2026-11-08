@@ -546,6 +546,15 @@ Non-commercial weights are deliberately absent from the catalog. Bria RMBG-2.0, 
 
 `--tile 0` runs the whole image in one pass; a positive value splits large images, and `--overlap` keeps tile seams out of hair edges. `--feather` blurs the alpha and `--edge-shift` moves the apparent boundary; both default to `0`.
 
+On a GPU with little memory the graph's fixed 1024x1024 input can fail to allocate
+in fp32; a 4 GB card cannot. `--precision auto` runs fp32 first and, on an
+allocation failure, derives a half-precision copy of the pinned weights, caches it
+beside them, and retries once. `--precision fp16` goes straight to that path and
+`--precision fp32` never falls back. Measured on an RTX 2050: fp32 fails on an
+822 MB allocation, fp16 runs, and the alpha differs from the CPU fp32 reference by
+at most 3/255 (mean 0.034/255). `imagen matting doctor` reports `precision_used`
+and `fp16_cached`.
+
 A matte is a prediction, not a guarantee. Thin strands, glass and semi-transparent material can be judged wrong, and an inaccurate matte leaves background colour on the edge.
 
 Run upscaling or same-size restoration through the dedicated model-processing command:
@@ -617,6 +626,27 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `all` runs visible, invisible, and metadata removal in order. It needs the same license confirmation and GPU as `invisible`; when the invisible stage has no signal or no GPU it is skipped and the other stages still run.
 - Each pipeline carries its own license (`qwen-zimage`, `qwen21-zimage`, `sdxl-zimage`, `chroma-zimage`); the default is `sdxl-zimage`, the smallest stack. Review it before `--accept-license`. A run estimated above the memory cap returns `approval_required` with a budget digest; repeat the identical command with `--budget-approval DIGEST`.
 - `watermark setup --accept` creates the isolated environment with the `visible` extra. Add the extras you need, such as `--extras visible,qwen-zimage` for invisible work, `--extras visible,classify,source-classify` for classification, or `--extras visible,video,diffusion` for video, then restart Imagen. `watermark update --accept` builds and probes a new one, then switches; a failed update keeps the previous environment.
+
+### Downscale, then upscale
+
+```bash
+imagen superres fetch --model realesrgan-x2plus --accept
+imagen watermark resample ARTIFACT_ID --model realesrgan-x2plus
+imagen watermark resample ARTIFACT_ID --backend cuda --factor 0.25
+```
+
+`resample` shrinks the image, then rebuilds it with a super-resolution model. That
+rewrites pixel statistics, so it attacks pixel-level watermarks rather than a
+verifiable signal: **Imagen makes no claim that the watermark is gone**, and the
+report always carries `verified: false`.
+
+It runs in-process and needs no `remove-ai-watermarks` environment, no diffusion
+model, and no license confirmation beyond the weights you already fetched. Missing
+weights are reported with the `imagen superres fetch --model NAME --accept` command
+to run. `--factor` defaults to `1/scale`, so the output keeps the source size; pass
+it explicitly to change that, and the report always lists `input_size`,
+`intermediate_size` and `output_size` so the change is never silent. `--backend
+cuda` uses the GPU and reports the provider that actually ran.
 
 ### Video
 

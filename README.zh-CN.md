@@ -544,6 +544,8 @@ imagen transform ARTIFACT_ID --preset '抠图贴纸 (Cutout Sticker)'
 
 `--tile 0` 表示整图一次推理；给正数则对大图分块，`--overlap` 避免接缝落在发丝上。`--feather` 羽化 alpha，`--edge-shift` 移动视觉边界，两者默认都是 `0`。
 
+显存小的卡上，模型固定的 1024×1024 输入在 fp32 下可能直接分配失败（4 GB 卡就是如此）。`--precision auto` 先用 fp32，遇到分配失败就把已校验的权重派生一份半精度副本、缓存在旁边，然后重试一次；`--precision fp16` 直接走这条路，`--precision fp32` 永不回退。RTX 2050 实测：fp32 在 822 MB 分配上失败、fp16 可用，而与 CPU fp32 参照相比 alpha 最大只差 3/255（平均 0.034/255）。`imagen matting doctor` 会报告 `precision_used` 与 `fp16_cached`。
+
 抠图是预测而非保证：极细发丝、玻璃与半透明材质可能判断错误，抠得不准时边缘会残留原背景颜色。
 
 超分、原尺寸降噪与 JPEG 伪影清理使用独立模型处理命令：
@@ -613,6 +615,18 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `all` 依次执行可见、不可见与元数据移除。它和 `invisible` 一样需要许可证确认与 GPU；不可见阶段没有信号或没有 GPU 时会跳过，其余阶段照常运行。
 - 每条管线有各自的许可（`qwen-zimage`、`qwen21-zimage`、`sdxl-zimage`、`chroma-zimage`）；默认是 `sdxl-zimage`，模型栈最小。审阅后再加 `--accept-license`。预计超出内存上限时返回 `approval_required` 与预算摘要；用同一命令加 `--budget-approval DIGEST` 重跑。
 - `watermark setup --accept` 用 `visible` extra 创建隔离环境。按需追加 extra，例如不可见处理用 `--extras visible,qwen-zimage`，分类用 `--extras visible,classify,source-classify`，视频用 `--extras visible,video,diffusion`，然后重启 Imagen。`watermark update --accept` 构建并验证新环境后再切换；更新失败会保留旧环境。
+
+### 先降采样再超分
+
+```bash
+imagen superres fetch --model realesrgan-x2plus --accept
+imagen watermark resample ARTIFACT_ID --model realesrgan-x2plus
+imagen watermark resample ARTIFACT_ID --backend cuda --factor 0.25
+```
+
+`resample` 先把图缩小，再用超分模型重建。它改写的是像素统计，不是可被验证的信号：**Imagen 不声称水印已被移除**，报告里始终带 `verified: false`。
+
+它在主进程内运行，不需要 `remove-ai-watermarks` 环境、不需要扩散模型，也不需要额外的许可证确认（权重在你执行 `superres fetch --accept` 时已经确认过）。权重缺失时会直接给出该执行的 `imagen superres fetch --model 名称 --accept`。`--factor` 默认 `1/scale`，因此输出与源保持同尺寸；要改变尺寸就显式指定，报告里始终列出 `input_size`、`intermediate_size`、`output_size`，不会静默变尺寸。`--backend cuda` 会用 GPU，并报告真正生效的 provider。
 
 ### 视频
 

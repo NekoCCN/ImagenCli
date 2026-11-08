@@ -224,3 +224,34 @@ curl -fsS -H "Authorization: Bearer $IMAGEN_WORKER_TOKEN" "$ENDPOINT/v1/meta"
 `/readyz` returns non-200 until the jobs directory exists (Modal volume or the
 container's `/jobs`). `/v1/meta` reports `state_mode`, `gpu`, `raiw_version`,
 `max_attempts` and the worker digest.
+
+## Acceptance run against a real endpoint
+
+Layer 1 (offline contract tests, `tests/fault/test_worker_watermark_contract.py`)
+proves the parameter translation without a network. This section is the one-time
+real-GPU acceptance. Run it after layer 1 is green, and expect it to cost money.
+
+1. Environment: `IMAGEN_WORKER_IMAGE` (the tag you built), `IMAGEN_MODAL_GPU=L4`,
+   and the `imagen-worker-auth` secret holding `IMAGEN_WORKER_TOKEN`.
+2. `modal deploy deploy/modal_app.py` — the image overlays `deploy/worker/app.py`,
+   `src/imagen_cli/remote/worker_cli.py` and `src/imagen_cli/application/matting.py`,
+   so the run exercises the checked-out code, not only what the base image baked in.
+3. Register the endpoint without printing the token:
+
+   ```bash
+   imagen remote add --name modal --endpoint "$ENDPOINT" --credential-ref env:IMAGEN_WORKER_TOKEN
+   ```
+
+4. The first submission returns `approval_required` with a `job_digest`. Rerun the
+   same command with `--accept-remote DIGEST`. This two-phase step is what records
+   consent for uploading the image; doing it once per distinct payload is expected.
+5. Run the operations in this order and record `status`, elapsed time, `raiw_version`
+   and the output `sha256` for each: `watermark identify`, `watermark metadata --remove`,
+   `watermark visible`, `watermark erase --region ...`, `watermark classify`,
+   `watermark invisible`, `watermark all`, then `matting run --remote modal --backend cuda`.
+6. Pass criteria: every sync operation returns `succeeded`; `invisible` and `all`
+   return `succeeded` through the async path; `raiw_version` is `0.53.0`;
+   `visible` and `all` report at least one mark; every output `sha256` differs from
+   the source; the matte artifact has an alpha channel.
+7. Stop at the first failure. Keep the raw JSON, do not retry, and do not add more
+   requests: each retry is billed. Target under $0.50 for the whole run.
