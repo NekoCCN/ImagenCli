@@ -457,3 +457,27 @@ def _wait(client, job_id):
             return record
         time.sleep(0.02)
     return record
+
+
+def test_matte_reports_an_unsupported_precision_by_name(tmp_path, monkeypatch):
+    import types
+
+    from imagen_cli.application import matting_fp16
+
+    fake_runtime = types.ModuleType("onnxruntime")
+    fake_runtime.InferenceSession = object  # type: ignore[attr-defined]
+    fake_runtime.get_available_providers = lambda: ["CPUExecutionProvider"]  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_runtime)
+
+    def unsupported(model):
+        raise matting_fp16.UnsupportedInThisImage("no onnxconverter-common here")
+
+    monkeypatch.setattr(matting_fp16, "ensure_fp16", unsupported)
+    source = tmp_path / "in.png"
+    source.write_bytes(_png())
+    response = worker_cli.handle({
+        "schema_version": 1, "operation": "matte", "input": str(source),
+        "output": str(tmp_path / "out.png"), "params": {"precision": "fp16"},
+    })
+    assert response["status"] == "failed"
+    assert response["error"]["type"] == "unsupported_in_this_image"

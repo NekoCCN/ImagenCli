@@ -549,3 +549,22 @@ def test_classify_returns_a_report_and_publishes_nothing(remote, published):
     assert data["report"] == {"status": "cleaned"}
     assert "artifact" not in data
     assert len(container.repositories.list("artifacts")) == before
+
+
+def test_a_failed_read_only_job_is_not_reported_as_success(remote, published, monkeypatch):
+    container, source = published
+    remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
+    approved = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "watermark.classify", params={"source": False},
+    )[1]["job_digest"]
+    monkeypatch.setattr(remote_service, "_submit", lambda *args, **kwargs: {
+        "status": "failed",
+        "error": {"type": "RuntimeError", "message": "the worker blew up"},
+    })
+    status, data = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "watermark.classify", accept_remote=approved, params={"source": False},
+    )
+    assert status == "failed"
+    assert data["error"]["type"] == "RuntimeError"

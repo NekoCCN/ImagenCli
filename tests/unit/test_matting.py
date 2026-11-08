@@ -394,3 +394,83 @@ def test_matting_cuda_without_a_provider_names_the_install_command(monkeypatch):
     monkeypatch.setattr(matting, "ensure_weights", lambda model, accept=False: None)
     with pytest.raises(ValueError, match="install --backend cuda"):
         matting._require_provider(Session(), "cuda")
+
+
+def test_the_matte_op_accepts_precision():
+    from imagen_cli.application.postprocess_service import validate
+
+    steps = validate([{"op": "matte", "params": {"model": "birefnet-lite",
+                                                "precision": "fp16"}}])
+    assert steps[0]["params"]["precision"] == "fp16"
+
+
+def test_doctor_reports_a_broken_provider_instead_of_raising(monkeypatch):
+    from imagen_cli.application import matting
+    from imagen_cli.application.superres import ProviderUnavailable
+
+    monkeypatch.setattr(
+        matting, "available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+
+    def fail(*args, **kwargs):
+        raise ProviderUnavailable(
+            "backend cuda was requested but the session is using CPUExecutionProvider"
+        )
+
+    monkeypatch.setattr(matting, "_make_runner", fail)
+    report = matting.doctor(backend="cuda")
+    assert report["status"] == "missing"
+    assert "install --backend cuda" in report["hint"]
+
+
+def test_doctor_turns_an_allocation_failure_into_a_fp16_hint(monkeypatch):
+    from imagen_cli.application import matting
+
+    monkeypatch.setattr(
+        matting, "available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+
+    def fail(*args, **kwargs):
+        raise ValueError("backend cuda ran out of memory while running the model")
+
+    monkeypatch.setattr(matting, "_make_runner", fail)
+    report = matting.doctor(backend="cuda")
+    assert report["status"] == "missing"
+    assert "precision fp16" in report["hint"]
+
+
+def test_auto_retries_when_the_session_cannot_allocate(monkeypatch, tmp_path):
+    from imagen_cli.application import matting, superres
+
+    weights = tmp_path / "stub.onnx"
+    weights.write_bytes(b"stub")
+    import sys
+    import types
+
+    fake_runtime = types.ModuleType("onnxruntime")
+    fake_runtime.InferenceSession = object  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_runtime)
+    monkeypatch.setattr(matting, "ensure_weights", lambda model, accept=False: weights)
+    monkeypatch.setattr(matting, "_preflight", lambda data: None)
+    monkeypatch.setattr(matting, "_choose_providers", lambda backend: ["CPUExecutionProvider"])
+    monkeypatch.setitem(matting.MANIFEST, "stub", {
+        "sha256": None, "input_size": 8, "mean": (0, 0, 0), "std": (1, 1, 1),
+    })
+    monkeypatch.setattr(matting, "_require_provider", lambda session, backend: None)
+    from imagen_cli.application import matting_fp16
+
+    monkeypatch.setattr(matting_fp16, "ensure_fp16", lambda model: (weights, {"derived": False}))
+    opened = []
+
+    def failing_session(factory, data, *, providers, backend):
+        opened.append(backend)
+        raise ValueError(
+            f"backend {backend or 'auto'} ran out of memory while loading the model"
+        )
+
+    monkeypatch.setattr(superres, "_open_session", failing_session)
+    with pytest.raises(ValueError, match="out of memory"):
+        matting.matte(Image.new("RGB", (8, 8)), model="stub", backend="cuda")
+    assert len(opened) == 2

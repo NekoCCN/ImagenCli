@@ -98,6 +98,10 @@ def _matting_ready() -> bool:
         return False
 
 
+class UnsupportedPrecision(RuntimeError):
+    """This image cannot derive fp16 weights; the client must ask for fp32."""
+
+
 def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]:
     from PIL import Image
 
@@ -106,19 +110,24 @@ def _matte(source: Path, output: Path, params: dict[str, Any]) -> dict[str, Any]
     model = str(params.get("model", "birefnet-lite"))
     if model not in matting.MANIFEST:
         raise ValueError(f"unknown matting model: {model}")
+    from imagen_cli.application.matting_fp16 import UnsupportedInThisImage
+
     with Image.open(source) as opened:
         opened.load()
-        result, engine = matting.matte(
-            opened,
-            model=model,
-            backend=params.get("backend"),
-            tile=int(params.get("tile") or 0),
-            overlap=int(params.get("overlap") or 64),
-            feather=int(params.get("feather") or 0),
-            edge_shift=float(params.get("edge_shift") or 0.0),
-            accept=False,
-            precision=str(params.get("precision") or "auto"),
-        )
+        try:
+            result, engine = matting.matte(
+                opened,
+                model=model,
+                backend=params.get("backend"),
+                tile=int(params.get("tile") or 0),
+                overlap=int(params.get("overlap") or 64),
+                feather=int(params.get("feather") or 0),
+                edge_shift=float(params.get("edge_shift") or 0.0),
+                accept=False,
+                precision=str(params.get("precision") or "auto"),
+            )
+        except UnsupportedInThisImage as error:
+            raise UnsupportedPrecision(str(error)) from error
     result.save(output, format="PNG")
     return {"status": "succeeded", "report": {"engine": engine, "model": model}}
 
@@ -534,9 +543,12 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
                 response["output"] = str(output)
                 response["output_sha256"] = hashlib.sha256(output.read_bytes()).hexdigest()
     except Exception as error:  # noqa: BLE001 - the boundary is structured errors only
+        kind = type(error).__name__
+        if kind == "UnsupportedPrecision":
+            kind = "unsupported_in_this_image"
         response.update({
             "status": "failed",
-            "error": {"type": type(error).__name__, "message": str(error)},
+            "error": {"type": kind, "message": str(error)},
         })
     return response
 

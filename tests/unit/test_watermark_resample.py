@@ -160,3 +160,45 @@ def test_resample_runs_on_the_cuda_provider(published):
     assert data["report"]["engine"]["provider"] == "CUDAExecutionProvider"
     plan = data["report"]["plan"]
     assert plan["output_size"] == plan["input_size"]
+
+
+def test_resample_reports_missing_weights_with_the_fetch_command(published, monkeypatch):
+    from pathlib import Path
+
+    from imagen_cli.application import superres, watermark_service
+
+    container, _, _, source = published
+    monkeypatch.setattr(
+        superres, "weights_path",
+        lambda model, suffix=".onnx": Path("/nonexistent") / f"{model}{suffix}",
+    )
+    with pytest.raises(watermark_service.WatermarkError) as error:
+        watermark_resample.run(container.repositories, container.artifact_store,
+                               source.id, model="realesrgan-x2plus", runner=_doubler)
+    assert error.value.status == "missing"
+    assert "superres fetch" in str(error.value)
+
+
+def test_resample_refuses_a_changed_source_digest(published, tmp_path, monkeypatch):
+    container, _, _, source = published
+    # The store verifies on read, so the race this check covers is a file that
+    # changes between `get()` and the read: hand the service a different path.
+    tampered = tmp_path / "tampered.png"
+    tampered.write_bytes(_bytes((32, 32), color=(1, 1, 1)))
+    monkeypatch.setattr(container.artifact_store, "get", lambda ident: tampered)
+    with pytest.raises(ValueError, match="bytes changed"):
+        watermark_resample.run(container.repositories, container.artifact_store,
+                               source.id, model="realesrgan-x2plus", runner=_doubler)
+
+
+def test_resample_refuses_a_second_local_run(published):
+    from imagen_cli.application import watermark_service
+
+    container, _, _, source = published
+    assert watermark_service._LOCAL_RUN_LOCK.acquire(blocking=False)
+    try:
+        with pytest.raises(watermark_service.WatermarkError, match="active"):
+            watermark_resample.run(container.repositories, container.artifact_store,
+                                   source.id, model="realesrgan-x2plus", runner=_doubler)
+    finally:
+        watermark_service._LOCAL_RUN_LOCK.release()

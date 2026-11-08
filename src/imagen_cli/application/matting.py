@@ -148,7 +148,8 @@ def _require_provider(session: Any, backend: str | None) -> None:
     try:
         check(session, backend)
     except ProviderUnavailable as error:
-        raise ValueError(
+        # Keep the subclass: doctor reports it as a broken layer instead of raising.
+        raise ProviderUnavailable(
             f"{error}; run: imagen matting install --backend {backend} --accept"
         ) from error
 
@@ -179,8 +180,10 @@ def _make_runner(
         if pinned is not None and digest != pinned:
             raise ValueError("weights digest mismatch")
     _preflight(data)
+    from imagen_cli.application.superres import _open_session
+
     make_session = session_factory or onnxruntime.InferenceSession
-    session = make_session(data, providers=providers)
+    session = _open_session(make_session, data, providers=providers, backend=backend)
     if backend is not None:
         _require_provider(session, backend)
     inputs = session.get_inputs()
@@ -296,9 +299,9 @@ def matte(
     else:
         report(progress, "loading_model", operation=model)
         chosen = None if precision == "auto" else precision
-        runner, engine = _make_runner(model, backend=backend, accept=accept,
-                                      precision=chosen)
         try:
+            runner, engine = _make_runner(model, backend=backend, accept=accept,
+                                          precision=chosen)
             combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
         except ValueError as error:
             # Only `auto` retries, only on an allocation failure, and only once.
@@ -380,10 +383,10 @@ def _cosine_window(width: int, height: int, overlap: int) -> Any:
 
 def op(image: Image.Image, *, model: str = "birefnet-lite", backend: str | None = None,
        tile: int = 0, overlap: int = 64, feather: int = 0, edge_shift: float = 0.0,
-       accept: bool = False) -> Image.Image:
+       accept: bool = False, precision: str = "auto") -> Image.Image:
     return matte(
         image, model=model, backend=backend, tile=tile, overlap=overlap,
-        feather=feather, edge_shift=edge_shift, accept=accept,
+        feather=feather, edge_shift=edge_shift, accept=accept, precision=precision,
     )[0]
 
 
@@ -571,17 +574,19 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
         # raising, because the doctor's job is to name the broken layer.
         from imagen_cli.application.superres import ProviderUnavailable
 
-        if not isinstance(error, ProviderUnavailable):
+        if not isinstance(error, ProviderUnavailable) and not _is_out_of_memory(error):
             raise
         data["status"] = "missing"
         data["backend"] = None
         data["provider_used"] = None
         data["missing"] = [_backend_provider(used)]
-        data["hint"] = (
-            str(error) + "; on a small card try --precision fp16, which derives a "
-            "half-precision copy, or use the cpu backend"
-            if _is_out_of_memory(error) else str(error)
-        )
+        hint = str(error)
+        if _is_out_of_memory(error):
+            hint += ("; on a small card try --precision fp16, which derives a "
+                     "half-precision copy, or use the cpu backend")
+        elif "install --backend" not in hint:
+            hint += f"; run: imagen matting install --backend {used} --accept"
+        data["hint"] = hint
         return data
     data["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     data["weights_verified"] = True

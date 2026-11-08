@@ -626,7 +626,7 @@ imagen watermark resample ARTIFACT_ID --backend cuda --factor 0.25
 
 `resample` 先把图缩小，再用超分模型重建。它改写的是像素统计，不是可被验证的信号：**Imagen 不声称水印已被移除**，报告里始终带 `verified: false`。
 
-它在主进程内运行，不需要 `remove-ai-watermarks` 环境、不需要扩散模型，也不需要额外的许可证确认（权重在你执行 `superres fetch --accept` 时已经确认过）。权重缺失时会直接给出该执行的 `imagen superres fetch --model 名称 --accept`。`--factor` 默认 `1/scale`，因此输出与源保持同尺寸；要改变尺寸就显式指定，报告里始终列出 `input_size`、`intermediate_size`、`output_size`，不会静默变尺寸。`--backend cuda` 会用 GPU，并报告真正生效的 provider。
+它在主进程内运行，不需要 `remove-ai-watermarks` 环境、不需要扩散模型，也不需要额外的许可证确认（权重在你执行 `superres fetch --accept` 时已经确认过）。权重缺失时会直接给出该执行的 `imagen superres fetch --model 名称 --accept`。`--factor` 只用于降采样（`0 < factor <= 1`），默认 `1/scale`，因此输出与源**在舍入后**同尺寸 —— 奇数宽高会因舍入少一像素，所以报告里始终列出 `input_size`、`intermediate_size`、`output_size`，不把变化留在暗处。产物固定写成 PNG（JPEG 源因此改变容器），并保留源里的 ICC profile。`--backend cuda` 会用 GPU，并报告真正生效的 provider。
 
 ### 视频
 

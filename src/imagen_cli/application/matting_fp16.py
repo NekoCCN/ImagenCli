@@ -48,7 +48,12 @@ def fingerprint_path(model: str) -> Path:
 
 
 def _version(name: str) -> str:
-    for candidate in (name, name.replace("onnxruntime", "onnxruntime-gpu")):
+    candidates = (
+        ("onnxruntime-gpu", "onnxruntime", "onnxconverter-common", "onnx")
+        if name == "onnxruntime"
+        else (name,)
+    )
+    for candidate in candidates:
         try:
             return metadata.version(candidate)
         except metadata.PackageNotFoundError:
@@ -94,17 +99,22 @@ def ensure_fp16(
 
     derived = derived_path(model)
     fingerprint_file = fingerprint_path(model)
-    wanted = {"source_sha256": digest, **_fingerprint()}
     if derived.is_file() and fingerprint_file.is_file():
         try:
             cached = json.loads(fingerprint_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             cached = None
-        if cached == wanted:
-            return derived, {"derived": False, "fingerprint": wanted}
+        # The derived digest is part of the fingerprint: a truncated or edited
+        # copy re-derives instead of becoming a permanent, unfixable cache hit.
+        if isinstance(cached, dict) and cached.get("source_sha256") == digest and all(
+            cached.get(key) == value for key, value in _fingerprint().items()
+        ) and cached.get("derived_sha256") == hashlib.sha256(
+            derived.read_bytes()
+        ).hexdigest():
+            return derived, {"derived": False, "fingerprint": cached}
 
     convert = convert or _default_convert
-    partial = derived.with_suffix(".fp16.part")
+    partial = derived.with_name(derived.name + f".{os.getpid()}.part")
     try:
         convert(source, partial)
         os.replace(partial, derived)
@@ -117,6 +127,11 @@ def ensure_fp16(
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+    wanted = {
+        "source_sha256": digest,
+        "derived_sha256": hashlib.sha256(derived.read_bytes()).hexdigest(),
+        **_fingerprint(),
+    }
     fingerprint_file.write_text(json.dumps(wanted, sort_keys=True, indent=2),
                                 encoding="utf-8")
     return derived, {"derived": True, "fingerprint": wanted}

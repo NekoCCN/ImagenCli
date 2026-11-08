@@ -69,10 +69,17 @@ def run(
     if digest != row["sha256"]:
         raise ValueError("source artifact bytes changed")
 
+    if not superres.weights_path(model).is_file():
+        raise watermark_service.WatermarkError(
+            "missing",
+            "the super-resolution weights are not installed; run: "
+            f"imagen superres fetch --model {model} --accept",
+        )
     with Image.open(path) as opened:
         opened.load()
         size = opened.size
         mode = opened.mode
+        profile = opened.info.get("icc_profile")
         if mode not in SUPPORTED_MODES:
             raise ValueError(f"{mode} color mode is not supported by watermark resample")
         plan = plan_size(size, model, factor)
@@ -103,7 +110,11 @@ def run(
         lock.release()
 
     buffer = io.BytesIO()
-    produced.save(buffer, format="PNG")
+    # Dropping an embedded profile would silently change the colour space.
+    options: dict[str, Any] = {"format": "PNG"}
+    if profile:
+        options["icc_profile"] = profile
+    produced.save(buffer, **options)
     identity = new_id("art")
     store.stage(identity, buffer.getvalue(), origin_manifest={
         "kind": "watermark",

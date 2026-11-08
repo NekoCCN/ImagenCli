@@ -57,8 +57,26 @@ def pytest_collection_modifyitems(config, items):
     except Exception:  # noqa: BLE001 - an absent runtime means no GPU either
         providers = []
     if "CUDAExecutionProvider" in providers:
+        if not _cuda_fixtures_present():
+            reason = "CUDA is available but the pinned weights are not downloaded"
+            for item in items:
+                if "cuda" in item.keywords:
+                    item.add_marker(pytest.mark.skip(reason=reason))
         return
     skip = pytest.mark.skip(reason="no CUDA provider available here")
     for item in items:
         if "cuda" in item.keywords:
             item.add_marker(skip)
+
+
+def _cuda_fixtures_present() -> bool:
+    """The GPU tests need pinned weights; a fresh machine must skip, not fail."""
+    try:
+        from imagen_cli.application import matting, superres
+
+        return (
+            matting.weights_path("birefnet-lite").is_file()
+            and superres.weights_path("realesrgan-x2plus").is_file()
+        )
+    except Exception:  # noqa: BLE001 - an absent runtime means no fixtures either
+        return False

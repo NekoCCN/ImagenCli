@@ -31,6 +31,10 @@ TERMINAL = {status.value for status in JobStatus} - {JobStatus.QUEUED.value,
 TRANSPORT: httpx.BaseTransport | None = None
 
 
+# Operations that answer with a report and never write an output file.
+READ_ONLY_OPERATIONS = {"watermark.identify", "watermark.classify"}
+
+
 class RemoteError(watermark_service.WatermarkError):
     pass
 
@@ -297,7 +301,7 @@ def job_resume(repositories: Repositories, store: ArtifactStore,
     live = (_job_status(row, str(row["provider_job_id"]), private_store)
             if row.get("provider_job_id") else {})
     if live.get("status") == JobStatus.SUCCEEDED.value:
-        if row.get("operation") == "watermark.identify":
+        if row.get("operation") in READ_ONLY_OPERATIONS:
             row = _update_job(repositories, job_id, status=JobStatus.SUCCEEDED.value)
             return "succeeded", {"job": row, "report": live.get("report", {})}
         artifact = _fetch_output(repositories, store, row, private_store)
@@ -557,7 +561,18 @@ def run_operation(
     if response.get("job_id"):
         updates["provider_job_id"] = str(response["job_id"])
     _update_job(repositories, str(job_row["id"]), **updates)
-    if operation in {"watermark.identify", "watermark.classify"}:
+    if operation in READ_ONLY_OPERATIONS:
+        reported = _contract_status(response.get("status"))
+        if reported != JobStatus.SUCCEEDED.value:
+            _update_job(repositories, str(job_row["id"]), status=reported)
+            return reported, {
+                "remote": describe(record, remote_name),
+                "remote_job": job_row["id"],
+                "error": response.get("error") or {
+                    "type": reported,
+                    "detail": "the worker returned no report for this operation",
+                },
+            }
         return "succeeded", {"remote": describe(record, remote_name),
                              "report": response.get("report", {}),
                              "job_digest": requested,

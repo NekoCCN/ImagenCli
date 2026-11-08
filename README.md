@@ -643,10 +643,12 @@ report always carries `verified: false`.
 It runs in-process and needs no `remove-ai-watermarks` environment, no diffusion
 model, and no license confirmation beyond the weights you already fetched. Missing
 weights are reported with the `imagen superres fetch --model NAME --accept` command
-to run. `--factor` defaults to `1/scale`, so the output keeps the source size; pass
-it explicitly to change that, and the report always lists `input_size`,
-`intermediate_size` and `output_size` so the change is never silent. `--backend
-cuda` uses the GPU and reports the provider that actually ran.
+to run. `--factor` is downscale-only (`0 < factor <= 1`) and defaults to `1/scale`,
+so the output keeps the source size up to rounding — an odd width or height loses a
+pixel, which is why the report always lists `input_size`, `intermediate_size` and
+`output_size` instead of leaving the change implicit. The result is always written
+as PNG (a JPEG source changes container) and keeps the source's embedded ICC
+profile. `--backend cuda` uses the GPU and reports the provider actually used.
 
 ### Video
 
