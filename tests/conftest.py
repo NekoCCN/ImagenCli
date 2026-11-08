@@ -70,7 +70,17 @@ def pytest_collection_modifyitems(config, items):
 
 
 def _cuda_fixtures_present() -> bool:
-    """The GPU tests need pinned weights; a fresh machine must skip, not fail."""
+    """The GPU tests need pinned weights and the fp16 toolchain.
+
+    A machine with a GPU but without `onnxconverter-common` must skip, not fail:
+    the fp16 path is an optional extra, not a prerequisite for the suite.
+    """
+    try:
+        from importlib import import_module
+
+        import_module("onnxconverter_common")
+    except Exception:  # noqa: BLE001 - the extra is optional
+        return False
     try:
         from imagen_cli.application import matting, superres
 

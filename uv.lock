@@ -839,11 +839,13 @@ dependencies = [
 ai-onnx = [
     { name = "numpy" },
     { name = "onnx" },
+    { name = "onnxconverter-common" },
     { name = "onnxruntime" },
 ]
 ai-onnx-gpu = [
     { name = "numpy" },
     { name = "onnx" },
+    { name = "onnxconverter-common" },
     { name = "onnxruntime-gpu" },
 ]
 ai-openvino = [
@@ -905,6 +907,8 @@ requires-dist = [
     { name = "onnx", marker = "extra == 'ai-onnx'", specifier = ">=1.20" },
     { name = "onnx", marker = "extra == 'ai-onnx-gpu'", specifier = ">=1.20" },
     { name = "onnx", marker = "extra == 'ai-openvino'", specifier = ">=1.20" },
+    { name = "onnxconverter-common", marker = "extra == 'ai-onnx'", specifier = ">=1.16" },
+    { name = "onnxconverter-common", marker = "extra == 'ai-onnx-gpu'", specifier = ">=1.16" },
     { name = "onnxruntime", marker = "extra == 'ai-onnx'", specifier = ">=1.20" },
     { name = "onnxruntime-gpu", marker = "extra == 'ai-onnx-gpu'", specifier = ">=1.20" },
     { name = "onnxruntime-openvino", marker = "extra == 'ai-openvino'", specifier = ">=1.20" },
@@ -1843,6 +1847,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/24/36c505c2f8079186ac7c2d858a7fda3c5591418ae92d134e2bf56f6eee1f/onnx-1.23.2-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:77674dc4fda2bde9a13aee67fb9ff658080159eb516d3a5b3fb2418d44dc70be", size = 8886676, upload-time = "2026-10-06T04:25:52.852Z" },
     { url = "https://files.pythonhosted.org/packages/db/1f/d30025c6ef40c0e42977c933aceba59ca2f5e3ab8b72673136f99c70268e/onnx-1.23.2-cp314-cp314t-win_amd64.whl", hash = "sha256:16ef247e51dbf42e32bd92f47ad772d17dda77f64c4017e0ded9725ff9ab3922", size = 7910684, upload-time = "2026-10-06T04:25:55.135Z" },
     { url = "https://files.pythonhosted.org/packages/69/84/7bbd40fc36f701968351b4f4c14de5bde61ba8f75b88f93b23d013f32f3d/onnx-1.23.2-cp314-cp314t-win_arm64.whl", hash = "sha256:1e6cbca3d808f811141ed0a0939e71b3a6c9fdefb2435f4a862ec776336718fe", size = 8089708, upload-time = "2026-10-06T04:25:56.893Z" },
+]
+
+[[package]]
+name = "onnxconverter-common"
+version = "1.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "packaging" },
+    { name = "protobuf" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/67/8dca1868a6e226f8d3f7d666cb6a48b79a60aad5267b16b24627cd8d9eb8/onnxconverter_common-1.16.0-py2.py3-none-any.whl", hash = "sha256:df39ee96f17fff119dff10dd245467651b60b9e8a96020eb93402239794852f7", size = 89511, upload-time = "2025-08-28T19:37:46.988Z" },
 ]
 
 [[package]]
