@@ -21,6 +21,13 @@ def _png() -> bytes:
     return buffer.getvalue()
 
 
+def _parsed(argv: list[str]) -> tuple[str, dict]:
+    """`_parse` returns `list | dict` by contract; these commands always get a dict."""
+    command, parameters, _ = _parse(argv)
+    assert isinstance(parameters, dict)
+    return command, parameters
+
+
 def test_remote_watermark_forwards_pipeline_backend_and_session(tmp_path, monkeypatch):
     captured = {}
 
@@ -64,7 +71,7 @@ def test_local_watermark_uses_max_seconds_as_the_timeout(tmp_path, monkeypatch):
 
 
 def test_mark_takes_a_value():
-    command, args, _ = _parse([
+    command, args = _parsed([
         "watermark", "visible", ARTIFACT, "--mark", "logo",
     ])
     assert command == "watermark visible"
@@ -107,7 +114,7 @@ def test_new_commands_advertise_their_own_data_schema():
 
 
 def test_watermark_accepts_an_explicit_session():
-    command, args, _ = _parse([
+    command, args = _parsed([
         "watermark", "visible", ARTIFACT, "--session", SESSION,
     ])
     assert command == "watermark visible"
@@ -115,7 +122,7 @@ def test_watermark_accepts_an_explicit_session():
 
 
 def test_erase_parses_repeated_regions_and_fill_options():
-    command, args, _ = _parse([
+    command, args = _parsed([
         "watermark", "erase", ARTIFACT,
         "--region", "4,8,16,12", "--region", "40,8,16,12",
         "--backend", "lama", "--inpaint-method", "ns", "--dilate", "5",
@@ -128,7 +135,7 @@ def test_erase_parses_repeated_regions_and_fill_options():
 
 
 def test_all_and_classify_parse_their_options():
-    command, args, _ = _parse([
+    command, args = _parsed([
         "watermark", "all", ARTIFACT, "--backend", "migan",
         "--sensitivity", "strict", "--pipeline", "sdxl-zimage",
         "--strength", "0.35", "--seed", "7", "--force",
@@ -137,7 +144,7 @@ def test_all_and_classify_parse_their_options():
     assert args["sensitivity"] == "strict"
     assert args["strength"] == 0.35
     assert args["seed"] == 7
-    command, args, _ = _parse(["watermark", "classify", ARTIFACT, "--source"])
+    command, args = _parsed(["watermark", "classify", ARTIFACT, "--source"])
     assert command == "watermark classify"
     assert args["source"] is True
 

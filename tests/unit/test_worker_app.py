@@ -62,6 +62,7 @@ def cleaned(job_id, payload, source):
 
 def wait_for(client, job_id):
     """Queue workers finish on a thread; tests must observe the terminal record."""
+    record = {}
     for _ in range(100):
         record = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
         if record["status"] in {"succeeded", "failed", "canceled"}:

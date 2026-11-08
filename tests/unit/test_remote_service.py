@@ -183,11 +183,13 @@ def test_remote_commands_parse():
         "--credential-ref", "env:TOKEN",
     ])[1] == {"name": "modal", "endpoint": "https://x.example",
               "credential_ref": "env:TOKEN"}
-    command, args, _ = _parse([
+    command, raw, _ = _parse([
         "watermark", "invisible", "art_0123456789ab4def8abc0123456789ab",
         "--remote", "modal", "--accept-remote", "a" * 64, "--max-seconds", "600",
     ])
     assert command == "watermark invisible"
+    assert isinstance(raw, dict)
+    args = raw
     assert args["remote"] == "modal"
     assert args["max_seconds"] == 600
 
