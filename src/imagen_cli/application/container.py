@@ -799,8 +799,43 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             if command == "matting run":
+                import imagen_cli.application.matting_api as matting_api
                 from imagen_cli.cli.commands import postprocess
 
+                model = str(args.get("model", "birefnet-lite"))
+                api_model = "/" in model
+                if api_model and args.get("remote"):
+                    return "validation_error", {"error": {
+                        "type": "validation_error",
+                        "detail": i18n.t(
+                            "An API model cannot be combined with --remote; pick one path.",
+                            "API 模型不能与 --remote 同时使用，请只选一条路径。",
+                        ),
+                    }}
+                if api_model and args.get("backend") not in (None, "auto"):
+                    return "validation_error", {"error": {
+                        "type": "validation_error",
+                        "detail": i18n.t(
+                            "--backend does not apply to API models: the vendor runs "
+                            "the model. Drop the flag, or pick a local model.",
+                            "--backend 对 API 模型无效：算力由厂商提供。"
+                            "去掉该参数，或改用本地模型。",
+                        ),
+                    }}
+                if api_model:
+                    return matting_api.run(
+                        self.repositories, self.artifact_store, args["artifact"],
+                        model=model,
+                        session=args.get("session"),
+                        resolution=args.get("resolution"),
+                        mask_blur=args.get("mask_blur"),
+                        mask_offset=args.get("mask_offset"),
+                        refine_fg=args.get("refine_fg"),
+                        accept_api=args.get("accept_api"),
+                        key_ref=str(args.get("replicate_key_ref")
+                                   or "env:REPLICATE_API_TOKEN"),
+                        timeout=float(args.get("timeout") or 300),
+                    )
                 matting_params: dict[str, Any] = {
                     key: args[key] for key in
                     ("model", "backend", "tile", "overlap", "feather", "edge_shift",

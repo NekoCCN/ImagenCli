@@ -581,10 +581,9 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "matting run":
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
-            "model": {
-                "enum": ["birefnet-lite"],
-                "default": "birefnet-lite",
-            },
+            # Local names (birefnet-lite) and vendor paths (owner/name) share one field;
+            # the enum could not express both, so the code names the valid values.
+            "model": {"type": "string", "minLength": 1, "default": "birefnet-lite"},
             "backend": {"enum": ["auto", "cpu", "cuda", "openvino"], "default": "auto"},
             "tile": {"type": "integer", "minimum": 0, "maximum": 4096, "default": 0},
             "overlap": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64},
@@ -598,6 +597,14 @@ def _input_schema(name: str) -> dict[str, Any]:
             "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 900},
             "budget_approval": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "timeout": {"type": "number", "minimum": 0, "default": 900},
+            # Hosted API models: the digest gate plus the vendor's own knobs.
+            "accept_api": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "resolution": {"type": "integer", "minimum": 512, "maximum": 2048},
+            "mask_blur": {"type": "integer", "minimum": 0, "maximum": 128, "default": 0},
+            "mask_offset": {"type": "integer", "minimum": -64, "maximum": 64, "default": 0},
+            "refine_fg": {"type": "boolean", "default": False},
+            "replicate_key_ref": {"type": "string", "minLength": 1,
+                                   "default": "env:REPLICATE_API_TOKEN"},
         }
         required = ("artifact",)
     elif name == "matting models":

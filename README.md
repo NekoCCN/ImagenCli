@@ -542,6 +542,26 @@ imagen transform ARTIFACT_ID --preset '抠图贴纸 (Cutout Sticker)'
 
 `s` lists both model families in one table, with a Family column. The shipped default is `birefnet-lite`: an MIT-licensed BiRefNet_lite ONNX export with a 1024×1024 input. It holds soft edges on hair and fur for illustrations and photographs alike. Weights are never bundled; each entry is pinned to a SHA-256 and downloaded only with `--accept`.
 
+### Cutouts come from three families
+
+| Family | How | Runs on | Where the image goes | Cost |
+|---|---|---|---|---|
+| Local | `imagen matting run ART` | this machine (`--backend cpu/cuda/openvino`) | never leaves the machine | weights, downloaded once |
+| Your own worker | `imagen matting run ART --remote NAME --accept-remote DIGEST` | the container you built (Salad, Modal, any endpoint) | your endpoint | you pay the compute |
+| Vendor API | `imagen matting run ART --model owner/name --accept-api DIGEST` | Replicate | **api.replicate.com** | the vendor bills each run |
+
+The three paths are mutually exclusive. `--remote` together with an `owner/name` model, or an explicit `--backend` with one, is a `validation_error` rather than a quiet choice of one path.
+
+```bash
+imagen matting models                                    # local and hosted, with a backend column
+imagen matting run ARTIFACT_ID --model sprited/birefnet-toonout    # prints the digest, uploads nothing
+imagen matting run ARTIFACT_ID --model sprited/birefnet-toonout --accept-api DIGEST
+```
+
+`sprited/birefnet-toonout` is the default hosted model: ToonOut, an MIT-licensed BiRefNet fine-tune for anime and line art. `sprited/birefnet` exposes the official variant set (this command always uses `variant=general`, `precision=fp32`, `output_format=cutout`), `men1scus/birefnet` is the most-used packaging, and `m-kunz/birefnet_portrait` is portrait-tuned. `sprited/birefnet-video` is listed but not implemented.
+
+The token is read from `REPLICATE_API_TOKEN` (or `--replicate-key-ref`); it never reaches the config file, the artifact database or error output. Nothing is uploaded until `--accept-api` carries the digest of the exact request — source bytes, model and every parameter. A returned image that does not decode, or whose size disagrees with the source, is a failure and publishes nothing.
+
 Non-commercial weights are deliberately absent from the catalog. Bria RMBG-2.0, for example, is CC BY-NC 4.0 and needs a separate commercial agreement, so it is not a drop-in default here.
 
 `--tile 0` runs the whole image in one pass; a positive value splits large images, and `--overlap` keeps tile seams out of hair edges. `--feather` blurs the alpha and `--edge-shift` moves the apparent boundary; both default to `0`.

@@ -540,6 +540,26 @@ imagen transform ARTIFACT_ID --preset '抠图贴纸 (Cutout Sticker)'
 
 `s` 打开的本地模型表会同时列出超分与抠图两类，并带一个「类别」列。默认权重是 `birefnet-lite`：MIT 许可的 BiRefNet_lite ONNX 导出，输入 1024×1024，在插画与实拍上都能保住发丝软边。权重不随包分发，每条都固定 SHA-256，只有加 `--accept` 才下载。
 
+### 抠图有三个后端家族
+
+| 家族 | 怎么调用 | 算力在哪 | 图片去哪 | 成本 |
+|---|---|---|---|---|
+| 本地 | `imagen matting run ART` | 本机（`--backend cpu/cuda/openvino`） | 不出本机 | 权重，下载一次 |
+| 自建 worker | `imagen matting run ART --remote NAME --accept-remote DIGEST` | 你自己构建的容器（Salad、Modal 或任何端点） | 你的端点 | 你付算力 |
+| 第三方 API | `imagen matting run ART --model owner/name --accept-api DIGEST` | Replicate | **api.replicate.com** | 厂商按次计费 |
+
+三条路互斥：`--remote` 搭配 `owner/name` 模型，或给 API 模型显式加 `--backend`，都会返回 `validation_error`，而不是悄悄选一条。
+
+```bash
+imagen matting models                                    # 本地与托管模型并列，带 backend 列
+imagen matting run ARTIFACT_ID --model sprited/birefnet-toonout    # 只打印 digest，不上传
+imagen matting run ARTIFACT_ID --model sprited/birefnet-toonout --accept-api DIGEST
+```
+
+`sprited/birefnet-toonout` 是默认托管模型：ToonOut，MIT 许可的 BiRefNet 微调，专攻二次元与线稿。`sprited/birefnet` 提供官方变体集合（本命令固定 `variant=general`、`precision=fp32`、`output_format=cutout`），`men1scus/birefnet` 是使用量最大的封装，`m-kunz/birefnet_portrait` 面向人像。`sprited/birefnet-video` 只登记、未实现。
+
+令牌从 `REPLICATE_API_TOKEN`（或 `--replicate-key-ref`）读取，绝不写入配置文件、产物数据库或错误输出。只有 `--accept-api` 携带**本次请求**的摘要（源字节、模型、每个参数）之后才会发生上传。返回的图片无法解码、或尺寸与源不一致，一律判失败且不发布任何产物。
+
 非商用权重被刻意排除在清单之外。例如 Bria RMBG-2.0 是 CC BY-NC 4.0、商用需单独协议，因此不作为默认值。
 
 `--tile 0` 表示整图一次推理；给正数则对大图分块，`--overlap` 避免接缝落在发丝上。`--feather` 羽化 alpha，`--edge-shift` 移动视觉边界，两者默认都是 `0`。
