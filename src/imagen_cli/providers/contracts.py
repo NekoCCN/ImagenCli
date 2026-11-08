@@ -22,6 +22,10 @@ _CONTRACTS = {
     ("gemini", "generate_content"): ProviderContract(
         "gemini", "generate_content", idempotency_scope="none",
     ),
+    ("replicate", "predictions"): ProviderContract(
+        "replicate", "predictions", transport="async",
+        idempotency_scope="none", cancellation="best_effort",
+    ),
 }
 
 
