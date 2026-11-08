@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from imagen_cli.providers import replicate
+import imagen_cli.providers.replicate as replicate
 
 Handler = Callable[[httpx.Request], httpx.Response]
 Route = httpx.Response | Handler

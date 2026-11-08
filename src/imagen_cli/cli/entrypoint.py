@@ -70,6 +70,14 @@ def _utf8_stdio() -> None:
             continue
 
 
+def _text_stream(*candidates: TextIO | None) -> TextIO:
+    """Pick the first usable stream; every caller needs a concrete object."""
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
+    raise RuntimeError("no usable standard stream")
+
+
 def _no_positional(command: str, words: list[str]) -> UsageError:
     found = " ".join(words)
     return UsageError(
@@ -854,8 +862,9 @@ def main(
         _utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     raw_argv = list(argv)
-    stdout = sys.stdout if stdout is None else stdout
-    stderr = sys.stderr if stderr is None else stderr
+    # sys.stdout/stderr can be None under a window-less parent; fall back to the real fds.
+    stdout = _text_stream(stdout, sys.stdout, sys.__stdout__)
+    stderr = _text_stream(stderr, sys.stderr, sys.__stderr__)
     renderer = Renderer(select_output(argv, is_tty=stdout.isatty()), stdout, stderr)
     language_token = None
     try:

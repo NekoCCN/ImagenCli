@@ -179,8 +179,9 @@ class ModelProcessScreen(Modal[bool]):
         tasks = {"denoise": t("Denoise · same size", "降噪 · 保持尺寸"),
                  "dejpeg": t("JPEG repair · same size", "JPEG 修复 · 保持尺寸"),
                  "upscale": t("Upscale", "超分")}
+        task_label = tasks.get(row["task"], row["task"])
         self.description.update(Text("\n".join([
-            tasks.get(row["task"], row["task"]) + f" · {row['model']}",
+            f"{task_label or ''} · {row['model']}",
             str(row.get("usage") or ""), str(row["license"]), str(row["source"]),
         ])))
         fixed = superres.MANIFEST[row["model"]].get("fixed_input")

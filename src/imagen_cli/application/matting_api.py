@@ -16,12 +16,13 @@ import json
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
+import imagen_cli.providers.replicate as replicate
 from imagen_cli.domain.primitive import new_id
-from imagen_cli.providers import replicate
 
 __all__ = [
     "DEFAULT_MODEL",
@@ -170,6 +171,18 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def _inside_store(path: Any, store: Any) -> bool:
+    """Refuse a path that escapes the store root, whatever produced it."""
+    root = getattr(store, "root", None)
+    if root is None:
+        return True
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def run(
     repositories: Any,
     store: Any,
@@ -213,7 +226,12 @@ def run(
             "The source must be a published artifact.",
             "源必须是已发布的产物。",
         ))
-    data = path.read_bytes()
+    data = path.read_bytes() if _inside_store(path, store) else None
+    if data is None:
+        return "validation_error", _failure("validation_error", i18n.t(
+            "The source path is outside the artifact store.",
+            "源路径不在产物仓库内。",
+        ))
     source_sha256 = hashlib.sha256(data).hexdigest()
     if source_sha256 != row["sha256"]:
         return "validation_error", _failure("validation_error", i18n.t(

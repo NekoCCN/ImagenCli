@@ -6,10 +6,10 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from imagen_cli.application import matting_api
+import imagen_cli.application.matting_api as matting_api
+import imagen_cli.providers.replicate as replicate
 from imagen_cli.application.container import Container
 from imagen_cli.application.session_service import SessionService
-from imagen_cli.providers import replicate
 
 
 def _png(size: tuple[int, int] = (32, 32), mode: str = "RGB",

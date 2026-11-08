@@ -31,7 +31,8 @@ REPLICATE_ENDPOINT = "https://api.replicate.com"
 _TERMINAL = frozenset({"succeeded", "failed", "canceled"})
 _PENDING = frozenset({"starting", "processing"})
 
-_SECRET = re.compile(r"(r8_|sk-)[A-Za-z0-9_\-]+")
+# Bounded on purpose: an unbounded tail lets a crafted error body backtrack.
+_SECRET = re.compile(r"(?:r8_|sk-)[A-Za-z0-9_-]{1,256}")
 
 
 def _scrub(text: str) -> str:

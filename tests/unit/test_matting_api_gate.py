@@ -2,7 +2,7 @@
 
 import pytest
 
-from imagen_cli.application import matting_api
+import imagen_cli.application.matting_api as matting_api
 
 
 def test_catalog_has_four_image_models_and_one_video_stub():
