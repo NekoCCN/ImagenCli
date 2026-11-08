@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import numpy as np
 import pytest
@@ -341,7 +342,7 @@ def test_matting_run_carries_precision_into_the_transform(tmp_path, monkeypatch)
     from imagen_cli.application.container import Container
     from imagen_cli.cli.commands import postprocess
 
-    captured = {}
+    captured: dict[str, Any] = {}
 
     def fake(repositories, store, artifact, **kwargs):
         captured.update(kwargs, artifact=artifact)
@@ -360,7 +361,7 @@ def test_matting_run_carries_precision_to_a_remote(tmp_path, monkeypatch):
     from imagen_cli.application import remote_service
     from imagen_cli.application.container import Container
 
-    captured = {}
+    captured: dict[str, Any] = {}
 
     def fake(repositories, store, artifact, remote, operation, **kwargs):
         captured.update(kwargs, operation=operation)
@@ -474,3 +475,14 @@ def test_auto_retries_when_the_session_cannot_allocate(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="out of memory"):
         matting.matte(Image.new("RGB", (8, 8)), model="stub", backend="cuda")
     assert len(opened) == 2
+
+
+def test_matting_run_parses_precision_from_argv():
+    from imagen_cli.cli.entrypoint import _parse
+
+    command, raw, _ = _parse([
+        "matting", "run", "art_" + "a" * 32, "--precision", "fp16",
+    ])
+    assert command == "matting run"
+    assert isinstance(raw, dict)
+    assert raw["precision"] == "fp16"

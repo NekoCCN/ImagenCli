@@ -91,6 +91,13 @@ plugins = ["pydantic.mypy"]
 module = ["onnxconverter_common.*", "onnx.*", "onnxruntime.*"]
 ignore_missing_imports = true
 
+# The type gate is `mypy src`: tests are exercised by pytest, and requiring an
+# annotation on every fixture parameter there buys nothing.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
 [[tool.mypy.overrides]]
 module = ["onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "torch", "torch.*", "keyring",
           "remove_ai_watermarks", "remove_ai_watermarks.*", "modal", "modal.*"]

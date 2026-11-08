@@ -296,6 +296,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "overlap",
                 "feather",
                 "edge-shift",
+                "precision",
                 "accept",
                 "budget-approval",
                 "key-file",
