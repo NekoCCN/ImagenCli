@@ -193,3 +193,22 @@ def test_resample_carries_its_choices_into_the_local_path(tmp_path, monkeypatch)
     assert captured["tile"] == 512
     assert captured["overlap"] == 8
     assert captured["session"] == SESSION
+
+
+def test_erase_carries_regions_to_a_remote(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake(repositories, store, artifact, name, operation, **kwargs):
+        captured.update(kwargs, operation=operation)
+        return "approval_required", {"job_digest": "a" * 64}
+
+    monkeypatch.setattr(remote_service, "run_operation", fake)
+    with Container(workspace=str(tmp_path / "ws")) as container:
+        container.execute("watermark erase", {
+            "artifact": ARTIFACT, "remote": "modal", "regions": ["4,8,16,12"],
+            "dilate": 5, "inpaint_method": "ns",
+        })
+    assert captured["operation"] == "watermark.erase"
+    assert captured["params"]["regions"] == ["4,8,16,12"]
+    assert captured["params"]["dilate"] == 5
+    assert captured["params"]["inpaint_method"] == "ns"

@@ -382,3 +382,34 @@ def test_from_environment_detects_cpu_when_no_cuda(monkeypatch, tmp_path):
     assert "cuda" not in meta["providers"]
     assert "cpu" in meta["providers"]
 
+
+
+def test_sync_mode_advertises_erase_and_classify(tmp_path):
+    client = build(tmp_path, mode="single-replica-sync")
+    meta = client.get("/v1/meta", headers=AUTH).json()
+    assert "watermark.erase" in meta["operations"]
+    assert "watermark.classify" in meta["operations"]
+    assert "watermark.invisible" not in meta["operations"]
+
+
+def test_erase_is_accepted_inline_and_returns_the_output(tmp_path):
+    client = build(tmp_path, execute=cleaned)
+    response = post(client, job(operation="watermark.erase",
+                                params={"regions": ["0,0,4,4"]}))
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "succeeded"
+    assert data["output"]["sha256"] == hashlib.sha256(PNG).hexdigest()
+
+
+def test_classify_returns_a_report_and_no_output(tmp_path):
+    def classified(job_id, payload, source):
+        return {"status": "succeeded", "report": {"pixels": "photo"}}
+
+    client = build(tmp_path, execute=classified)
+    response = post(client, job(operation="watermark.classify"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "succeeded"
+    assert data["report"] == {"pixels": "photo"}
+    assert "output" not in data

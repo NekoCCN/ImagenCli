@@ -645,12 +645,18 @@ def _input_schema(name: str) -> dict[str, Any]:
             "inpaint_method": {"enum": ["telea", "ns"], "default": "telea"},
             "dilate": {"type": "integer", "minimum": 0, "maximum": 512, "default": 3},
             "session": text,
+            "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "accept_remote": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
         }
         required = ("artifact", "regions")
     elif name == "watermark classify":
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
             "source": {"type": "boolean", "default": False},
+            "remote": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "accept_remote": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
         }
         required = ("artifact",)
     elif name == "watermark resample":

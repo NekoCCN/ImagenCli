@@ -732,6 +732,10 @@ class Container:
                     "text_manifest": args.get("text_manifest"),
                     "fidelity_anchor": args.get("fidelity_anchor"),
                     "vendor": args.get("vendor"),
+                    "regions": args.get("regions"),
+                    "inpaint_method": args.get("inpaint_method"),
+                    "dilate": args.get("dilate"),
+                    "source": args.get("source"),
                 }
                 try:
                     return remote_service.run_operation(

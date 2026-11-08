@@ -525,3 +525,21 @@ def test_matte_is_refused_before_upload_when_the_worker_cannot_do_it(monkeypatch
 
     with pytest.raises(ValueError, match="capabilities.matte"):
         rs.run_operation(Repos(), Store(), "art_x", "worker", "matte")
+
+
+def test_classify_returns_a_report_and_publishes_nothing(remote, published):
+    container, source = published
+    remote_service.add("modal", "https://worker.example", "env:IMAGEN_TEST_TOKEN")
+    approved = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "watermark.classify", params={"source": False},
+    )[1]["job_digest"]
+    before = len(container.repositories.list("artifacts"))
+    status, data = remote_service.run_operation(
+        container.repositories, container.artifact_store, source.id, "modal",
+        "watermark.classify", accept_remote=approved, params={"source": False},
+    )
+    assert status == "succeeded"
+    assert data["report"] == {"status": "cleaned"}
+    assert "artifact" not in data
+    assert len(container.repositories.list("artifacts")) == before

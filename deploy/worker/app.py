@@ -28,9 +28,11 @@ from imagen_cli.contract import JobStatus, reject_client_paths
 SCHEMA_VERSION = 1
 STATE_MODES = {"shared-volume", "queue", "single-replica-sync"}
 SYNC_OPERATIONS = {"watermark.identify", "watermark.metadata", "watermark.visible",
-                   "matte"}
+                   "watermark.erase", "watermark.classify", "matte"}
 # Long diffusion rebuilds: only a queue or shared-volume endpoint can carry them.
 ASYNC_OPERATIONS = {"watermark.invisible", "watermark.all"}
+# Read-only operations return a report and never write an output file.
+READ_ONLY_OPERATIONS = {"watermark.identify", "watermark.classify"}
 SYNC_MAX_SECONDS = 90
 SYNC_MAX_BYTES = 64 * 1024 * 1024
 
@@ -166,10 +168,10 @@ def _default_execute(job: dict[str, Any], source: bytes) -> dict[str, Any]:
             "params": job.get("params") or {},
             "input": str(input_path),
             "output": str(Path(directory) / ("output" + extension))
-            if operation != "watermark.identify" else None,
+            if operation not in READ_ONLY_OPERATIONS else None,
         })
         output = None
-        if operation != "watermark.identify":
+        if operation not in READ_ONLY_OPERATIONS:
             candidate = Path(directory) / ("output" + extension)
             output = candidate.read_bytes() if candidate.is_file() else None
     response["output_bytes"] = output

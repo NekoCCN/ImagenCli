@@ -41,6 +41,11 @@ image = (
         copy=True,
     )
     .add_local_file("deploy/worker/app.py", "/app/app.py", copy=True)
+    .add_local_file(
+        "src/imagen_cli/remote/worker_cli.py",
+        "/usr/local/lib/python3.12/site-packages/imagen_cli/remote/worker_cli.py",
+        copy=True,
+    )
     .env({"IMAGEN_MODAL_GPU": GPU})
 )
 app = modal.App("imagen-worker")

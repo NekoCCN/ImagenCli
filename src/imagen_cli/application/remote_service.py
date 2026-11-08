@@ -557,7 +557,7 @@ def run_operation(
     if response.get("job_id"):
         updates["provider_job_id"] = str(response["job_id"])
     _update_job(repositories, str(job_row["id"]), **updates)
-    if operation == "watermark.identify":
+    if operation in {"watermark.identify", "watermark.classify"}:
         return "succeeded", {"remote": describe(record, remote_name),
                              "report": response.get("report", {}),
                              "job_digest": requested,
