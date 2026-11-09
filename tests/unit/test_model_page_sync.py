@@ -1,5 +1,7 @@
 import asyncio
 import io
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from PIL import Image
@@ -8,75 +10,89 @@ from imagen_cli.application.container import Container
 from imagen_cli.application.session_service import SessionService
 from imagen_cli.cli.tui.app import (
     Deps,
-    ModelProcessScreen,
     WorkbenchApp,
     _control_fields,
     _convert_arguments,
 )
+from imagen_cli.cli.tui.model_process import ModelProcessScreen
 
 
 def test_local_timeout_stays_in_arguments_and_is_numeric(tmp_path):
-    assert 'timeout' not in {row[0] for row in _control_fields('transform')}
-    assert 'timeout' not in {row[0] for row in _control_fields('superres run')}
-    args = _convert_arguments('transform', {'artifact': 'art_' + 'a' * 32,
-                                          'op': 'invert', 'timeout': '17.5'})
-    assert args['timeout'] == 17.5
+    assert "timeout" not in {row[0] for row in _control_fields("transform")}
+    assert "timeout" not in {row[0] for row in _control_fields("superres run")}
+    args = _convert_arguments(
+        "transform", {"artifact": "art_" + "a" * 32, "op": "invert", "timeout": "17.5"}
+    )
+    assert args["timeout"] == 17.5
     with Container(workspace=str(tmp_path)) as container:
         service = SessionService(container.repositories, container.artifact_store)
-        session = service.create_session('a')
+        session = service.create_session("a")
         buffer = io.BytesIO()
-        Image.new('RGB', (8, 8), 'red').save(buffer, format='PNG')
-        source = 'art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa'
+        Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
+        source = "art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa"
         container.artifact_store.stage(source, buffer.getvalue())
         container.artifact_store.publish(source)
-        container.repositories.insert('artifact_links', {
-            'session_id': session.id, 'artifact_id': source, 'role': 'output',
-            'created_at': '2026-10-29T00:00:00Z',
-        })
-        args['artifact'] = source
-        status, data = container.execute('transform', args)
-        assert status == 'succeeded'
-        turn = container.repositories.get('turns', data['job']['turn_id'])
-        assert turn['parameters']['timeout'] == 17.5
+        container.repositories.insert(
+            "artifact_links",
+            {
+                "session_id": session.id,
+                "artifact_id": source,
+                "role": "output",
+                "created_at": "2026-10-29T00:00:00Z",
+            },
+        )
+        args["artifact"] = source
+        status, data = container.execute("transform", args)
+        assert status == "succeeded"
+        turn = container.repositories.get("turns", data["job"]["turn_id"])
+        assert turn["parameters"]["timeout"] == 17.5
 
 
-@pytest.mark.parametrize('size', [(140, 42), (80, 24)])
+@pytest.mark.parametrize("size", [(140, 42), (80, 24)])
 def test_model_page_lists_real_models_without_transform_chrome(tmp_path, monkeypatch, size):
     from imagen_cli.application import superres
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
-    monkeypatch.setattr(superres, 'available_providers', lambda: ['CPUExecutionProvider'])
-    path = tmp_path / 'source.png'
-    Image.new('RGBA', (120, 80), (220, 80, 60, 200)).save(path)
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(superres, "available_providers", lambda: ["CPUExecutionProvider"])
+    path = tmp_path / "source.png"
+    Image.new("RGBA", (120, 80), (220, 80, 60, 200)).save(path)
 
-    async def exercise():
-        app = WorkbenchApp(Deps(None, None))
-        # Harness avoids initializing workspace views, but preserves shipped CSS/theme.
+    async def exercise() -> None:
         from textual.app import App
-        class Harness(App):
+
+        class Harness(App[None]):
             CSS = WorkbenchApp.CSS
-        app = Harness()
-        async with app.run_test(size=size) as pilot:
-            screen = ModelProcessScreen(Deps(None, None), 'art', 'ses', path)
-            await app.push_screen(screen)
-            await pilot.pause()
-            assert not screen.query('#transform-categories')
-            assert not screen.query('#transform-presets')
-            assert screen.query_one('#processing-models').row_count == 8
-            assert screen.query_one('#model-backend')
-            assert screen.query_one('#model-timeout').value == '900'
-            assert screen.query_one('#model-mode')
-            assert '120' in str(screen.query_one('#model-source-size').content)
-            run = screen.query_one('#model-run')
-            assert run.region.bottom <= size[1]
-            assert run.region.height == 1
-            assert screen.query_one('#model-close').region.right <= size[0]
-            assert screen.query_one('#processing-models').region.height >= 3
-            assert screen.query_one('#model-preview').region.height >= 2
-            title = screen.query_one('.panel-title')
-            assert title.region.height == 1
-            if size[0] == 80:
-                assert screen.view.region.y >= screen.table.region.bottom
+
+        with Container(workspace=str(tmp_path / "workspace")) as container:
+            app = Harness()
+            async with app.run_test(size=size) as pilot:
+                screen = ModelProcessScreen(
+                    Deps(container.repositories, container.artifact_store),
+                    "art",
+                    "ses",
+                    path,
+                )
+                await app.push_screen(screen)
+                await pilot.pause()
+                from textual.widgets import Button, DataTable, Input, Select, Static
+
+                assert not screen.query("#transform-categories")
+                assert not screen.query("#transform-presets")
+                assert screen.query_one("#processing-models", DataTable).row_count == 8
+                assert screen.query_one("#model-backend", Select)
+                assert screen.query_one("#model-timeout", Input).value == "900"
+                assert screen.query_one("#model-mode", Select)
+                assert "120" in str(screen.query_one("#model-source-size", Static).content)
+                run = screen.query_one("#model-run", Button)
+                assert run.region.bottom <= size[1]
+                assert run.region.height == 1
+                assert screen.query_one("#model-close", Button).region.right <= size[0]
+                assert screen.query_one("#processing-models", DataTable).region.height >= 3
+                assert screen.query_one("#model-preview", Static).region.height >= 2
+                title = screen.query_one(".panel-title", Static)
+                assert title.region.height == 1
+                if size[0] == 80:
+                    assert screen.view.region.y >= screen.table.region.bottom
 
     asyncio.run(exercise())
 
@@ -86,121 +102,137 @@ def test_model_parameters_survive_foreground_execution(tmp_path, monkeypatch):
 
     from imagen_cli.application import postprocess_worker, superres
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
     catalog = superres.catalog()
-    for row in catalog['models']:
-        row['downloaded'] = True
-    monkeypatch.setattr(superres, 'catalog', lambda: catalog)
+    for row in catalog["models"]:
+        row["downloaded"] = True
+    monkeypatch.setattr(superres, "catalog", lambda: catalog)
 
-    async def exercise():
-        with Container(workspace=str(tmp_path / 'workspace')) as container:
+    async def exercise() -> None:
+        with Container(workspace=str(tmp_path / "workspace")) as container:
             service = SessionService(container.repositories, container.artifact_store)
-            session = service.create_session('a')
+            session = service.create_session("a")
             buffer = io.BytesIO()
-            Image.new('RGB', (8, 8), 'red').save(buffer, format='PNG')
-            source = 'art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa'
+            Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
+            source = "art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa"
             container.artifact_store.stage(source, buffer.getvalue())
             container.artifact_store.publish(source)
-            container.repositories.insert('artifact_links', {
-                'session_id': session.id, 'artifact_id': source, 'role': 'output',
-                'created_at': '2026-10-29T00:00:00Z',
-            })
+            container.repositories.insert(
+                "artifact_links",
+                {
+                    "session_id": session.id,
+                    "artifact_id": source,
+                    "role": "output",
+                    "created_at": "2026-10-29T00:00:00Z",
+                },
+            )
 
             def compute(path, pipeline, *, progress=None, **kwargs):
-                assert kwargs['timeout'] == 17.5
-                params = pipeline[0]['params']
-                assert params['model'] == 'realesr-animevideov3'
-                assert params['tile'] == 4 and params['overlap'] == 0
-                assert params['backend'] == 'cpu'
+                assert kwargs["timeout"] == 17.5
+                params = pipeline[0]["params"]
+                assert params["model"] == "realesr-animevideov3"
+                assert params["tile"] == 4 and params["overlap"] == 0
+                assert params["backend"] == "cpu"
                 with Image.open(path) as image:
                     result, _ = superres.upscale(
-                        image, model=params['model'], tile=4, overlap=0,
+                        image,
+                        model=params["model"],
+                        tile=4,
+                        overlap=0,
                         runner=lambda tile: np.repeat(np.repeat(tile, 4, 0), 4, 1),
                         progress=progress,
                     )
                 output = io.BytesIO()
-                result.save(output, format='PNG')
+                result.save(output, format="PNG")
                 return output.getvalue(), {}
 
-            monkeypatch.setattr(postprocess_worker, 'execute', compute)
-            app = WorkbenchApp(Deps(container.repositories, container.artifact_store,
-                                    execute=container.execute,
-                                    workspace_root=container.resolved_workspace.root))
+            monkeypatch.setattr(postprocess_worker, "execute", compute)
+            app = WorkbenchApp(
+                Deps(
+                    container.repositories,
+                    container.artifact_store,
+                    execute=container.execute,
+                    workspace_root=container.resolved_workspace.root,
+                )
+            )
             async with app.run_test(size=(100, 35)) as pilot:
-                screen = ModelProcessScreen(app.deps, source, session.id,
-                                             container.artifact_store.get(source))
+                source_path = container.artifact_store.get(source)
+                assert source_path is not None
+                screen = ModelProcessScreen(app.deps, source, session.id, source_path)
                 await app.push_screen(screen)
-                index = next(i for i, row in enumerate(screen.rows)
-                             if row['model'] == 'realesr-animevideov3')
+                index = next(
+                    i for i, row in enumerate(screen.rows) if row["model"] == "realesr-animevideov3"
+                )
                 screen.table.move_cursor(row=index)
                 await pilot.pause()
-                screen.tile.value, screen.overlap.value = '4', '0'
-                screen.timeout.value, screen.backend.value = '17.5', 'cpu'
+                screen.tile.value, screen.overlap.value = "4", "0"
+                screen.timeout.value, screen.backend.value = "17.5", "cpu"
                 screen.action_apply()
                 await pilot.pause()
                 await app.screen.dismiss(True)
                 await pilot.pause()
                 await app.workers.wait_for_complete()
                 await pilot.pause()
-                jobs = container.repositories.list('jobs')
-                assert len(jobs) == 1 and jobs[0]['state'] == 'succeeded'
-                assert container.artifact_store.get(source).read_bytes() == buffer.getvalue()
+                jobs = container.repositories.list("jobs")
+                assert len(jobs) == 1 and jobs[0]["state"] == "succeeded"
+                saved_source = cast(Path, container.artifact_store.get(source))
+                assert saved_source.read_bytes() == buffer.getvalue()
 
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('screen_type', ['model', 'transform'])
+@pytest.mark.parametrize("screen_type", ["model", "transform"])
 def test_processing_progress_ignores_popped_screen(tmp_path, monkeypatch, screen_type):
     from textual.app import App
 
     from imagen_cli.cli.tui.app import TransformScreen
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
-    path = tmp_path / 'source.png'
-    Image.new('RGB', (8, 8)).save(path)
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
+    path = tmp_path / "source.png"
+    Image.new("RGB", (8, 8)).save(path)
 
-    async def exercise():
-        app = App()
+    async def exercise() -> None:
+        app: App[None] = App()
         async with app.run_test() as pilot:
-            cls = ModelProcessScreen if screen_type == 'model' else TransformScreen
-            screen = cls(Deps(None, None), 'art', 'ses', path)
+            cls = ModelProcessScreen if screen_type == "model" else TransformScreen
+            screen = cls(Deps(cast(Any, None), cast(Any, None)), "art", "ses", path)
             await app.push_screen(screen)
             await screen.dismiss(False)
             await pilot.pause()
-            screen._processing_progress({'stage': 'processing', 'completed': 1, 'total': 2})
+            screen._processing_progress({"stage": "processing", "completed": 1, "total": 2})
 
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('screen_type', ['model', 'transform'])
+@pytest.mark.parametrize("screen_type", ["model", "transform"])
 def test_processing_callbacks_stop_before_partial_shutdown(tmp_path, monkeypatch, screen_type):
     from textual.app import App
 
     from imagen_cli.cli.tui.app import TransformScreen
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
-    path = tmp_path / 'source.png'
-    Image.new('RGB', (8, 8)).save(path)
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
+    path = tmp_path / "source.png"
+    Image.new("RGB", (8, 8)).save(path)
 
-    class ShutdownHarness(App):
+    class ShutdownHarness(App[None]):
         async def _close_all(self):
             assert not self.is_running
-            screen = self.screen
-            await screen.query_one('#processing-progress').remove()
+            screen = cast(ModelProcessScreen | TransformScreen, self.screen)
+            await screen.query_one("#processing-progress").remove()
             assert screen.status.is_attached
-            screen._processing_progress({'stage': 'processing', 'completed': 1, 'total': 2})
+            screen._processing_progress({"stage": "processing", "completed": 1, "total": 2})
             if isinstance(screen, ModelProcessScreen):
-                await screen.query_one('#model-run').remove()
+                await screen.query_one("#model-run").remove()
                 screen._set_running(False)
-                await screen.query_one('#model-close').remove()
-                screen._downloaded('succeeded')
+                await screen.query_one("#model-close").remove()
+                screen._downloaded("succeeded")
             await super()._close_all()
 
-    async def exercise():
+    async def exercise() -> None:
         app = ShutdownHarness()
         async with app.run_test():
-            cls = ModelProcessScreen if screen_type == 'model' else TransformScreen
-            await app.push_screen(cls(Deps(None, None), 'art', 'ses', path))
+            cls = ModelProcessScreen if screen_type == "model" else TransformScreen
+            await app.push_screen(cls(Deps(cast(Any, None), cast(Any, None)), "art", "ses", path))
 
     asyncio.run(exercise())
 
@@ -210,39 +242,53 @@ def test_model_worker_cancel_does_not_touch_removed_controls(tmp_path, monkeypat
 
     from imagen_cli.application import postprocess_worker
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
     entered, release, finished = Event(), Event(), Event()
 
     def compute(path, pipeline, **kwargs):
         entered.set()
         try:
             assert release.wait(5)
-            raise ValueError('postprocess cancelled')
+            raise ValueError("postprocess cancelled")
         finally:
             finished.set()
 
-    monkeypatch.setattr(postprocess_worker, 'execute', compute)
+    monkeypatch.setattr(postprocess_worker, "execute", compute)  # noqa: ARG005
 
-    async def exercise():
-        with Container(workspace=str(tmp_path / 'workspace')) as container:
+    async def exercise() -> None:
+        with Container(workspace=str(tmp_path / "workspace")) as container:
             service = SessionService(container.repositories, container.artifact_store)
-            session = service.create_session('a')
+            session = service.create_session("a")
             buffer = io.BytesIO()
-            Image.new('RGB', (8, 8)).save(buffer, format='PNG')
-            source = 'art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa'
+            Image.new("RGB", (8, 8)).save(buffer, format="PNG")
+            source = "art_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa"
             container.artifact_store.stage(source, buffer.getvalue())
             container.artifact_store.publish(source)
-            deps = Deps(container.repositories, container.artifact_store,
-                        execute=container.execute, workspace_root=container.resolved_workspace.root)
+            deps = Deps(
+                container.repositories,
+                container.artifact_store,
+                execute=container.execute,
+                workspace_root=container.resolved_workspace.root,
+            )
             from textual.app import App
-            app = App()
+
+            app: App[None] = App()
             async with app.run_test() as pilot:
-                screen = ModelProcessScreen(deps, source, session.id,
-                                            container.artifact_store.get(source))
+                source_path = container.artifact_store.get(source)
+                assert source_path is not None
+                screen = ModelProcessScreen(deps, source, session.id, source_path)
                 await app.push_screen(screen)
-                screen._start({'artifact': source, 'session': session.id,
-                               'model': 'film-degrainer', 'tile': 256, 'overlap': 16,
-                               'accept': True, 'timeout': 900})
+                screen._start(
+                    {
+                        "artifact": source,
+                        "session": session.id,
+                        "model": "film-degrainer",
+                        "tile": 256,
+                        "overlap": 16,
+                        "accept": True,
+                        "timeout": 900,
+                    }
+                )
                 try:
                     assert await asyncio.to_thread(entered.wait, 2)
                     await screen.remove_children()
@@ -265,36 +311,41 @@ def test_model_download_can_outlive_closed_page(tmp_path, monkeypatch):
 
     from imagen_cli.application import superres
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
     started, release = Event(), Event()
-    model = 'film-degrainer'
-    weights = b'offline test weights'
+    model = "film-degrainer"
+    weights = b"offline test weights"
     import hashlib
-    monkeypatch.setitem(superres.MANIFEST[model], 'sha256', hashlib.sha256(weights).hexdigest())
+
+    monkeypatch.setitem(superres.MANIFEST[model], "sha256", hashlib.sha256(weights).hexdigest())
 
     def download(url, target):
         started.set()
-        assert release.wait(5), 'test did not release the download'
+        assert release.wait(5), "test did not release the download"
         target.write_bytes(weights)
 
-    monkeypatch.setattr(superres, '_download', download)
-    path = tmp_path / 'source.png'
-    Image.new('RGB', (8, 8)).save(path)
+    monkeypatch.setattr(superres, "_download", download)
+    path = tmp_path / "source.png"
+    Image.new("RGB", (8, 8)).save(path)
 
-    class Harness(App):
+    class Harness(App[None]):
         CSS = WorkbenchApp.CSS
 
-    async def exercise():
-        with Container(workspace=str(tmp_path / 'workspace')) as container:
-            deps = Deps(container.repositories, container.artifact_store,
-                        execute=container.execute,
-                        workspace_root=container.resolved_workspace.root)
+    async def exercise() -> None:
+        with Container(workspace=str(tmp_path / "workspace")) as container:
+            deps = Deps(
+                container.repositories,
+                container.artifact_store,
+                execute=container.execute,
+                workspace_root=container.resolved_workspace.root,
+            )
             app = Harness()
             async with app.run_test(size=(100, 35)) as pilot:
-                screen = ModelProcessScreen(deps, 'art', 'ses', path)
+                screen = ModelProcessScreen(deps, "art", "ses", path)
                 await app.push_screen(screen)
-                screen.table.move_cursor(row=next(i for i, row in enumerate(screen.rows)
-                                                 if row['model'] == model))
+                screen.table.move_cursor(
+                    row=next(i for i, row in enumerate(screen.rows) if row["model"] == model)
+                )
                 await pilot.pause()
                 screen.action_fetch()
                 await pilot.pause()
@@ -302,10 +353,13 @@ def test_model_download_can_outlive_closed_page(tmp_path, monkeypatch):
                 try:
                     assert await asyncio.to_thread(started.wait, 2)
                     await pilot.pause()
-                    assert not screen.query_one('#model-close').disabled
-                    assert str(screen.query_one('#model-close').label) in {'Close', '关闭'}
-                    assert any(word in str(screen.status.content)
-                               for word in ('continue', '下载继续'))
+                    assert not screen.query_one("#model-close").disabled
+                    from textual.widgets import Button
+
+                    assert str(screen.query_one("#model-close", Button).label) in {"Close", "关闭"}
+                    assert any(
+                        word in str(screen.status.content) for word in ("continue", "下载继续")
+                    )
                     screen.action_cancel()
                     await pilot.pause()
                     assert app.screen is not screen
@@ -314,7 +368,7 @@ def test_model_download_can_outlive_closed_page(tmp_path, monkeypatch):
                     await app.workers.wait_for_complete()
                 await pilot.pause()
                 assert superres.weights_path(model).read_bytes() == weights
-                assert not list(superres.weights_path(model).parent.glob('.imagen-download-*'))
+                assert not list(superres.weights_path(model).parent.glob(".imagen-download-*"))
 
     asyncio.run(exercise())
 
@@ -322,29 +376,158 @@ def test_model_download_can_outlive_closed_page(tmp_path, monkeypatch):
 def test_fixed_model_switch_restores_editable_tile_defaults(tmp_path, monkeypatch):
     from textual.app import App
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
-    path = tmp_path / 'source.png'
-    Image.new('RGB', (8, 8)).save(path)
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
+    path = tmp_path / "source.png"
+    Image.new("RGB", (8, 8)).save(path)
 
-    class Harness(App):
+    class Harness(App[None]):
         CSS = WorkbenchApp.CSS
 
-    async def exercise():
+    async def exercise() -> None:
         app = Harness()
         async with app.run_test(size=(100, 35)) as pilot:
-            screen = ModelProcessScreen(Deps(None, None), 'art', 'ses', path)
+            screen = ModelProcessScreen(
+                Deps(cast(Any, None), cast(Any, None)),
+                "art",
+                "ses",
+                path,
+            )
             await app.push_screen(screen)
-            fixed = next(i for i, row in enumerate(screen.rows)
-                         if row['model'] == 'dejpg-srformer-light')
+            fixed = next(
+                i for i, row in enumerate(screen.rows) if row["model"] == "dejpg-srformer-light"
+            )
             screen.table.move_cursor(row=fixed)
             await pilot.pause()
-            assert screen.tile.value == '64' and screen.tile.disabled
-            normal = next(i for i, row in enumerate(screen.rows)
-                          if row['model'] == 'realesr-animevideov3')
+            assert screen.tile.value == "64" and screen.tile.disabled
+            normal = next(
+                i for i, row in enumerate(screen.rows) if row["model"] == "realesr-animevideov3"
+            )
             screen.table.move_cursor(row=normal)
             await pilot.pause()
             assert not screen.tile.disabled
-            assert screen.tile.value == '256' and screen.overlap.value == '16'
+            assert screen.tile.value == "256" and screen.overlap.value == "16"
+
+    asyncio.run(exercise())
+
+
+def test_matting_picker_includes_hosted_api_models_without_download_state(monkeypatch):
+    from imagen_cli.application import matting
+    from imagen_cli.cli.tui.app import LocalModelScreen
+
+    monkeypatch.setattr(
+        matting,
+        "catalog",
+        lambda **_: {
+            "models": [
+                {
+                    "model": "birefnet-lite",
+                    "scale": 1,
+                    "license": "MIT",
+                    "downloaded": True,
+                    "bytes": 1024,
+                    "source": "local",
+                    "downloadable": True,
+                    "backend": "local",
+                },
+                {
+                    "model": "sprited/birefnet-toonout",
+                    "scale": 1,
+                    "license": "MIT",
+                    "source": "https://replicate.com/sprited/birefnet-toonout",
+                    "backend": "api:replicate",
+                    "available": True,
+                    "cost_note": "vendor-priced per run",
+                    "implemented": True,
+                },
+            ]
+        },
+    )
+
+    async def exercise() -> None:
+        from textual.app import App
+
+        class Harness(App[None]):
+            CSS = WorkbenchApp.CSS
+
+        app = Harness()
+        async with app.run_test(size=(90, 30)) as pilot:
+            screen = LocalModelScreen(family="matting")
+            selected: list[str | None] = []
+            await app.push_screen(screen, selected.append)
+            assert len(screen.rows) == 2
+            screen.table.move_cursor(row=1)
+            await pilot.pause()
+            assert "api.replicate.com" in str(screen.status.content)
+            screen._choose()
+            await pilot.pause()
+            assert selected == ["api:sprited/birefnet-toonout"]
+
+    asyncio.run(exercise())
+
+
+def test_hosted_model_runs_only_after_digest_confirmation(tmp_path, monkeypatch):
+    from textual.app import App
+
+    from imagen_cli.cli.tui.app import ConfirmScreen, TransformScreen
+
+    source = "art_" + "a" * 32
+    calls = []
+
+    def execute(command, args):
+        calls.append((command, dict(args)))
+        if "accept_api" not in args:
+            return "approval_required", {
+                "api_digest": "d" * 64,
+                "error": {
+                    "type": "approval_required",
+                    "detail": "Uploads to api.replicate.com; billed per run.",
+                },
+            }
+        return "succeeded", {"artifact": {"id": "art_output"}}
+
+    class Harness(App[None]):
+        CSS = WorkbenchApp.CSS
+
+    async def exercise() -> None:
+        with Container(workspace=str(tmp_path / "workspace")) as container:
+            path = tmp_path / "source.png"
+            Image.new("RGB", (8, 8), "red").save(path)
+            app = Harness()
+            async with app.run_test(size=(100, 35)) as pilot:
+                deps = Deps(container.repositories, container.artifact_store, execute=execute)
+                screen = TransformScreen(deps, source, "ses", path)
+                await app.push_screen(screen)
+                screen._run_api_matting("sprited/birefnet-toonout")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                assert len(calls) == 1 and "accept_api" not in calls[0][1]
+                assert isinstance(app.screen, ConfirmScreen)
+                assert "api.replicate.com" in app.screen.prompt
+                app.screen.action_answer_yes()
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                assert len(calls) == 2
+                assert calls[1][1]["accept_api"] == "d" * 64
+
+    asyncio.run(exercise())
+
+
+def test_command_palette_exposes_watermark_resample():
+    from textual.app import App
+
+    from imagen_cli.cli.tui.app import CommandPaletteScreen
+
+    class Harness(App[None]):
+        CSS = WorkbenchApp.CSS
+
+    async def exercise() -> None:
+        app = Harness()
+        async with app.run_test(size=(100, 35)) as pilot:
+            screen = CommandPaletteScreen()
+            await app.push_screen(screen)
+            screen.filter.value = "watermark resample"
+            await pilot.pause()
+            assert screen.matches == ["watermark resample"]
 
     asyncio.run(exercise())
 
@@ -353,31 +536,38 @@ def test_model_run_requires_explicit_license_confirmation(tmp_path, monkeypatch)
     from textual.app import App
 
     from imagen_cli.application import superres
+    from imagen_cli.application.container import Container
     from imagen_cli.cli.tui.app import ConfirmScreen
 
-    monkeypatch.setenv('IMAGEN_MODEL_DIR', str(tmp_path / 'models'))
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
     catalog = superres.catalog()
-    for row in catalog['models']:
-        row['downloaded'] = True
-    monkeypatch.setattr(superres, 'catalog', lambda: catalog)
-    path = tmp_path / 'source.png'
-    Image.new('RGB', (8, 8), 'red').save(path)
+    for row in catalog["models"]:
+        row["downloaded"] = True
+    monkeypatch.setattr(superres, "catalog", lambda: catalog)
+    path = tmp_path / "source.png"
+    Image.new("RGB", (8, 8), "red").save(path)
 
-    class Harness(App):
+    class Harness(App[None]):
         CSS = WorkbenchApp.CSS
 
-    async def exercise():
-        app = Harness()
-        async with app.run_test(size=(100, 35)) as pilot:
-            screen = ModelProcessScreen(Deps(None, None), 'art', 'ses', path)
-            await app.push_screen(screen)
-            screen.action_apply()
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmScreen)
-            assert screen.running is False
-            app.screen.dismiss(False)
-            await pilot.pause()
-            assert app.screen is screen
-            assert screen.running is False
+    async def exercise() -> None:
+        with Container(workspace=str(tmp_path / "workspace")) as container:
+            app = Harness()
+            async with app.run_test(size=(100, 35)) as pilot:
+                screen = ModelProcessScreen(
+                    Deps(container.repositories, container.artifact_store),
+                    "art",
+                    "ses",
+                    path,
+                )
+                await app.push_screen(screen)
+                screen.action_apply()
+                await pilot.pause()
+                assert isinstance(app.screen, ConfirmScreen)
+                assert screen.running is False
+                app.screen.dismiss(False)
+                await pilot.pause()
+                assert not isinstance(app.screen, ConfirmScreen)
+                assert screen.running is False
 
     asyncio.run(exercise())

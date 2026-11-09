@@ -77,8 +77,12 @@ def test_pinned_version_uses_predictions_endpoint():
         ),
     }
     result = replicate.predict(
-        "sprited/birefnet", {"image": "data:image/png;base64,AA"},
-        token="t", version="v1", transport=_router(routes), sleep=lambda _s: None,
+        "sprited/birefnet",
+        {"image": "data:image/png;base64,AA"},
+        token="t",
+        version="v1",
+        transport=_router(routes),
+        sleep=lambda _s: None,
     )
 
     assert seen["url"] == "https://api.replicate.com/v1/predictions"
@@ -99,12 +103,16 @@ def test_polls_until_terminal():
 
     routes: dict[tuple[str, str], Route] = {
         ("POST", "/v1/models/o/m/predictions"): httpx.Response(
-            201, json={"id": "p3", "status": "starting"}),
+            201, json={"id": "p3", "status": "starting"}
+        ),
         ("GET", "/v1/predictions/p3"): polled,
     }
     result = replicate.predict(
-        "o/m", {"image": "data:image/png;base64,AA"}, token="t",
-        transport=_router(routes), sleep=lambda _s: None,
+        "o/m",
+        {"image": "data:image/png;base64,AA"},
+        token="t",
+        transport=_router(routes),
+        sleep=lambda _s: None,
     )
     assert polls["count"] == 3
     assert result.output == ("https://x/o.png",)
@@ -113,14 +121,19 @@ def test_polls_until_terminal():
 def test_failed_prediction_raises_with_detail():
     routes: dict[tuple[str, str], Route] = {
         ("POST", "/v1/models/o/m/predictions"): httpx.Response(
-            201, json={"id": "p4", "status": "starting"}),
+            201, json={"id": "p4", "status": "starting"}
+        ),
         ("GET", "/v1/predictions/p4"): httpx.Response(
             200, json={"id": "p4", "status": "failed", "error": "CUDA out of memory"}
         ),
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", transport=_router(routes), sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            transport=_router(routes),
+            sleep=lambda _s: None,
         )
     assert caught.value.kind == "failed"
     assert "CUDA out of memory" in caught.value.detail
@@ -129,14 +142,17 @@ def test_failed_prediction_raises_with_detail():
 def test_canceled_prediction_raises():
     routes: dict[tuple[str, str], Route] = {
         ("POST", "/v1/models/o/m/predictions"): httpx.Response(
-            201, json={"id": "p5", "status": "starting"}),
-        ("GET", "/v1/predictions/p5"): httpx.Response(
-            200, json={"id": "p5", "status": "canceled"}
+            201, json={"id": "p5", "status": "starting"}
         ),
+        ("GET", "/v1/predictions/p5"): httpx.Response(200, json={"id": "p5", "status": "canceled"}),
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", transport=_router(routes), sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            transport=_router(routes),
+            sleep=lambda _s: None,
         )
     assert caught.value.kind == "canceled"
 
@@ -144,22 +160,34 @@ def test_canceled_prediction_raises():
 def test_timeout_stops_polling():
     routes: dict[tuple[str, str], Route] = {
         ("POST", "/v1/models/o/m/predictions"): httpx.Response(
-            201, json={"id": "p6", "status": "starting"}),
+            201, json={"id": "p6", "status": "starting"}
+        ),
         ("GET", "/v1/predictions/p6"): httpx.Response(
-            200, json={"id": "p6", "status": "processing"}),
+            200, json={"id": "p6", "status": "processing"}
+        ),
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", transport=_router(routes),
-            poll_interval=1.0, poll_max=1.0, timeout=3.0, sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            transport=_router(routes),
+            poll_interval=1.0,
+            poll_max=1.0,
+            timeout=3.0,
+            sleep=lambda _s: None,
         )
     assert caught.value.kind == "timeout"
 
 
 @pytest.mark.parametrize(
     ("status", "kind"),
-    [(401, "authentication_error"), (403, "authentication_error"),
-     (402, "insufficient_credit"), (429, "rate_limited")],
+    [
+        (401, "authentication_error"),
+        (403, "authentication_error"),
+        (402, "insufficient_credit"),
+        (429, "rate_limited"),
+    ],
 )
 def test_submit_status_codes_map_to_kinds(status: int, kind: str):
     routes: dict[tuple[str, str], Route] = {
@@ -167,7 +195,11 @@ def test_submit_status_codes_map_to_kinds(status: int, kind: str):
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", transport=_router(routes), sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            transport=_router(routes),
+            sleep=lambda _s: None,
         )
     assert caught.value.kind == kind
 
@@ -195,7 +227,11 @@ def test_error_text_scrubs_credentials():
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", transport=_router(routes), sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            transport=_router(routes),
+            sleep=lambda _s: None,
         )
     assert fake_token not in caught.value.detail
     assert "[redacted]" in caught.value.detail
@@ -213,8 +249,7 @@ def test_throttled_submission_waits_for_retry_after():
     def throttled(request: httpx.Request) -> httpx.Response:
         calls["count"] += 1
         if calls["count"] == 1:
-            return httpx.Response(429, headers={"retry-after": "3"},
-                                  json={"detail": "throttled"})
+            return httpx.Response(429, headers={"retry-after": "3"}, json={"detail": "throttled"})
         return httpx.Response(201, json={"id": "p9", "status": "starting"})
 
     routes: dict[tuple[str, str], Route] = {
@@ -224,8 +259,13 @@ def test_throttled_submission_waits_for_retry_after():
         ),
     }
     result = replicate.predict(
-        "o/m", {}, token="t", version="v1", transport=_router(routes),
-        timeout=60.0, sleep=slept.append,
+        "o/m",
+        {},
+        token="t",
+        version="v1",
+        transport=_router(routes),
+        timeout=60.0,
+        sleep=slept.append,
     )
     assert calls["count"] == 2
     assert slept[0] == 3.0
@@ -235,11 +275,17 @@ def test_throttled_submission_waits_for_retry_after():
 def test_throttling_gives_up_when_the_budget_runs_out():
     routes: dict[tuple[str, str], Route] = {
         ("POST", "/v1/predictions"): httpx.Response(
-            429, headers={"retry-after": "60"}, json={"detail": "throttled"}),
+            429, headers={"retry-after": "60"}, json={"detail": "throttled"}
+        ),
     }
     with pytest.raises(replicate.ReplicateError) as caught:
         replicate.predict(
-            "o/m", {}, token="t", version="v1", transport=_router(routes),
-            timeout=30.0, sleep=lambda _s: None,
+            "o/m",
+            {},
+            token="t",
+            version="v1",
+            transport=_router(routes),
+            timeout=30.0,
+            sleep=lambda _s: None,
         )
     assert caught.value.kind == "rate_limited"

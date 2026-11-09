@@ -229,9 +229,9 @@ _SUMMARY_EN = {
     "superres fetch": "Download upscaling weights pinned to a digest; requires --accept",
     "superres benchmark": "Compare upscaling models by downsampling self-consistency, "
     "PSNR/SSIM and time",
-    "matting run": "Predict an alpha matte locally and save an RGBA artifact; the source "
-    "is never modified",
-    "matting models": "List matting models with licence, download and install state",
+    "matting run": "Predict an alpha matte locally, on your worker, or through a gated "
+    "Replicate API model; save a new RGBA artifact",
+    "matting models": "List local and hosted matting models with backend and readiness",
     "matting doctor": "Run one inference on a 64x64 image to prove the requested backend "
     "is really in use; no weight download",
     "matting install": "Install the inference runtime and any named matting models; "
@@ -285,8 +285,7 @@ _SUMMARY_EN = {
     "explicit only; requires --accept",
     "deploy remove": "Delete a Salad container group or stop the Modal app; "
     "irreversible; requires --accept and --yes",
-    "deploy secret set": "Store a deployment key privately and return only its "
-    "private: reference",
+    "deploy secret set": "Store a deployment key privately and return only its private: reference",
     "language": "Show or set the default interface language",
     "tui": "Open the terminal workspace; browse read-only and delete with confirmation",
 }
@@ -333,12 +332,12 @@ def _geometry_descriptions() -> dict[str, str]:
         spec.name: spec.values
         for spec in vocabulary.specs(
             "gemini", "generate_content", "gemini-3.1-flash-image", "generate"
-        ) or ()
+        )
+        or ()
     }
     openai = {
         spec.name: spec.values
-        for spec in vocabulary.specs("openai", "images", "gpt-image-2.5-sunburst", "generate")
-        or ()
+        for spec in vocabulary.specs("openai", "images", "gpt-image-2.5-sunburst", "generate") or ()
     }
     return {
         "size": (
@@ -364,8 +363,14 @@ def _creation_schema(operation: str | None = None) -> dict[str, Any]:
     properties = schema["properties"]
     # Pydantic's runtime validators are not represented in its generated schema.
     for field in (
-        "profile", "model", "mask", "size", "aspect_ratio", "image_size",
-        "retry_of_job_id", "ack_duplicate_cost",
+        "profile",
+        "model",
+        "mask",
+        "size",
+        "aspect_ratio",
+        "image_size",
+        "retry_of_job_id",
+        "ack_duplicate_cost",
     ):
         properties[field] = properties[field]["anyOf"][0]
     for field, description in _geometry_descriptions().items():
@@ -495,8 +500,12 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {field: {"type": "string", "pattern": f"^{prefix}_[0-9a-f]{{32}}$"}}
         required = (field,)
         if name.endswith(" wait") or name == "plan execute":
-            properties["timeout"] = {"type": "integer", "default": 300,
-                                     "minimum": 1, "maximum": 86400}
+            properties["timeout"] = {
+                "type": "integer",
+                "default": 300,
+                "minimum": 1,
+                "maximum": 86400,
+            }
         if name == "job cancel":
             properties["scope"] = {"enum": ["wait", "local", "remote"]}
             required += ("scope",)
@@ -542,7 +551,9 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "superres run":
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
-            "model": text, "backend": text, "session": text,
+            "model": text,
+            "backend": text,
+            "session": text,
             "tile": {"type": "integer", "minimum": 4, "default": 256},
             "overlap": {"type": "integer", "minimum": 0, "default": 16},
             "accept": {"type": "boolean", "default": False},
@@ -603,8 +614,11 @@ def _input_schema(name: str) -> dict[str, Any]:
             "mask_blur": {"type": "integer", "minimum": 0, "maximum": 128, "default": 0},
             "mask_offset": {"type": "integer", "minimum": -64, "maximum": 64, "default": 0},
             "refine_fg": {"type": "boolean", "default": False},
-            "replicate_key_ref": {"type": "string", "minLength": 1,
-                                   "default": "env:REPLICATE_API_TOKEN"},
+            "replicate_key_ref": {
+                "type": "string",
+                "minLength": 1,
+                "default": "env:REPLICATE_API_TOKEN",
+            },
         }
         required = ("artifact",)
     elif name == "matting models":
@@ -646,7 +660,8 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {
             "artifact": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
             "regions": {
-                "type": "array", "minItems": 1,
+                "type": "array",
+                "minItems": 1,
                 "items": {"type": "string", "pattern": "^-?\\d+,-?\\d+,\\d+,\\d+$"},
             },
             "backend": {"enum": ["cv2", "migan", "lama"], "default": "cv2"},
@@ -683,8 +698,7 @@ def _input_schema(name: str) -> dict[str, Any]:
         properties = {
             "directory": text,
             "to": text,
-            "mode": {"enum": ["visible", "metadata", "all", "invisible"],
-                     "default": "all"},
+            "mode": {"enum": ["visible", "metadata", "all", "invisible"], "default": "all"},
             "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "auto"},
             "sensitivity": {"enum": ["auto", "strict"], "default": "auto"},
             "pipeline": {
@@ -706,8 +720,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "text_manifest": text,
             "fidelity_anchor": {"type": "boolean", "default": False},
             "vendor": text,
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 3600},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 3600},
         }
         required = ("directory",)
     elif name == "watermark video identify":
@@ -726,8 +739,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "mark": text,
             "backend": {"enum": ["auto", "cv2", "migan", "lama"], "default": "cv2"},
             "session": text,
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 3600},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 3600},
         }
         required = ("artifact",)
     elif name == "watermark video all":
@@ -742,8 +754,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "batch_size": {"type": "integer", "minimum": 1},
             "seed": {"type": "integer", "minimum": 0},
             "session": text,
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 3600},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 3600},
         }
         required = ("artifact",)
     elif name == "watermark video invisible":
@@ -757,8 +768,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "model": text,
             "device": {"enum": ["auto", "cpu", "cuda"], "default": "auto"},
             "session": text,
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 7200},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 7200},
         }
         required = ("artifact",)
     elif name == "watermark video batch":
@@ -774,8 +784,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "fps": {"type": "number", "exclusiveMinimum": 0},
             "batch_size": {"type": "integer", "minimum": 1},
             "seed": {"type": "integer", "minimum": 0},
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 7200},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 7200},
         }
         required = ("directory",)
     elif name in {"watermark invisible", "watermark all"}:
@@ -844,8 +853,12 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name == "remote jobs list":
         properties = {"provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
         required = ()
-    elif name in {"remote job get", "remote job resume",
-                  "remote job retry-interrupted", "remote job cancel"}:
+    elif name in {
+        "remote job get",
+        "remote job resume",
+        "remote job retry-interrupted",
+        "remote job cancel",
+    }:
         properties = {"job": {"type": "string", "pattern": "^rmt_[0-9a-f]{32}$"}}
         required = ("job",)
     elif name == "deploy status":
@@ -866,8 +879,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "rename": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
             "set_env": {
                 "type": "array",
-                "items": {"type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"},
+                "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"},
             },
             "salad_key_ref": {"type": "string", "pattern": _REF},
             "worker_token_ref": {"type": "string", "pattern": _REF},
@@ -880,8 +892,7 @@ def _input_schema(name: str) -> dict[str, Any]:
             "modal_cpu": {"type": "number", "exclusiveMinimum": 0},
             "accept": {"type": "boolean", "default": False},
             "yes": {"type": "boolean", "default": False},
-            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400,
-                            "default": 900},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 900},
         }
         required = ("vendor", "image")
     elif name == "deploy build":
@@ -977,11 +988,17 @@ def _data_schema(command: Command) -> dict[str, Any]:
     if command.name == "profile secret":
         return _object({"profile": {"type": "object"}}, ("profile",))
     if command.name in {"transform", "superres run"}:
-        return _object({"artifact": {"type": "object"}, "source": {"type": "string"},
-                        "job": {"type": "object"},
-                        "artifacts": {"type": "array", "items": {"type": "object"}},
-                        "next_actions": {"type": "array", "items": {"type": "object"}},
-                        "budget": {"type": "object"}, "error": {"type": "object"}})
+        return _object(
+            {
+                "artifact": {"type": "object"},
+                "source": {"type": "string"},
+                "job": {"type": "object"},
+                "artifacts": {"type": "array", "items": {"type": "object"}},
+                "next_actions": {"type": "array", "items": {"type": "object"}},
+                "budget": {"type": "object"},
+                "error": {"type": "object"},
+            }
+        )
     if command.name == "sheet":
         return _object(
             {
@@ -1336,7 +1353,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
             return _object({"jobs": {"type": "array", "items": row}}, ("jobs",))
         if command.name == "remote job get":
             return _object(
-                {"job": row, "live": {"type": ["object", "null"]}}, ("job", "live"),
+                {"job": row, "live": {"type": ["object", "null"]}},
+                ("job", "live"),
             )
         if command.name == "remote job resume":
             return _object(
@@ -1353,8 +1371,7 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "name": {"type": ["string", "null"]},
                 "endpoint": {"type": "string"},
                 **dict.fromkeys(
-                    ("state_mode", "gpu", "worker_digest", "raiw_version",
-                     "imagen_cli_version"),
+                    ("state_mode", "gpu", "worker_digest", "raiw_version", "imagen_cli_version"),
                     {"type": ["string", "null"]},
                 ),
                 "meta": {"type": "object"},
@@ -1378,8 +1395,15 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "capabilities": {"type": "object"},
                 "cuda": {"type": "boolean"},
             },
-            ("interpreter", "environment", "supported_range", "known_good",
-             "memory_limit", "memory_mb", "ready"),
+            (
+                "interpreter",
+                "environment",
+                "supported_range",
+                "known_good",
+                "memory_limit",
+                "memory_mb",
+                "ready",
+            ),
         )
     if command.name in {"watermark setup", "watermark update"}:
         return _object(
@@ -1407,12 +1431,15 @@ def _data_schema(command: Command) -> dict[str, Any]:
         )
     if command.name == "watermark video identify":
         return _object(
-            {"report": {"type": "object"},
-             "raiw_version": {"type": ["string", "null"]}},
+            {"report": {"type": "object"}, "raiw_version": {"type": ["string", "null"]}},
             ("report",),
         )
-    if command.name in {"watermark video metadata", "watermark video visible",
-                        "watermark video all", "watermark video invisible"}:
+    if command.name in {
+        "watermark video metadata",
+        "watermark video visible",
+        "watermark video all",
+        "watermark video invisible",
+    }:
         return _object(
             {
                 "artifact": {"type": "object"},
@@ -1422,9 +1449,13 @@ def _data_schema(command: Command) -> dict[str, Any]:
                 "raiw_version": {"type": ["string", "null"]},
             },
             # metadata without --remove and a no-match visible run publish nothing.
-            ("artifact",) if command.name in {
-                "watermark video all", "watermark video invisible",
-            } else (),
+            ("artifact",)
+            if command.name
+            in {
+                "watermark video all",
+                "watermark video invisible",
+            }
+            else (),
         )
     if command.name in {"watermark identify", "watermark classify"}:
         return _object(
@@ -1446,8 +1477,13 @@ def _data_schema(command: Command) -> dict[str, Any]:
             },
             ("artifact",),
         )
-    if command.name in {"watermark metadata", "watermark visible", "watermark erase",
-                        "watermark invisible", "watermark all"}:
+    if command.name in {
+        "watermark metadata",
+        "watermark visible",
+        "watermark erase",
+        "watermark invisible",
+        "watermark all",
+    }:
         return _object(
             {
                 "artifact": {"type": "object"},

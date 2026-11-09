@@ -34,7 +34,7 @@
 
 ## 新更新
 
-最近版本加入本地水印工作台与媒体批处理：
+即将发布的 `0.1.22` 增加 Replicate 托管抠图与本地「降采样→超分」水印处理，同时包含水印工作台和媒体批处理：
 
 - **图片**：`watermark identify`、`metadata`、`visible`、`erase`、`invisible`、`all`、`classify`，并保留许可证与内存预算确认。
 - **视频**：`watermark video identify`、`metadata`、`visible`、`all`、`invisible`，包括流复制元数据移除与稳定可见标记移除。
@@ -564,6 +564,8 @@ imagen matting run ARTIFACT_ID --model sprited/birefnet-toonout --accept-api DIG
 
 `--tile 0` 表示整图一次推理；给正数则对大图分块，`--overlap` 避免接缝落在发丝上。`--feather` 羽化 alpha，`--edge-shift` 移动视觉边界，两者默认都是 `0`。
 
+在 TUI 中打开 transform 页面并选择抠图 preset；模型选择器会把 `api:replicate` 托管模型与本地权重并列显示。Imagen 会先显示上传目标、按次计费说明和请求摘要；只有确认后才上传图片。API 模型不下载权重，也不会进入本地 ONNX pipeline。
+
 显存小的卡上，模型固定的 1024×1024 输入在 fp32 下可能直接分配失败（4 GB 卡就是如此）。`--precision auto` 先用 fp32，遇到分配失败就把已校验的权重派生一份半精度副本、缓存在旁边，然后重试一次；`--precision fp16` 直接走这条路，`--precision fp32` 永不回退。RTX 2050 实测：fp32 在 822 MB 分配上失败、fp16 可用，而与 CPU fp32 参照相比 alpha 最大只差 3/255（平均 0.034/255）。`imagen matting doctor` 会报告 `precision_used` 与 `fp16_cached`。
 
 抠图是预测而非保证：极细发丝、玻璃与半透明材质可能判断错误，抠得不准时边缘会残留原背景颜色。
@@ -637,6 +639,8 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `watermark setup --accept` 用 `visible` extra 创建隔离环境。按需追加 extra，例如不可见处理用 `--extras visible,qwen-zimage`，分类用 `--extras visible,classify,source-classify`，视频用 `--extras visible,video,diffusion`，然后重启 Imagen。`watermark update --accept` 构建并验证新环境后再切换；更新失败会保留旧环境。
 
 ### 先降采样再超分
+
+`watermark resample` 只在本地运行，不接受 `--remote`，不需要隔离的 raiw 环境，且始终报告 `verified: false`。它不能证明水印已被移除。在 TUI 中按 `:` 打开命令面板也能找到该命令。
 
 ```bash
 imagen superres fetch --model realesrgan-x2plus --accept
@@ -898,4 +902,3 @@ Imagen 建立在开源工作之上。以下是它所依赖项目的引用，不�
 ## 许可证
 
 Imagen 源码采用 [MIT License](LICENSE)。第三方依赖、端点服务和模型权重适用各自的许可与条款。
-

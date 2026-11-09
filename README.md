@@ -34,7 +34,7 @@ Help, errors, and TUI text support English and Simplified Chinese. JSON keys, st
 
 ## What's new
 
-The latest release adds a local watermark workbench and media batches:
+The upcoming `0.1.22` release adds Replicate-hosted matting and a local downscale→super-resolution watermark operation, alongside the watermark workbench and media batches:
 
 - **Images:** `watermark identify`, `metadata`, `visible`, `erase`, `invisible`, `all`, and `classify`, with explicit license and memory-budget gates.
 - **Video:** `watermark video identify`, `metadata`, `visible`, `all`, and `invisible`, including stream-copy metadata removal and stable visible-mark removal.
@@ -566,6 +566,8 @@ Non-commercial weights are deliberately absent from the catalog. Bria RMBG-2.0, 
 
 `--tile 0` runs the whole image in one pass; a positive value splits large images, and `--overlap` keeps tile seams out of hair edges. `--feather` blurs the alpha and `--edge-shift` moves the apparent boundary; both default to `0`.
 
+In the TUI, open the transform page and choose a matting preset; the model picker lists hosted `api:replicate` models beside local weights. Imagen first displays the exact upload destination and per-run billing note with its request digest; the image is sent only after you confirm. API models do not download weights and do not run through the local ONNX pipeline.
+
 On a GPU with little memory the graph's fixed 1024x1024 input can fail to allocate
 in fp32; a 4 GB card cannot. `--precision auto` runs fp32 first and, on an
 allocation failure, derives a half-precision copy of the pinned weights, caches it
@@ -648,6 +650,8 @@ imagen watermark all ARTIFACT_ID --pipeline sdxl-zimage --accept-license
 - `watermark setup --accept` creates the isolated environment with the `visible` extra. Add the extras you need, such as `--extras visible,qwen-zimage` for invisible work, `--extras visible,classify,source-classify` for classification, or `--extras visible,video,diffusion` for video, then restart Imagen. `watermark update --accept` builds and probes a new one, then switches; a failed update keeps the previous environment.
 
 ### Downscale, then upscale
+
+`watermark resample` is a local-only image operation. It does not support `--remote`, does not use the isolated raiw environment, and makes no claim that a watermark is verified as removed. The TUI command palette (open with `:`) exposes the same command.
 
 ```bash
 imagen superres fetch --model realesrgan-x2plus --accept
@@ -920,4 +924,3 @@ Imagen builds on open-source work. These are references to the projects whose be
 ## License
 
 Imagen source code is available under the [MIT License](LICENSE). Third-party dependencies, provider services, and model weights are covered by their own terms.
-
