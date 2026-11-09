@@ -158,10 +158,23 @@ def _detail_result_lines(data: dict[str, Any]) -> list[str]:
         )
         lines.append(t(f"ONNX runtime: {runtime_state}", f"ONNX 运行时：{runtime_state}"))
         for row in data["models"][:_MAX_ROWS]:
+            scale = f" · x{row['scale']}" if row.get("scale") else ""
+            if row.get("backend") == "api:replicate":
+                # A hosted model has no file to download; readiness means a key is set.
+                ready = t("key present", "已配置令牌") if row.get("available") else t(
+                    "no token", "缺少令牌"
+                )
+                pending = "" if row.get("implemented", True) else t(
+                    " · not implemented", " · 未实现"
+                )
+                lines.append(
+                    f"{row.get('model')}{scale} · api:replicate"
+                    f" · {row.get('license', '')} · {ready}{pending}"
+                )
+                continue
             state = t("downloaded", "已下载") if row.get("downloaded") else t(
                 "not downloaded", "未下载"
             )
-            scale = f" · x{row['scale']}" if row.get("scale") else ""
             lines.append(
                 f"{row.get('model')}{scale} · {row.get('task', 'upscale')}"
                 f" · {row.get('license', '')} · {state}"
@@ -413,9 +426,18 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
         ident = row.get("model_id") or row.get("model")
         detail = row.get("evidence") or row.get("license") or ""
         scale = f" · x{row['scale']}" if row.get("scale") else ""
+        backend = row.get("backend")
+        badge = ""
+        if backend == "api:replicate":
+            ready = t("key present", "已配置令牌") if row.get("available") else t(
+                "no token", "缺少令牌"
+            )
+            badge = f" · {backend} · {ready}"
+        elif backend == "local" and row.get("state"):
+            badge = f" · {backend} · {row['state']}"
         lines.append(
             t(f"Model {ident}", f"模型 {ident}")
-            + f"{scale}{(' · ' + str(detail)) if detail else ''}"
+            + f"{scale}{badge}{(' · ' + str(detail)) if detail else ''}"
         )
     if len(models) > _MAX_ROWS:
         lines.append(

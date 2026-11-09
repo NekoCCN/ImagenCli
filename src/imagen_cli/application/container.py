@@ -437,39 +437,49 @@ class Container:
                     return "succeeded", {"remotes": remote_service.list_()}
                 if command == "remote add":
                     return "succeeded", remote_service.add(
-                        args["name"], args["endpoint"], args["credential_ref"],
+                        args["name"],
+                        args["endpoint"],
+                        args["credential_ref"],
                         gateway_credential_ref=args.get("gateway_credential_ref"),
                         private_store=self.private_state_store,
                     )
                 if command == "remote status":
                     return "succeeded", remote_service.status(
-                        args["name"], private_store=self.private_state_store,
+                        args["name"],
+                        private_store=self.private_state_store,
                     )
                 if command == "remote jobs list":
                     return "succeeded", {
                         "jobs": remote_service.jobs_list(
-                            self.repositories, args.get("provider"),
+                            self.repositories,
+                            args.get("provider"),
                         ),
                     }
                 if command.startswith("remote job "):
                     action = command.removeprefix("remote job ")
                     if action == "get":
                         return "succeeded", remote_service.job_get(
-                            self.repositories, args["job"],
+                            self.repositories,
+                            args["job"],
                             private_store=self.private_state_store,
                         )
                     if action == "resume":
                         return remote_service.job_resume(
-                            self.repositories, self.artifact_store, args["job"],
+                            self.repositories,
+                            self.artifact_store,
+                            args["job"],
                             private_store=self.private_state_store,
                         )
                     if action == "retry-interrupted":
                         return remote_service.job_retry_interrupted(
-                            self.repositories, self.artifact_store, args["job"],
+                            self.repositories,
+                            self.artifact_store,
+                            args["job"],
                             private_store=self.private_state_store,
                         )
                     return remote_service.job_cancel(
-                        self.repositories, args["job"],
+                        self.repositories,
+                        args["job"],
                         private_store=self.private_state_store,
                     )
                 remote_service.remove(args["name"])
@@ -477,9 +487,12 @@ class Container:
             except remote_service.RemoteError as error:
                 return error.status, {"error": {"type": error.status, "detail": str(error)}}
             except (ValueError, OSError) as error:
-                return "validation_error", {"error": {
-                    "type": "validation_error", "detail": str(error),
-                }}
+                return "validation_error", {
+                    "error": {
+                        "type": "validation_error",
+                        "detail": str(error),
+                    }
+                }
         if command.startswith("deploy "):
             from jsonschema import validate
 
@@ -490,7 +503,8 @@ class Container:
             try:
                 if command == "deploy status":
                     return deploy_service.status(
-                        args["vendor"], name=args.get("name"),
+                        args["vendor"],
+                        name=args.get("name"),
                         salad_key_ref=args.get("salad_key_ref"),
                         worker_token_ref=args.get("worker_token_ref"),
                         salad_org=args.get("salad_org"),
@@ -499,8 +513,10 @@ class Container:
                     )
                 if command == "deploy update":
                     return deploy_service.update(
-                        args["vendor"], image=args["image"],
-                        name=args.get("name"), rename=args.get("rename"),
+                        args["vendor"],
+                        image=args["image"],
+                        name=args.get("name"),
+                        rename=args.get("rename"),
                         set_env=args.get("set_env"),
                         accept=args.get("accept") is True,
                         yes=args.get("yes") is True,
@@ -518,11 +534,11 @@ class Container:
                     )
                 if command == "deploy build":
                     return deploy_service.build(
-                        tag=args["tag"], image=args["image"],
+                        tag=args["tag"],
+                        image=args["image"],
                         push=args.get("push") is True,
                         target=args.get("image_target", "worker"),
-                        salad_queue_worker_url_ref=args.get(
-                            "salad_queue_worker_url_ref"),
+                        salad_queue_worker_url_ref=args.get("salad_queue_worker_url_ref"),
                         base_image=args.get("base_image"),
                         registry_username_ref=args.get("registry_user_ref"),
                         registry_password_ref=args.get("registry_password_ref"),
@@ -531,7 +547,8 @@ class Container:
                     )
                 if command == "deploy remove":
                     return deploy_service.remove(
-                        args["vendor"], name=args.get("name"),
+                        args["vendor"],
+                        name=args.get("name"),
                         accept=args.get("accept") is True,
                         yes=args.get("yes") is True,
                         salad_key_ref=args.get("salad_key_ref"),
@@ -542,12 +559,17 @@ class Container:
                         private_store=self.private_state_store,
                     )
                 return deploy_service.set_secret(
-                    self.private_state_store, args["name"], args["key_file"],
+                    self.private_state_store,
+                    args["name"],
+                    args["key_file"],
                 )
             except (ValueError, OSError) as error:
-                return "validation_error", {"error": {
-                    "type": "validation_error", "detail": str(error),
-                }}
+                return "validation_error", {
+                    "error": {
+                        "type": "validation_error",
+                        "detail": str(error),
+                    }
+                }
         if command.startswith("watermark "):
             from jsonschema import validate
 
@@ -568,38 +590,47 @@ class Container:
 
             def failed(error: Any) -> tuple[str, dict[str, Any]]:
                 status = str(failures.get(error.status, error.status))
-                return status, {"error": {"type": status, "detail": str(error)},
-                                **error.data}
+                return status, {"error": {"type": status, "detail": str(error)}, **error.data}
 
             if command == "watermark status":
                 return "succeeded", watermark_service.status()
             if command == "watermark setup":
                 try:
                     return "succeeded", watermark_service.setup(
-                        args.get("accept") is True, args.get("extras"),
+                        args.get("accept") is True,
+                        args.get("extras"),
                     )
                 except (ValueError, watermark_service.WatermarkError) as error:
                     if isinstance(error, watermark_service.WatermarkError):
                         return failed(error)
-                    return "validation_error", {"error": {
-                        "type": "validation_error", "detail": str(error),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": str(error),
+                        }
+                    }
             if command == "watermark update":
                 try:
                     return "succeeded", watermark_service.update(
-                        args.get("accept") is True, args.get("to"), args.get("extras"),
+                        args.get("accept") is True,
+                        args.get("to"),
+                        args.get("extras"),
                     )
                 except (ValueError, watermark_service.WatermarkError) as error:
                     if isinstance(error, watermark_service.WatermarkError):
                         return failed(error)
-                    return "validation_error", {"error": {
-                        "type": "validation_error", "detail": str(error),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": str(error),
+                        }
+                    }
             if command in {"watermark batch", "watermark video batch"}:
                 try:
                     if command == "watermark batch":
                         return "succeeded", watermark_service.batch_directory(
-                            args["directory"], to=args.get("to"),
+                            args["directory"],
+                            to=args.get("to"),
                             mode=args.get("mode", "all"),
                             pipeline=args.get("pipeline", "sdxl-zimage"),
                             backend=args.get("backend", "auto"),
@@ -624,7 +655,8 @@ class Container:
                             timeout=args.get("max_seconds") or 3600,
                         )
                     return "succeeded", watermark_service.video_batch_directory(
-                        args["directory"], to=args.get("to"),
+                        args["directory"],
+                        to=args.get("to"),
                         mode=args.get("mode", "all"),
                         options={
                             "mark": args.get("mark"),
@@ -646,18 +678,26 @@ class Container:
                 except (ValueError, watermark_service.WatermarkError) as error:
                     if isinstance(error, watermark_service.WatermarkError):
                         return failed(error)
-                    return "validation_error", {"error": {
-                        "type": "validation_error", "detail": str(error),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": str(error),
+                        }
+                    }
             if command == "watermark resample":
                 if args.get("remote"):
-                    return "validation_error", {"error": {
-                        "type": "validation_error",
-                        "detail": "watermark resample runs locally; it does not accept --remote",
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": "watermark resample runs locally; "
+                                      "it does not accept --remote",
+                        }
+                    }
                 try:
                     return watermark_resample.run(
-                        self.repositories, self.artifact_store, args["artifact"],
+                        self.repositories,
+                        self.artifact_store,
+                        args["artifact"],
                         session=args.get("session"),
                         model=args.get("model", "realesrgan-x2plus"),
                         factor=args.get("factor"),
@@ -675,12 +715,16 @@ class Container:
                 except watermark_service.WatermarkError as error:
                     return failed(error)
                 except ValueError as error:
-                    return "validation_error", {"error": {
-                        "type": "validation_error", "detail": str(error),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": str(error),
+                        }
+                    }
             parts = command.split()
-            operation = ("watermark.video." + parts[2] if parts[1] == "video"
-                         else "watermark." + parts[1])
+            operation = (
+                "watermark.video." + parts[2] if parts[1] == "video" else "watermark." + parts[1]
+            )
             if operation == "watermark.metadata" and args.get("remove") is not True:
                 operation = "watermark.identify"
             if operation == "watermark.video.metadata" and args.get("remove") is not True:
@@ -726,8 +770,7 @@ class Container:
                     "seed": args.get("seed"),
                     "humanize": args.get("humanize"),
                     "unsharp": args.get("unsharp"),
-                    "controlnet_conditioning_scale": args.get(
-                        "controlnet_conditioning_scale"),
+                    "controlnet_conditioning_scale": args.get("controlnet_conditioning_scale"),
                     "adaptive_polish": args.get("adaptive_polish"),
                     "text_manifest": args.get("text_manifest"),
                     "fidelity_anchor": args.get("fidelity_anchor"),
@@ -739,13 +782,17 @@ class Container:
                 }
                 try:
                     return remote_service.run_operation(
-                        self.repositories, self.artifact_store, args["artifact"],
-                        remote_name, operation,
+                        self.repositories,
+                        self.artifact_store,
+                        args["artifact"],
+                        remote_name,
+                        operation,
                         accept_remote=args.get("accept_remote"),
                         session=args.get("session"),
                         pipeline=args.get("pipeline"),
-                        params={key: value for key, value in remote_params.items()
-                                if value is not None},
+                        params={
+                            key: value for key, value in remote_params.items() if value is not None
+                        },
                         max_seconds=args.get("max_seconds"),
                         accept_license=args.get("accept_license") is True,
                         memory_mb=args.get("memory_mb"),
@@ -760,12 +807,18 @@ class Container:
                 except (ValueError, watermark_service.WatermarkError) as error:
                     if isinstance(error, watermark_service.WatermarkError):
                         return failed(error)
-                    return "validation_error", {"error": {
-                        "type": "validation_error", "detail": str(error),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": str(error),
+                        }
+                    }
             try:
                 return watermark_service.run_operation(
-                    self.repositories, self.artifact_store, args["artifact"], operation,
+                    self.repositories,
+                    self.artifact_store,
+                    args["artifact"],
+                    operation,
                     session=args.get("session"),
                     pipeline=args.get("pipeline"),
                     visible_backend=args.get("backend"),
@@ -777,9 +830,13 @@ class Container:
                     accept_license=args.get("accept_license") is True,
                     strength=args.get("strength"),
                     timeout=args.get("max_seconds")
-                    or (3600 if operation.startswith("watermark.video.")
-                        else 900 if operation in {"watermark.invisible", "watermark.all"}
-                        else self.options.timeout),
+                    or (
+                        3600
+                        if operation.startswith("watermark.video.")
+                        else 900
+                        if operation in {"watermark.invisible", "watermark.all"}
+                        else self.options.timeout
+                    ),
                     memory_mb=args.get("memory_mb"),
                     budget_approval=args.get("budget_approval"),
                     regions=args.get("regions"),
@@ -805,26 +862,32 @@ class Container:
                 model = str(args.get("model", "birefnet-lite"))
                 api_model = "/" in model
                 if api_model and args.get("remote"):
-                    return "validation_error", {"error": {
-                        "type": "validation_error",
-                        "detail": i18n.t(
-                            "An API model cannot be combined with --remote; pick one path.",
-                            "API 模型不能与 --remote 同时使用，请只选一条路径。",
-                        ),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": i18n.t(
+                                "An API model cannot be combined with --remote; pick one path.",
+                                "API 模型不能与 --remote 同时使用，请只选一条路径。",
+                            ),
+                        }
+                    }
                 if api_model and args.get("backend") not in (None, "auto"):
-                    return "validation_error", {"error": {
-                        "type": "validation_error",
-                        "detail": i18n.t(
-                            "--backend does not apply to API models: the vendor runs "
-                            "the model. Drop the flag, or pick a local model.",
-                            "--backend 对 API 模型无效：算力由厂商提供。"
-                            "去掉该参数，或改用本地模型。",
-                        ),
-                    }}
+                    return "validation_error", {
+                        "error": {
+                            "type": "validation_error",
+                            "detail": i18n.t(
+                                "--backend does not apply to API models: the vendor runs "
+                                "the model. Drop the flag, or pick a local model.",
+                                "--backend 对 API 模型无效：算力由厂商提供。"
+                                "去掉该参数，或改用本地模型。",
+                            ),
+                        }
+                    }
                 if api_model:
                     return matting_api.run(
-                        self.repositories, self.artifact_store, args["artifact"],
+                        self.repositories,
+                        self.artifact_store,
+                        args["artifact"],
                         model=model,
                         session=args.get("session"),
                         resolution=args.get("resolution"),
@@ -832,14 +895,21 @@ class Container:
                         mask_offset=args.get("mask_offset"),
                         refine_fg=args.get("refine_fg"),
                         accept_api=args.get("accept_api"),
-                        key_ref=str(args.get("replicate_key_ref")
-                                   or "env:REPLICATE_API_TOKEN"),
+                        key_ref=str(args.get("replicate_key_ref") or "env:REPLICATE_API_TOKEN"),
                         timeout=float(args.get("timeout") or 900),
                     )
                 matting_params: dict[str, Any] = {
-                    key: args[key] for key in
-                    ("model", "backend", "tile", "overlap", "feather", "edge_shift",
-                     "accept", "precision")
+                    key: args[key]
+                    for key in (
+                        "model",
+                        "backend",
+                        "tile",
+                        "overlap",
+                        "feather",
+                        "edge_shift",
+                        "accept",
+                        "precision",
+                    )
                     if key in args
                 }
                 remote_name = args.get("remote")
@@ -848,14 +918,24 @@ class Container:
 
                     remote_params = {
                         key: matting_params[key]
-                        for key in ("model", "backend", "tile", "overlap",
-                                    "feather", "edge_shift", "precision")
+                        for key in (
+                            "model",
+                            "backend",
+                            "tile",
+                            "overlap",
+                            "feather",
+                            "edge_shift",
+                            "precision",
+                        )
                         if key in matting_params
                     }
                     try:
                         return remote_service.run_operation(
-                            self.repositories, self.artifact_store, args["artifact"],
-                            remote_name, "matte",
+                            self.repositories,
+                            self.artifact_store,
+                            args["artifact"],
+                            remote_name,
+                            "matte",
                             accept_remote=args.get("accept_remote"),
                             session=args.get("session"),
                             params=remote_params,
@@ -864,13 +944,20 @@ class Container:
                         )
                     except (ValueError, remote_service.RemoteError) as error:
                         status = getattr(error, "status", "validation_error")
-                        return status, {"error": {
-                            "type": status, "detail": str(error),
-                        }}
+                        return status, {
+                            "error": {
+                                "type": status,
+                                "detail": str(error),
+                            }
+                        }
                 return postprocess.transform_(
-                    self.repositories, self.artifact_store, args["artifact"],
-                    model_params=matting_params, op_name="matte",
-                    session=args.get("session"), timeout=args.get("timeout"),
+                    self.repositories,
+                    self.artifact_store,
+                    args["artifact"],
+                    model_params=matting_params,
+                    op_name="matte",
+                    session=args.get("session"),
+                    timeout=args.get("timeout"),
                     budget_approval=args.get("budget_approval"),
                     asynchronous=self.options.async_,
                     progress=self.progress,
@@ -879,8 +966,10 @@ class Container:
                 return "succeeded", matting.catalog(verify=args.get("verify") is True)
             if command == "matting doctor":
                 report = matting.doctor(args.get("model"), backend=args.get("backend", "auto"))
-                return ("succeeded" if report["status"] == "ready" else "unsupported_capability",
-                        report)
+                return (
+                    "succeeded" if report["status"] == "ready" else "unsupported_capability",
+                    report,
+                )
             if command == "matting install":
                 return "succeeded", matting.install(
                     args.get("model"),
@@ -888,7 +977,8 @@ class Container:
                     accept=args.get("accept") is True,
                 )
             return "succeeded", matting.fetch(
-                args["model"], accept=args.get("accept") is True,
+                args["model"],
+                accept=args.get("accept") is True,
             )
         if command.startswith("superres "):
             from jsonschema import validate
@@ -900,13 +990,17 @@ class Container:
                 from imagen_cli.cli.commands import postprocess
 
                 params: dict[str, Any] = {
-                    key: args[key] for key in ("model", "backend", "tile", "overlap", "accept")
+                    key: args[key]
+                    for key in ("model", "backend", "tile", "overlap", "accept")
                     if key in args
                 }
                 return postprocess.transform_(
-                    self.repositories, self.artifact_store, args["artifact"],
+                    self.repositories,
+                    self.artifact_store,
+                    args["artifact"],
                     model_params=params,
-                    session=args.get("session"), timeout=args.get("timeout"),
+                    session=args.get("session"),
+                    timeout=args.get("timeout"),
                     budget_approval=args.get("budget_approval"),
                     asynchronous=self.options.async_,
                     progress=self.progress,
@@ -915,8 +1009,10 @@ class Container:
                 return "succeeded", superres.catalog(verify=args.get("verify") is True)
             if command == "superres doctor":
                 report = superres.doctor(args.get("model"), backend=args.get("backend", "auto"))
-                return ("succeeded" if report["status"] == "ready" else "unsupported_capability",
-                        report)
+                return (
+                    "succeeded" if report["status"] == "ready" else "unsupported_capability",
+                    report,
+                )
             if command == "superres install":
                 return "succeeded", superres.install(
                     args.get("model"),
@@ -1284,8 +1380,9 @@ class Container:
         if command == "job cancel":
             return job.cancel_(artifacts, args["job_id"], scope=args["scope"])
         if command == "job wait":
-            return job.wait_(artifacts, args["job_id"], timeout=self.options.timeout,
-                             progress=self.progress)
+            return job.wait_(
+                artifacts, args["job_id"], timeout=self.options.timeout, progress=self.progress
+            )
         if command in {"job fetch", "job reconcile"}:
             from imagen_cli.application.reconcile import recover_inline
 

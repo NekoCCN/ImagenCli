@@ -34,8 +34,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 MANIFEST: dict[str, dict[str, Any]] = {
     "birefnet-lite": {
         "url": (
-            "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/"
-            "resolve/main/onnx/model.onnx"
+            "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx"
         ),
         "sha256": "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
         "license": "MIT",
@@ -118,8 +117,9 @@ def weights_path(model: str, suffix: str = ".onnx") -> Path:
     return weight_path(model, suffix)
 
 
-def ensure_weights(model: str, *, accept: bool = False,
-                   download_fn: Callable[[str, Path], None] | None = None) -> Path:
+def ensure_weights(
+    model: str, *, accept: bool = False, download_fn: Callable[[str, Path], None] | None = None
+) -> Path:
     if model not in MANIFEST:
         raise ValueError("unknown matting model")
     entry = MANIFEST[model]
@@ -156,7 +156,10 @@ def _require_provider(session: Any, backend: str | None) -> None:
 
 
 def _make_runner(
-    model: str, *, backend: str | None, accept: bool,
+    model: str,
+    *,
+    backend: str | None,
+    accept: bool,
     session_factory: Callable[..., Any] | None = None,
     precision: str | None = None,
 ) -> tuple[Runner, dict[str, Any]]:
@@ -301,16 +304,16 @@ def matte(
         report(progress, "loading_model", operation=model)
         chosen = None if precision == "auto" else precision
         try:
-            runner, engine = _make_runner(model, backend=backend, accept=accept,
-                                          precision=chosen)
+            runner, engine = _make_runner(model, backend=backend, accept=accept, precision=chosen)
             combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
         except ValueError as error:
             # Only `auto` retries, only on an allocation failure, and only once.
             if chosen is not None or not _is_out_of_memory(error):
                 raise
             try:
-                runner, engine = _make_runner(model, backend=backend, accept=accept,
-                                              precision="fp16")
+                runner, engine = _make_runner(
+                    model, backend=backend, accept=accept, precision="fp16"
+                )
                 combined = _tiles_to_alpha(runner, rgb, tile, overlap, progress)
             except Exception:  # noqa: BLE001 - report the original allocation failure
                 raise error from None
@@ -329,8 +332,9 @@ def _is_out_of_memory(error: BaseException) -> bool:
     return is_out_of_memory(error)
 
 
-def _tiles_to_alpha(runner: Runner, rgb: Image.Image, tile: int, overlap: int,
-                    progress: Any) -> Any:
+def _tiles_to_alpha(
+    runner: Runner, rgb: Image.Image, tile: int, overlap: int, progress: Any
+) -> Any:
     """Run every tile and blend the pieces through a cosine window."""
     from imagen_cli.application.progress import report
 
@@ -349,19 +353,29 @@ def _tiles_to_alpha(runner: Runner, rgb: Image.Image, tile: int, overlap: int,
         x1, y1 = min(width, right + overlap), min(height, bottom + overlap)
         piece = runner(rgb.crop((x0, y0, x1, y1)))
         expected_size = (x1 - x0, y1 - y0)
-        matte_tile = numpy.asarray(
-            Image.fromarray((numpy.clip(piece, 0, 1) * 255).astype(numpy.uint8), "L")
-            .resize(expected_size, Image.Resampling.BILINEAR),
-            dtype=numpy.float32,
-        ) / 255.0
+        matte_tile = (
+            numpy.asarray(
+                Image.fromarray((numpy.clip(piece, 0, 1) * 255).astype(numpy.uint8), "L").resize(
+                    expected_size, Image.Resampling.BILINEAR
+                ),
+                dtype=numpy.float32,
+            )
+            / 255.0
+        )
         # A cosine ramp keeps tile borders from showing as seams.
         mask = _cosine_window(expected_size[0], expected_size[1], overlap)
-        inner = matte_tile[top - y0:bottom - y0, left - x0:right - x0]
-        inner_mask = mask[top - y0:bottom - y0, left - x0:right - x0]
+        inner = matte_tile[top - y0 : bottom - y0, left - x0 : right - x0]
+        inner_mask = mask[top - y0 : bottom - y0, left - x0 : right - x0]
         accumulator[top:bottom, left:right] += inner * inner_mask
         weight[top:bottom, left:right] += inner_mask
-        report(progress, "processing", completed=index, total=len(tiles),
-               unit="tiles", operation="matte")
+        report(
+            progress,
+            "processing",
+            completed=index,
+            total=len(tiles),
+            unit="tiles",
+            operation="matte",
+        )
     numpy.maximum(weight, 1e-6, out=weight)
     return numpy.clip(accumulator / weight, 0, 1)
 
@@ -382,12 +396,28 @@ def _cosine_window(width: int, height: int, overlap: int) -> Any:
     return numpy.outer(ramp_y, ramp_x)
 
 
-def op(image: Image.Image, *, model: str = "birefnet-lite", backend: str | None = None,
-       tile: int = 0, overlap: int = 64, feather: int = 0, edge_shift: float = 0.0,
-       accept: bool = False, precision: str = "auto") -> Image.Image:
+def op(
+    image: Image.Image,
+    *,
+    model: str = "birefnet-lite",
+    backend: str | None = None,
+    tile: int = 0,
+    overlap: int = 64,
+    feather: int = 0,
+    edge_shift: float = 0.0,
+    accept: bool = False,
+    precision: str = "auto",
+) -> Image.Image:
     return matte(
-        image, model=model, backend=backend, tile=tile, overlap=overlap,
-        feather=feather, edge_shift=edge_shift, accept=accept, precision=precision,
+        image,
+        model=model,
+        backend=backend,
+        tile=tile,
+        overlap=overlap,
+        feather=feather,
+        edge_shift=edge_shift,
+        accept=accept,
+        precision=precision,
     )[0]
 
 
@@ -424,22 +454,24 @@ def catalog(*, verify: bool = False, include_api: bool = True) -> dict[str, Any]
     # Hosted API models sit in the same listing so nobody mistakes one family for all.
     # The weight panels pass include_api=False: a hosted model has no file to manage.
     for name, entry in sorted(matting_api.MODELS.items()) if include_api else ():
-        models.append({
-            "model": name,
-            "task": "matting",
-            "category": entry["category"],
-            "usage": entry["note"],
-            "license": entry["license"],
-            "source": entry["source"],
-            "note": entry["note"],
-            "backend": "api:replicate",
-            "available": _api_ready(),
-            "implemented": entry["implemented"],
-            "billing": entry["billing"],
-            "cost_note": entry["cost_note"],
-            "version": entry["version"],
-            "scale": 1,
-        })
+        models.append(
+            {
+                "model": name,
+                "task": "matting",
+                "category": entry["category"],
+                "usage": entry["note"],
+                "license": entry["license"],
+                "source": entry["source"],
+                "note": entry["note"],
+                "backend": "api:replicate",
+                "available": _api_ready(),
+                "implemented": entry["implemented"],
+                "billing": entry["billing"],
+                "cost_note": entry["cost_note"],
+                "version": entry["version"],
+                "scale": 1,
+            }
+        )
     return {**backend_report(), "models": models, "verified": verify}
 
 
@@ -550,12 +582,14 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
             "billing": entry["billing"],
             "cost_note": entry["cost_note"],
             "implemented": entry["implemented"],
-            "api_key_ready": ready,
+            "api_available": ready,
             "inference": False,
-            "status": "ready" if ready and entry["implemented"]
-            else "unsupported_capability",
-            "hint": None if ready and entry["implemented"] else (
-                "this model is listed but not implemented" if not entry["implemented"]
+            "status": "ready" if ready and entry["implemented"] else "unsupported_capability",
+            "hint": None
+            if ready and entry["implemented"]
+            else (
+                "this model is listed but not implemented"
+                if not entry["implemented"]
                 else "set REPLICATE_API_TOKEN in this shell to use hosted matting"
             ),
         }
@@ -610,9 +644,7 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
     elif selected not in MANIFEST:
         raise ValueError("unknown matting model")
     data["model"] = selected
-    data["fp16_cached"] = bool(selected) and matting_fp16.derived_path(
-        str(selected)
-    ).is_file()
+    data["fp16_cached"] = bool(selected) and matting_fp16.derived_path(str(selected)).is_file()
     if selected is None:
         data["hint"] = "no downloaded weights; run: imagen matting install --model NAME --accept"
         return data
@@ -622,7 +654,11 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
     try:
         _output, engine = matte(
             Image.new("RGB", (64, 64), (127, 127, 127)),
-            model=selected, backend=used, tile=64, overlap=0, accept=False,
+            model=selected,
+            backend=used,
+            tile=64,
+            overlap=0,
+            accept=False,
         )
     except ValueError as error:
         # A provider can be listed and still fail to load; report that instead of
@@ -637,8 +673,10 @@ def doctor(model: str | None = None, *, backend: str = "auto") -> dict[str, Any]
         data["missing"] = [_backend_provider(used)]
         hint = str(error)
         if _is_out_of_memory(error):
-            hint += ("; on a small card try --precision fp16, which derives a "
-                     "half-precision copy, or use the cpu backend")
+            hint += (
+                "; on a small card try --precision fp16, which derives a "
+                "half-precision copy, or use the cpu backend"
+            )
         elif "install --backend" not in hint:
             hint += f"; run: imagen matting install --backend {used} --accept"
         data["hint"] = hint

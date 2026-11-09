@@ -550,8 +550,7 @@ def test_catalog_lists_local_and_api_families(tmp_path, monkeypatch):
 def test_catalog_reports_api_unavailable_without_a_token(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path))
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
-    api = [row for row in matting.catalog()["models"]
-           if row["backend"] == "api:replicate"]
+    api = [row for row in matting.catalog()["models"] if row["backend"] == "api:replicate"]
     assert api and all(row["available"] is False for row in api)
 
 
@@ -559,7 +558,7 @@ def test_doctor_reports_api_readiness_without_network(monkeypatch):
     monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
     report = matting.doctor("sprited/birefnet-toonout")
     assert report["backend"] == "api:replicate"
-    assert report["api_key_ready"] is True
+    assert report["api_available"] is True
     assert report["status"] == "ready"
     assert report["inference"] is False
 
@@ -567,7 +566,7 @@ def test_doctor_reports_api_readiness_without_network(monkeypatch):
 def test_doctor_flags_missing_key_for_an_api_model(monkeypatch):
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
     report = matting.doctor("sprited/birefnet-toonout")
-    assert report["api_key_ready"] is False
+    assert report["api_available"] is False
     assert report["status"] == "unsupported_capability"
     assert "REPLICATE_API_TOKEN" in report["hint"]
 
