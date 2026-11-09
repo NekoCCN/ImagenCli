@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -129,6 +129,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS remote_jobs_digest ON remote_jobs(job_digest);
 CREATE INDEX IF NOT EXISTS remote_jobs_provider ON remote_jobs(provider);
 """
 
+SCHEMA_V4 = """
+CREATE TABLE remote_jobs_v4 (
+ id TEXT PRIMARY KEY,
+ provider TEXT NOT NULL,
+ provider_job_id TEXT,
+ queue_id TEXT,
+ endpoint_host TEXT NOT NULL,
+ operation TEXT NOT NULL,
+ input_artifact_id TEXT NOT NULL,
+ input_sha256 TEXT NOT NULL,
+ request_canonical TEXT NOT NULL,
+ job_digest TEXT NOT NULL,
+ pipeline TEXT,
+ gpu TEXT,
+ max_seconds INTEGER NOT NULL CHECK(max_seconds>0),
+ license TEXT,
+ worker_image_digest TEXT,
+ status TEXT NOT NULL,
+ artifact_id TEXT,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ payload TEXT NOT NULL DEFAULT '{}'
+);
+INSERT INTO remote_jobs_v4
+ SELECT id,provider,provider_job_id,queue_id,endpoint_host,operation,input_artifact_id,
+ input_sha256,request_canonical,job_digest,pipeline,gpu,max_seconds,license,
+ worker_image_digest,status,artifact_id,created_at,updated_at,payload
+ FROM remote_jobs;
+DROP TABLE remote_jobs;
+ALTER TABLE remote_jobs_v4 RENAME TO remote_jobs;
+CREATE INDEX remote_jobs_status ON remote_jobs(status);
+CREATE UNIQUE INDEX remote_jobs_digest ON remote_jobs(job_digest);
+CREATE INDEX remote_jobs_provider ON remote_jobs(provider);
+"""
+
 
 def migrate(connection: sqlite3.Connection) -> None:
     if connection.in_transaction:
@@ -153,11 +188,13 @@ def migrate(connection: sqlite3.Connection) -> None:
             backup.close()
     # Each step owns its transaction so DDL and the version advance are atomic.
     if version == 0:
-        steps = [(1, SCHEMA), (2, SCHEMA_V2), (3, SCHEMA_V3)]
+        steps = [(1, SCHEMA), (2, SCHEMA_V2), (3, SCHEMA_V3), (4, SCHEMA_V4)]
     elif version == 1:
-        steps = [(2, SCHEMA_V2), (3, SCHEMA_V3)]
+        steps = [(2, SCHEMA_V2), (3, SCHEMA_V3), (4, SCHEMA_V4)]
+    elif version == 2:
+        steps = [(3, SCHEMA_V3), (4, SCHEMA_V4)]
     else:
-        steps = [(3, SCHEMA_V3)]
+        steps = [(4, SCHEMA_V4)]
     try:
         for target, script in steps:
             if target <= version:

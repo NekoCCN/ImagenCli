@@ -1,7 +1,11 @@
 """Downscale-then-upscale removal: plan math, artifact rules, budget gate."""
 
 import io
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -10,14 +14,25 @@ from imagen_cli.application.container import Container
 from imagen_cli.application.session_service import SessionService
 
 
-def _bytes(size, mode="RGB", color=(10, 20, 30), fmt="PNG"):
+def _bytes(
+    size: tuple[int, int], mode: str = "RGB", color: Any = (10, 20, 30), fmt: str = "PNG"
+) -> bytes:
     buffer = io.BytesIO()
     Image.new(mode, size, color).save(buffer, format=fmt)
     return buffer.getvalue()
 
 
+@pytest.fixture(autouse=True)
+def installed_default_weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from imagen_cli.application import superres
+
+    weights = tmp_path / "realesrgan-x2plus.onnx"
+    weights.write_bytes(b"fixture weights")
+    monkeypatch.setattr(superres, "weights_path", lambda model, suffix=".onnx": weights)
+
+
 @pytest.fixture
-def published(tmp_path):
+def published(tmp_path: Path) -> Iterator[tuple[Container, SessionService, str, Any]]:
     with Container(workspace=str(tmp_path / "workspace")) as container:
         service = SessionService(container.repositories, container.artifact_store)
         session = service.create_session("watermark")
@@ -31,7 +46,9 @@ def published(tmp_path):
         yield container, service, session.id, source
 
 
-def _extra_artifact(service, session_id, data, instruction="extra"):
+def _extra_artifact(
+    service: SessionService, session_id: str, data: bytes, instruction: str = "extra"
+) -> Any:
     turn = service.create_turn(
         session_id, instruction=instruction, operation="generate",
         resolved_profile_snapshot={}, model="fixture", parameters={},
@@ -39,11 +56,11 @@ def _extra_artifact(service, session_id, data, instruction="extra"):
     return service.save_artifact(turn.id, data, origin_manifest={"kind": "fixture"})
 
 
-def _doubler(array):
+def _doubler(array: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     return array.repeat(2, axis=0).repeat(2, axis=1)
 
 
-def _gradient(size=(32, 32)):
+def _gradient(size: tuple[int, int] = (32, 32)) -> bytes:
     """A non-uniform image: a flat fill survives a round trip byte for byte."""
     image = Image.new("RGB", size)
     image.putdata([
@@ -135,9 +152,10 @@ def test_resample_rejects_unsupported_color_mode(published):
 
 def test_resample_requires_the_budget_digest_when_too_large(published, monkeypatch):
     container, _, _, source = published
+    from imagen_cli import settings
     from imagen_cli.application import postprocess_service
 
-    monkeypatch.setattr(postprocess_service.settings, "memory_limit", lambda: 1)
+    monkeypatch.setattr(settings, "memory_limit", lambda: 1)
     with pytest.raises(postprocess_service.BudgetApprovalRequired) as error:
         watermark_resample.run(container.repositories, container.artifact_store,
                                source.id, model="realesrgan-x2plus", runner=_doubler)
