@@ -23,7 +23,11 @@ def _bytes(
 
 
 @pytest.fixture(autouse=True)
-def installed_default_weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def installed_default_weights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    if request.node.get_closest_marker("cuda"):
+        return
     from imagen_cli.application import superres
 
     weights = tmp_path / "realesrgan-x2plus.onnx"
@@ -37,8 +41,12 @@ def published(tmp_path: Path) -> Iterator[tuple[Container, SessionService, str, 
         service = SessionService(container.repositories, container.artifact_store)
         session = service.create_session("watermark")
         turn = service.create_turn(
-            session.id, instruction="source", operation="generate",
-            resolved_profile_snapshot={}, model="fixture", parameters={},
+            session.id,
+            instruction="source",
+            operation="generate",
+            resolved_profile_snapshot={},
+            model="fixture",
+            parameters={},
         )
         source = service.save_artifact(
             turn.id, _bytes((32, 32)), origin_manifest={"kind": "fixture"}
@@ -50,8 +58,12 @@ def _extra_artifact(
     service: SessionService, session_id: str, data: bytes, instruction: str = "extra"
 ) -> Any:
     turn = service.create_turn(
-        session_id, instruction=instruction, operation="generate",
-        resolved_profile_snapshot={}, model="fixture", parameters={},
+        session_id,
+        instruction=instruction,
+        operation="generate",
+        resolved_profile_snapshot={},
+        model="fixture",
+        parameters={},
     )
     return service.save_artifact(turn.id, data, origin_manifest={"kind": "fixture"})
 
@@ -63,11 +75,13 @@ def _doubler(array: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
 def _gradient(size: tuple[int, int] = (32, 32)) -> bytes:
     """A non-uniform image: a flat fill survives a round trip byte for byte."""
     image = Image.new("RGB", size)
-    image.putdata([
-        (x * 7 % 256, y * 5 % 256, (x + y) * 3 % 256)
-        for y in range(size[1])
-        for x in range(size[0])
-    ])
+    image.putdata(
+        [
+            (x * 7 % 256, y * 5 % 256, (x + y) * 3 % 256)
+            for y in range(size[1])
+            for x in range(size[0])
+        ]
+    )
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -75,8 +89,13 @@ def _gradient(size: tuple[int, int] = (32, 32)) -> bytes:
 
 def test_plan_size_defaults_to_one_to_one():
     plan = watermark_resample.plan_size((640, 480), "realesrgan-x2plus", None)
-    assert plan == {"input_size": [640, 480], "intermediate_size": [320, 240],
-                    "output_size": [640, 480], "factor": 0.5, "scale": 2}
+    assert plan == {
+        "input_size": [640, 480],
+        "intermediate_size": [320, 240],
+        "output_size": [640, 480],
+        "factor": 0.5,
+        "scale": 2,
+    }
 
 
 def test_plan_size_reports_a_net_change_when_factor_is_explicit():
@@ -94,15 +113,17 @@ def test_plan_size_rounds_odd_sizes_down_to_the_factor():
 def test_resample_rejects_an_unknown_model(published):
     container, _, _, source = published
     with pytest.raises(ValueError, match="super-resolution model"):
-        watermark_resample.run(container.repositories, container.artifact_store,
-                               source.id, model="nope")
+        watermark_resample.run(
+            container.repositories, container.artifact_store, source.id, model="nope"
+        )
 
 
 def test_resample_rejects_an_unpublished_artifact(tmp_path):
     with Container(workspace=str(tmp_path / "w")) as container:
         with pytest.raises(ValueError, match="published artifact"):
-            watermark_resample.run(container.repositories, container.artifact_store,
-                                   "art_" + "0" * 32)
+            watermark_resample.run(
+                container.repositories, container.artifact_store, "art_" + "0" * 32
+            )
 
 
 def test_resample_publishes_a_new_artifact_and_never_touches_the_source(published):
@@ -111,8 +132,11 @@ def test_resample_publishes_a_new_artifact_and_never_touches_the_source(publishe
     before = container.artifact_store.get(source.id).read_bytes()
 
     status, data = watermark_resample.run(
-        container.repositories, container.artifact_store, source.id,
-        model="realesrgan-x2plus", runner=_doubler,
+        container.repositories,
+        container.artifact_store,
+        source.id,
+        model="realesrgan-x2plus",
+        runner=_doubler,
     )
 
     assert status == "succeeded"
@@ -130,8 +154,11 @@ def test_resample_keeps_alpha_and_reports_odd_size(published):
     source = _extra_artifact(service, session_id, _bytes((17, 9), "RGBA", (1, 2, 3, 128)))
 
     _, data = watermark_resample.run(
-        container.repositories, container.artifact_store, source.id,
-        model="realesrgan-x2plus", runner=_doubler,
+        container.repositories,
+        container.artifact_store,
+        source.id,
+        model="realesrgan-x2plus",
+        runner=_doubler,
     )
 
     with Image.open(container.artifact_store.get(data["artifact"]["id"])) as opened:
@@ -142,12 +169,15 @@ def test_resample_keeps_alpha_and_reports_odd_size(published):
 
 def test_resample_rejects_unsupported_color_mode(published):
     container, service, session_id, _ = published
-    source = _extra_artifact(
-        service, session_id, _bytes((64, 64), "CMYK", fmt="JPEG"), "cmyk"
-    )
+    source = _extra_artifact(service, session_id, _bytes((64, 64), "CMYK", fmt="JPEG"), "cmyk")
     with pytest.raises(ValueError, match="color mode"):
-        watermark_resample.run(container.repositories, container.artifact_store,
-                               source.id, model="realesrgan-x2plus", runner=_doubler)
+        watermark_resample.run(
+            container.repositories,
+            container.artifact_store,
+            source.id,
+            model="realesrgan-x2plus",
+            runner=_doubler,
+        )
 
 
 def test_resample_requires_the_budget_digest_when_too_large(published, monkeypatch):
@@ -157,12 +187,21 @@ def test_resample_requires_the_budget_digest_when_too_large(published, monkeypat
 
     monkeypatch.setattr(settings, "memory_limit", lambda: 1)
     with pytest.raises(postprocess_service.BudgetApprovalRequired) as error:
-        watermark_resample.run(container.repositories, container.artifact_store,
-                               source.id, model="realesrgan-x2plus", runner=_doubler)
+        watermark_resample.run(
+            container.repositories,
+            container.artifact_store,
+            source.id,
+            model="realesrgan-x2plus",
+            runner=_doubler,
+        )
     digest = error.value.report["digest"]
     _, data = watermark_resample.run(
-        container.repositories, container.artifact_store, source.id,
-        model="realesrgan-x2plus", runner=_doubler, budget_approval=digest,
+        container.repositories,
+        container.artifact_store,
+        source.id,
+        model="realesrgan-x2plus",
+        runner=_doubler,
+        budget_approval=digest,
     )
     assert data["report"]["budget_approval"] == digest
 
@@ -171,8 +210,11 @@ def test_resample_requires_the_budget_digest_when_too_large(published, monkeypat
 def test_resample_runs_on_the_cuda_provider(published):
     container, _, _, source = published
     status, data = watermark_resample.run(
-        container.repositories, container.artifact_store, source.id,
-        model="realesrgan-x2plus", backend="cuda",
+        container.repositories,
+        container.artifact_store,
+        source.id,
+        model="realesrgan-x2plus",
+        backend="cuda",
     )
     assert status == "succeeded"
     assert data["report"]["engine"]["provider"] == "CUDAExecutionProvider"
@@ -187,12 +229,18 @@ def test_resample_reports_missing_weights_with_the_fetch_command(published, monk
 
     container, _, _, source = published
     monkeypatch.setattr(
-        superres, "weights_path",
+        superres,
+        "weights_path",
         lambda model, suffix=".onnx": Path("/nonexistent") / f"{model}{suffix}",
     )
     with pytest.raises(watermark_service.WatermarkError) as error:
-        watermark_resample.run(container.repositories, container.artifact_store,
-                               source.id, model="realesrgan-x2plus", runner=_doubler)
+        watermark_resample.run(
+            container.repositories,
+            container.artifact_store,
+            source.id,
+            model="realesrgan-x2plus",
+            runner=_doubler,
+        )
     assert error.value.status == "missing"
     assert "superres fetch" in str(error.value)
 
@@ -205,8 +253,13 @@ def test_resample_refuses_a_changed_source_digest(published, tmp_path, monkeypat
     tampered.write_bytes(_bytes((32, 32), color=(1, 1, 1)))
     monkeypatch.setattr(container.artifact_store, "get", lambda ident: tampered)
     with pytest.raises(ValueError, match="bytes changed"):
-        watermark_resample.run(container.repositories, container.artifact_store,
-                               source.id, model="realesrgan-x2plus", runner=_doubler)
+        watermark_resample.run(
+            container.repositories,
+            container.artifact_store,
+            source.id,
+            model="realesrgan-x2plus",
+            runner=_doubler,
+        )
 
 
 def test_resample_refuses_a_second_local_run(published):
@@ -216,7 +269,12 @@ def test_resample_refuses_a_second_local_run(published):
     assert watermark_service._LOCAL_RUN_LOCK.acquire(blocking=False)
     try:
         with pytest.raises(watermark_service.WatermarkError, match="active"):
-            watermark_resample.run(container.repositories, container.artifact_store,
-                                   source.id, model="realesrgan-x2plus", runner=_doubler)
+            watermark_resample.run(
+                container.repositories,
+                container.artifact_store,
+                source.id,
+                model="realesrgan-x2plus",
+                runner=_doubler,
+            )
     finally:
         watermark_service._LOCAL_RUN_LOCK.release()

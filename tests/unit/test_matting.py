@@ -451,7 +451,7 @@ def test_doctor_reports_a_broken_provider_instead_of_raising(monkeypatch):
         )
 
     monkeypatch.setattr(matting, "_make_runner", fail)
-    report = matting.doctor(backend="cuda")
+    report = matting.doctor(model="birefnet-lite", backend="cuda")
     assert report["status"] == "missing"
     assert "install --backend cuda" in report["hint"]
 
@@ -469,7 +469,7 @@ def test_doctor_turns_an_allocation_failure_into_a_fp16_hint(monkeypatch):
         raise ValueError("backend cuda ran out of memory while running the model")
 
     monkeypatch.setattr(matting, "_make_runner", fail)
-    report = matting.doctor(backend="cuda")
+    report = matting.doctor(model="birefnet-lite", backend="cuda")
     assert report["status"] == "missing"
     assert "precision fp16" in report["hint"]
 
