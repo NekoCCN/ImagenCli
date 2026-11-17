@@ -101,10 +101,11 @@ def test_launcher_workspace_choice_has_back_and_reset(isolated):
     from imagen_cli.cli.skills_wizard import launcher
 
     err = io.StringIO()
-    assert launcher(stdin=io.StringIO("4\nb\n4\n/tmp/image work\n1\n"), stderr=err) == [
-        "tui", "--workspace", "/tmp/image work",
+    workspace = str(isolated / "image work")
+    assert launcher(stdin=io.StringIO(f"4\nb\n4\n{workspace}\n1\n"), stderr=err) == [
+        "tui", "--workspace", workspace,
     ]
     assert "Project Skills still use the current directory" in err.getvalue()
-    assert launcher(stdin=io.StringIO("4\n/tmp/custom\n4\n\n3\n"), stderr=err) == ["help"]
+    assert launcher(stdin=io.StringIO(f"4\n{workspace}\n4\n\n3\n"), stderr=err) == ["help"]
     with pytest.raises(KeyboardInterrupt):
         launcher(stdin=io.StringIO("4\nq\n"), stderr=err)
