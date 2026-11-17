@@ -236,7 +236,8 @@ The workbench has Import and Save as buttons. More (or `F10`) opens the remainin
 | Delete image | `d` | `session remove-artifact`, `asset delete` |
 | Profiles and endpoint models | `v` | `profile ...`, `models ...`, `providers` |
 | Cache audit / purge | `c` | `cache audit`, `cache purge` |
-| Jobs / batches / worker / skills | command palette; no dedicated pages | `job ...`, `batch ...`, `worker ...`, `skills ...` |
+| Agent skills | More actions → Agent skills; scope and destination selectors | `skills ...` |
+| Jobs / batches / worker | command palette; no dedicated pages | `job ...`, `batch ...`, `worker ...` |
 | Help / language | `?`, `l` | `help`, `schema`, `--zh`, `--en`, `language` |
 
 <details>
@@ -831,6 +832,9 @@ imagen skills install                     # asks which agents, in a terminal
 imagen skills install --target universal  # the shared .agents/skills directory
 imagen skills install --target claude-code --target codex
 imagen skills install --scope global --target claude-code
+imagen skills list imagen --scope global --target claude-code
+imagen skills update imagen --scope global --target claude-code
+imagen skills update                      # same agent picker as install
 imagen skills uninstall --target codex
 ```
 
@@ -838,9 +842,11 @@ imagen skills uninstall --target codex
 
 - Default scope is the current project; `--scope global` installs into user directories.
 - Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
-- In a terminal without `--target`, Imagen opens a checklist: arrows move, space selects, `a` selects all, enter confirms, `q` cancels. The shared directory and any agent directory already present in the project start ticked. Without a terminal — or with `--no-interactive` — the command installs into the default target and never prompts.
+- For install, update, and uninstall in a terminal without `--target`, Imagen opens a scope-aware checklist: arrows move, space selects, `a` selects all, enter confirms, `q` cancels. The shared directory and any agent directory already present in the project start ticked. Without a terminal — or with `--no-interactive` — the command installs into the default target and never prompts.
 - Project-only agents are reported when global installation is requested.
 - Installation writes a managed manifest (`.imagen-install.json`). Uninstall refuses unmanaged directories and symlinked paths. A locally modified managed skill needs `--force --yes`.
+
+Use **More actions → Agent skills** in the TUI for status, install, update, and uninstall. Choose skills, scope, and agent destinations in the same form. `skills update` refreshes existing copies from the installed CLI package; it does not download a new CLI release. Upgrade the CLI first to receive newer bundled skills. Missing copies show an install command; locally edited copies remain protected unless you explicitly pass `--force`. Positional skill names and repeated `--skill` flags are equivalent.
 
 The bundled skills are `imagen`, `imagen-assets`, and `imagen-batch`.
 
@@ -939,7 +945,7 @@ imagen tui
 - **Image quality:** expand evaluation across illustration, photography, and other domains, including visual comparison and user preference. Postprocessing stays experimental until this is complete.
 - **Platform support:** verify Windows on physical hardware and improve processing resource controls on Windows and macOS. Size, buffer, and timeout checks leave sandbox-level guarantees for later; Linux address-space limits cap virtual address space only, so RSS and GPU memory can still grow.
 - **Language support:** add more interface languages. English is the default; Chinese is available through `--lang zh-CN` or `IMAGEN_LANG=zh-CN`.
-- **Parity:** improve dedicated TUI workflows for batch, worker, and skills operations; the command palette and local-model management already exist.
+- **Parity:** improve dedicated TUI workflows for batch and worker operations; the command palette and local-model management already exist.
 
 ## Development
 

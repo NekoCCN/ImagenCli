@@ -506,8 +506,15 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name.startswith("skills "):
         properties = {
             "scope": {"enum": ["project", "global"], "default": "project"},
-            "skill": {"type": "array", "items": text, "minItems": 1},
-            "target": {"type": "array", "items": text, "minItems": 1},
+            "skill": {"type": "array", "items": text, "minItems": 1,
+                      "description": i18n.t(
+                          "Skill names (also positional); omit for all skills",
+                          "技能名称（也可用位置参数）；省略则选择全部技能")},
+            "target": {"type": "array", "items": text, "minItems": 1,
+                       "description": i18n.t(
+                           "Repeat for agents; terminal mutations open a picker; "
+                           "otherwise defaults to universal",
+                           "可重复指定 agent；终端中的修改操作打开选择器；否则默认 universal")},
         }
         if name != "skills list":
             properties["force"] = {"type": "boolean", "default": False}
@@ -1112,7 +1119,10 @@ def _data_schema(command: Command) -> dict[str, Any]:
             }
         )
     if command.name == "skills list":
-        return _object({"skills": {"type": "array", "items": {"type": "object"}}}, ("skills",))
+        return _object({
+            "skills": {"type": "array", "items": {"type": "object"}},
+            "available": {"type": "array", "items": {"type": "string"}},
+        }, ("skills",))
     if command.name == "skills uninstall":
         return _object(
             {
@@ -1128,6 +1138,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
             {
                 "scope": {"type": "string"},
                 "updated": {"type": "array", "items": {"type": "string"}},
+                "missing": {"type": "array", "items": {"type": "object"}},
+                "available": {"type": "array", "items": {"type": "string"}},
                 "current": {"type": "array", "items": {"type": "string"}},
                 "conflicts": {"type": "array", "items": {"type": "object"}},
                 "installed": {"type": "array", "items": {"type": "object"}},

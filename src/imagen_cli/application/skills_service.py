@@ -148,11 +148,17 @@ def _state(root: Path, name: str, bundled: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_(
-    *, agents: list[str] | None = None, scope: str | None = None
+    *, agents: list[str] | None = None, scope: str | None = None,
+    names: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    available_names = {entry["name"] for entry in available()}
+    if names and set(names) - available_names:
+        return "not_found", {"skills": [], "available": sorted(available_names)}
     rows = []
     scopes = (scope,) if scope else SCOPES
     for entry in available():
+        if names and entry["name"] not in names:
+            continue
         bundled = {
             **entry,
             "files": _manifest(Path(entry["path"]), entry["name"])["files"],
@@ -221,11 +227,14 @@ def install_(
             target = root / name
             managed = _managed(target, name) if target.exists() else None
             if not _safe(target):
-                existing.append({"name": name, "path": str(target), "agent": agent})
+                existing.append({"name": name, "path": str(target), "agent": agent,
+                                 "reason": "unsafe"})
             elif target.exists() and managed is None:
-                existing.append({"name": name, "path": str(target), "agent": agent})
+                existing.append({"name": name, "path": str(target), "agent": agent,
+                                 "reason": "unmanaged"})
             elif target.exists() and not force:
-                existing.append({"name": name, "path": str(target), "agent": agent})
+                existing.append({"name": name, "path": str(target), "agent": agent,
+                                 "reason": "exists"})
     if existing:
         return "conflict", {
             "scope": scope,
@@ -308,10 +317,12 @@ def update_(
     changed: dict[str, list[str]] = {}
     current: list[dict[str, str]] = []
     conflicts: list[dict[str, str]] = []
+    missing: list[dict[str, str]] = []
     for agent, root in _roots(scope, agents):
         for name in selected:
             target = root / name
             if not (target / "SKILL.md").is_file():
+                missing.append({"name": name, "path": str(target), "agent": agent})
                 continue
             record = _managed(target, name)
             source = Path(bundled[name]["path"])
@@ -366,6 +377,7 @@ def update_(
             failed.append({"agent": agent, "names": agent_names})
     return ("internal_error" if failed else "succeeded"), {
         "scope": scope,
+        "missing": missing,
         "updated": sorted({str(row["name"]) for row in installed}),
         "current": sorted({row["name"] for row in current}),
         "conflicts": [],

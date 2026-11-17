@@ -1338,7 +1338,9 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             if command == "skills list":
-                return skills.list_(agents=args.get("target"), scope=args.get("scope"))
+                return skills.list_(
+                    agents=args.get("target"), scope=args.get("scope"), names=args.get("skill")
+                )
             if command == "skills update":
                 return skills.update_(
                     args.get("skill"),

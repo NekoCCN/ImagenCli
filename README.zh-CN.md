@@ -228,7 +228,8 @@ request ──► plan (review) ──► approve ──► execute ──► jo
 | 删除图片 | `d` | `session remove-artifact`、`asset delete` |
 | Profile 与端点模型 | `v` | `profile ...`、`models ...`、`providers` |
 | 缓存审计／回收 | `c` | `cache audit`、`cache purge` |
-| 任务／批量／worker／skills | 命令面板；无独立页面 | `job ...`、`batch ...`、`worker ...`、`skills ...` |
+| Agent 技能 | 更多操作 → Agent 技能；选择范围和目标目录 | `skills ...` |
+| 任务／批量／worker | 命令面板；无独立页面 | `job ...`、`batch ...`、`worker ...` |
 | 帮助／语言 | `?`、`l` | `help`、`schema`、`--zh`、`--en`、`language` |
 
 <details>
@@ -801,6 +802,9 @@ imagen skills install                     # 在终端里询问装到哪些 agent
 imagen skills install --target universal  # 共享的 .agents/skills 目录
 imagen skills install --target claude-code --target codex
 imagen skills install --scope global --target claude-code
+imagen skills list imagen --scope global --target claude-code
+imagen skills update imagen --scope global --target claude-code
+imagen skills update                      # 与安装相同的 agent 选择器
 imagen skills uninstall --target codex
 ```
 
@@ -813,6 +817,8 @@ imagen skills uninstall --target codex
 - 安装会写入托管清单（`.imagen-install.json`）。卸载不会删除未托管目录或符号链接路径；已修改的受管 skill 需要 `--force --yes`。
 
 随包 skills 为 `imagen`、`imagen-assets` 和 `imagen-batch`。
+
+TUI 中通过 **更多操作 → Agent 技能** 查看状态、安装、更新和卸载；同一个表单可选择技能、范围和目标目录。`skills update` 使用当前 CLI 内置的技能更新已有副本，不会下载新版 CLI；请先升级 CLI，再更新技能。未安装的副本会提示安装命令，本地修改默认受到保护。技能名称可以使用位置参数，也可重复传入 `--skill`。安装、更新和卸载在交互终端中使用相同的 agent 选择器；`--no-interactive` 或机器输出不弹出选择器，默认目标为 `universal`。
 
 ## 机器接口
 
@@ -909,7 +915,7 @@ imagen tui
 - **图像质量**：扩展插画、摄影等领域的视觉对照与用户偏好评价；完成前，后处理保持 experimental。
 - **平台支持**：补充 Windows 实机验证，改进 Windows/macOS 处理资源控制。尺寸、缓冲和超时检查尚未达到完整沙箱的程度；Linux 地址空间限制只管虚拟地址空间，RSS 和显存仍可继续增长。
 - **语言支持**：增加更多界面语言。默认英文，中文可通过 `--lang zh-CN` 或 `IMAGEN_LANG=zh-CN` 使用。
-- **界面一致性**：完善批量、worker 和 skills 的独立 TUI 工作流；命令面板与本地模型管理已可用。
+- **界面一致性**：完善批量和 worker 的独立 TUI 工作流；命令面板与本地模型管理已可用。
 
 ## 开发
 

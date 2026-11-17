@@ -675,7 +675,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, parameters, options
     if command in {"skills list", "skills install", "skills update", "skills uninstall"}:
         if words:
-            raise _no_positional(command, words)
+            if "skill" in parameters:
+                raise UsageError(i18n.t(
+                    "Use positional skill names or --skill, not both.",
+                    "技能名称使用位置参数或 --skill，不能同时使用。",
+                ))
+            parameters["skill"] = words
         if parameters.pop("global", False):
             if parameters.get("scope") == "project":
                 raise UsageError(
@@ -889,17 +894,21 @@ def main(
             from imagen_cli.cli.selection import choose
 
             if (
-                argv[:2] in (["skills", "install"], ["skills", "uninstall"])
+                argv[:2] in (["skills", "install"], ["skills", "update"], ["skills", "uninstall"])
                 and not any(value == "--target" or value.startswith("--target=") for value in argv)
                 and not any(value in {"--help", "-h"} for value in argv)
             ):
-                from imagen_cli.application.skill_targets import prompt_order
+                from imagen_cli.application.skill_targets import prompt_order, root_for
 
-                labels, preselected = prompt_order()
+                _, parsed, _ = _parse(argv)
+                scope = parsed.get("scope", "project") if isinstance(parsed, dict) else "project"
+                labels, preselected = prompt_order(scope)
+                stderr.write(i18n.t("Skill scope: ", "Skill 范围：") + scope + "\n")
                 selected = choose(labels, stdin=sys.stdin, stderr=stderr, selected=preselected)
                 if not selected:
                     raise KeyboardInterrupt
                 for name in selected:
+                    stderr.write(f"{scope}/{name} → {root_for(name, scope)}\n")
                     argv.extend(["--target", name])
             if (
                 argv[:2] == ["superres", "fetch"]

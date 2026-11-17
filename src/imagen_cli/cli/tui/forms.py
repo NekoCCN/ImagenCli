@@ -44,8 +44,12 @@ class ChoiceForm(Modal[dict[str, str] | None]):
         custom: set[str] | None = None,
         optional: set[str] | None = None,
         secrets: set[str] | None = None,
+        validate_values: Callable[[dict[str, str]], None] | None = None,
+        submit_label: str | None = None,
     ) -> None:
         super().__init__()
+        self.validate_values = validate_values
+        self.submit_label = submit_label or t("Save", "保存")
         self.heading = title
         self.fields = fields
         self.choices = choices or {}
@@ -101,7 +105,7 @@ class ChoiceForm(Modal[dict[str, str] | None]):
                         password=name in self.secrets,
                     )
             yield from self.extra_fields()
-            yield Button(t("Save", "保存"), id="submit", variant="primary")
+            yield Button(self.submit_label, id="submit", variant="primary")
             yield Button(t("Cancel", "取消"), id="cancel")
 
     def field_choices(self, name: str, default: str) -> ComposeResult:
@@ -188,7 +192,14 @@ class ChoiceForm(Modal[dict[str, str] | None]):
                 t("Required: ", "必填：") + ", ".join(missing)
             )
             return
-        self.dismiss({name: value for name, value in values.items() if value})
+        values = {name: value for name, value in values.items() if value}
+        if self.validate_values is not None:
+            try:
+                self.validate_values(values)
+            except (ValueError, TypeError) as error:
+                self.query_one("#form-status", Static).update(str(error))
+                return
+        self.dismiss(values)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -865,3 +876,27 @@ class CreationForm(ChoiceForm):
             self.query_one("#form-status", Static).update(message)
             return
         super().submit()
+
+
+class SkillsForm(ChoiceForm):
+    """Scope-aware agent choices, with destinations visible before executing."""
+
+    DEFAULT_CSS = "SkillsForm SelectionList { height: auto; max-height: 8; min-height: 3; }"
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        super().on_select_changed(event)
+        if event.select.id != "scope" or event.value not in {"project", "global"}:
+            return
+        from imagen_cli.application.skill_targets import prompt_order, root_for
+
+        scope = str(event.value)
+        labels, defaults = prompt_order(scope)
+        picker = self.query_one("#target", SelectionList)
+        picked = set(picker.selected)
+        selected = picked.intersection(labels) or set(defaults)
+        picker.clear_options()
+        picker.add_options([
+            Selection(Text(f"[{'x' if name in selected else ' '}] {name} → "
+                           f"{root_for(name, scope)}"), name, name in selected)
+            for name in labels
+        ])
