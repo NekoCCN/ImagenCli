@@ -797,30 +797,28 @@ imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST
 随包 skills 教 agent 何时使用 Imagen、如何发现命令与 schema、如何遵守计划与批准流程、如何处理 unknown outcome，以及如何守住费用、凭据和权重下载边界。
 
 ```bash
-imagen skills list
-imagen skills install                     # 在终端里询问装到哪些 agent
-imagen skills install --target universal  # 共享的 .agents/skills 目录
-imagen skills install --target claude-code --target codex
-imagen skills install --scope global --target claude-code
-imagen skills list imagen --scope global --target claude-code
+imagen                                   # 终端入口：工作台、技能管理或帮助
+imagen skills                            # 统一交互式技能管理
+imagen skills install                    # 范围 → agent → 技能子集 → 确认
+imagen skills update                     # 同一流程；更新已有副本
+imagen skills uninstall                  # 同一流程；默认安全卸载
+imagen skills list --no-interactive       # 直接查看状态，不提问
+imagen skills install imagen --scope global --target claude-code
 imagen skills update imagen --scope global --target claude-code
-imagen skills update                      # 与安装相同的 agent 选择器
-imagen skills uninstall --target codex
 ```
 
-<img src="assets/screenshots-0.1.10/imagen-cli-skills-zh-CN.png" alt="Agent skill 安装选项" width="760">
+在人机交互终端中，`imagen skills` 提供状态、安装、更新、卸载菜单；不带参数的子命令从范围选择开始进入同一流程。可以选择 project/global 范围、agent 目标，以及 `imagen`、`imagen-assets`、`imagen-batch` 中的部分或全部技能。最后显示操作、范围、技能、目标目录和等价 CLI 命令。
 
-- 默认安装到当前项目；`--scope global` 安装到用户目录。
-- 未指定 `--target` 时安装到 `universal`，即多数 agent 都会读取的共享目录 `.agents/skills`。需要更多 agent 时重复传 `--target`；`--target all` 选择兼容表中的全部目标。
-- 在终端中未指定 `--target` 时打开勾选列表：方向键移动、空格选择、`a` 全选、回车确认、`q` 取消。共享目录和项目里已存在的 agent 目录默认勾选。没有终端（或加 `--no-interactive`）时直接装到默认目标，不提问。
-- 全局安装时会报告仅支持项目作用域的目标。
-- 安装会写入托管清单（`.imagen-install.json`）。卸载不会删除未托管目录或符号链接路径；已修改的受管 skill 需要 `--force --yes`。
+- 操作、范围、确认使用数字菜单，回车接受显示的默认值。勾选列表中方向键移动、空格切换、`a` 切换全选、回车接受所选项；`b` 返回上一步，`q` 取消。最终确认前不修改文件。空选择不会静默替换为其他目标。
+- 默认安全模式，保留本地修改。强制模式要求安装/更新时输入 `overwrite`，卸载时输入 `remove`。只处理受管副本，不覆盖非受管目录或符号链接路径。确认时取消或返回不会丢失修改。
+- 初始范围为 project，默认勾选共享目标 `universal` 和检测到的 agent 目录，以及全部内置技能。global 范围仅显示支持该范围的 agent。请检查显示的实际路径，尤其是设置过 agent 专用环境变量时。
+- 显式参数仍然有效，不进入完整向导。交互式安装/更新/卸载若没有 `--target`，仍显示 agent 选择器。可重复 `--target` 或使用 `--target all`；技能可用位置参数或重复 `--skill`；全局范围可用 `--scope global` 或 `--global`。
+- 非终端、`--no-interactive` 或机器输出模式不提问。原有子命令保持 project、universal、全部技能、不强制的默认行为。脚本中的裸 `skills list` 仍检查两个范围。`imagen skills` 本身需要交互终端，脚本需指定子命令。非交互模式下裸 `imagen` 仍输出帮助。
+- `skills update` 使用已安装 CLI 内置的技能，不升级 CLI 软件包。未安装的副本会提示安装命令；重复安装会报告已有副本并提示 update；重复更新或卸载可安全执行。显式 `--force` 保持原义，删除修改过的受管技能还需要 `--yes`。
 
-随包 skills 为 `imagen`、`imagen-assets` 和 `imagen-batch`。
+TUI 中通过 **更多操作 → Agent 技能** 或命令面板的 `skills` 进入同样的选择流程。强制操作会额外确认；确认强制卸载时自动提供 CLI 所需的 `--yes`。命令表单遇到错误时保留输入，包括 timeout 等执行选项错误。
 
-不带参数运行 `imagen skills install`、`update`、`uninstall` 时，默认选择全部内置技能和 project 范围。终端中的选择器只选择 agent，不询问范围、技能名称、`--force` 或 `--yes`；这些选项需使用参数，或在 TUI 的 **更多操作 → Agent 技能** 表单中选择。`imagen` 显示帮助，单独的 `imagen skills` 不是安装向导。
-
-TUI 中通过 **更多操作 → Agent 技能** 查看状态、安装、更新和卸载；同一个表单可选择技能、范围和目标目录。`skills update` 使用当前 CLI 内置的技能更新已有副本，不会下载新版 CLI；请先升级 CLI，再更新技能。未安装的副本会提示安装命令，本地修改默认受到保护。技能名称可以使用位置参数，也可重复传入 `--skill`。安装、更新和卸载在交互终端中使用相同的 agent 选择器；`--no-interactive` 或机器输出不弹出选择器，默认目标为 `universal`。
+交互入口和 TUI 覆盖常见图片、端点工作流，但不代表所有 CLI 参数都有专用向导。机器格式（`--agent`、`--output json/jsonl`）和无人值守（`--no-interactive`）仍显式指定。工作区（`--workspace`）仍作为启动参数；批量 JSON 输入和高级部署配置保留 CLI/schema 接口及命令面板表单。
 
 ## 机器接口
 

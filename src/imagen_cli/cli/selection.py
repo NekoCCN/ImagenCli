@@ -12,6 +12,11 @@ from rich.text import Text
 
 from imagen_cli.i18n import t
 
+
+class Back(Exception):
+    """Return to the previous step of an interactive setup."""
+
+
 # Which keys do what; `apply` is pure so the state machine is testable without a TTY.
 _UP = {"\x1b[A", "\x1bOA", "\x00H", "\xe0H", "k"}
 _DOWN = {"\x1b[B", "\x1bOB", "\x00P", "\xe0P", "j"}
@@ -76,7 +81,9 @@ def _read_key(stream: TextIO) -> str:
         return char
 
 
-def _render(labels: list[str], picked: list[str], cursor: int, height: int) -> Text:
+def _render(
+    labels: list[str], picked: list[str], cursor: int, height: int, allow_back: bool = False
+) -> Text:
     start = max(0, min(cursor - height // 2, len(labels) - height))
     body = Text()
     for index in range(start, min(start + height, len(labels))):
@@ -95,50 +102,72 @@ def _render(labels: list[str], picked: list[str], cursor: int, height: int) -> T
         ),
         style="dim",
     )
+    if allow_back:
+        body.append(t(" · b back", " · b 返回"), style="dim")
+        if not picked:
+            body.append(t(" · select at least one", " · 至少选择一项"), style="yellow")
     return body
 
 
-def _pick(numbers: list[str], stdin: TextIO, stderr: TextIO, selected: list[str]) -> list[str]:
+def _pick(
+    numbers: list[str], stdin: TextIO, stderr: TextIO, selected: list[str],
+    allow_back: bool = False,
+) -> list[str]:
     for index, label in enumerate(numbers, 1):
         mark = "*" if label in selected else " "
         stderr.write(f"{index:2}. [{mark}] {label}\n")
-    stderr.write(
-        t(
+    while True:
+        stderr.write(t(
             "Enter numbers (comma-separated, blank keeps the starred ones): ",
             "输入序号（多个用逗号分隔，空白保留带 * 的项）：",
-        )
-    )
-    stderr.flush()
-    value = stdin.readline()
-    if value == "":
-        return []
-    value = value.strip()
-    if not value:
-        return list(selected)
-    try:
-        indices = list(dict.fromkeys(int(item.strip()) - 1 for item in value.split(",")))
-        if any(index < 0 or index >= len(numbers) for index in indices):
+        ))
+        if allow_back:
+            stderr.write(t("[a all, b back, q cancel] ", "[a 全选，b 返回，q 取消] "))
+        stderr.flush()
+        raw = stdin.readline()
+        if raw == "" or raw.strip().lower() == "q":
             return []
-        return [numbers[index] for index in indices]
-    except ValueError:
-        return []
+        value = raw.strip()
+        if allow_back and value.lower() == "b":
+            raise Back
+        if allow_back and value.lower() == "a":
+            return list(numbers)
+        chosen = list(selected) if not value else []
+        if value:
+            try:
+                indices = list(dict.fromkeys(int(item.strip()) - 1 for item in value.split(",")))
+                if all(0 <= index < len(numbers) for index in indices):
+                    chosen = [numbers[index] for index in indices]
+            except ValueError:
+                pass
+        if chosen or not allow_back:
+            return chosen
+        stderr.write(t("Select at least one valid number.\n", "请至少选择一个有效序号。\n"))
 
 
 def choose(
-    labels: list[str], *, stdin: TextIO, stderr: TextIO, selected: list[str] | None = None
+    labels: list[str], *, stdin: TextIO, stderr: TextIO, selected: list[str] | None = None,
+    allow_back: bool = False,
 ) -> list[str]:
     """Tick agents in a checklist; `selected` starts ticked."""
     picked = [label for label in labels if label in (selected or [])]
     if not _tty(stdin) or not _tty(stderr):
-        return _pick(labels, stdin, stderr, picked)
+        return _pick(labels, stdin, stderr, picked, allow_back)
     console = Console(file=stderr, force_terminal=True, highlight=False)
     height = max(5, min(len(labels), console.height - 3))
     cursor = 0
     with Live(
-        _render(labels, picked, cursor, height), console=console, transient=True
+        _render(labels, picked, cursor, height, allow_back), console=console, transient=True
     ) as live:
         while True:
-            picked, cursor, done = apply(labels, picked, cursor, _read_key(stdin))
+            key = _read_key(stdin)
+            if not key:
+                return []
+            if allow_back and key == "b":
+                raise Back
+            if allow_back and key in _CONFIRM and not picked:
+                continue
+            picked, cursor, done = apply(labels, picked, cursor, key)
             if done is not None:
                 return picked if done else []
-            live.update(_render(labels, picked, cursor, height))
+            live.update(_render(labels, picked, cursor, height, allow_back))

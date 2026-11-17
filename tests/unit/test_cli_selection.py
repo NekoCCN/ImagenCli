@@ -60,3 +60,22 @@ def test_the_picker_cancels_on_q(monkeypatch):
     monkeypatch.setattr(selection, "_read_key", lambda stream: "q")
     err = io.StringIO()
     assert selection.choose(["universal"], stdin=io.StringIO(), stderr=err) == []
+
+
+def test_wizard_picker_back_and_empty_selection(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(selection, '_tty', lambda stream: True)
+    monkeypatch.setattr(selection, '_read_key', lambda stream: 'b')
+    with pytest.raises(selection.Back):
+        choose(['universal'], stdin=io.StringIO(), stderr=io.StringIO(), allow_back=True)
+    keys = iter(['a', '\r', ' ', '\r'])
+    monkeypatch.setattr(selection, '_read_key', lambda stream: next(keys))
+    assert choose(['universal'], selected=['universal'], stdin=io.StringIO(),
+                  stderr=io.StringIO(), allow_back=True) == ['universal']
+
+
+def test_picker_eof_cancels(monkeypatch):
+    monkeypatch.setattr(selection, '_tty', lambda stream: True)
+    monkeypatch.setattr(selection, '_read_key', lambda stream: '')
+    assert choose(['universal'], stdin=io.StringIO(), stderr=io.StringIO()) == []

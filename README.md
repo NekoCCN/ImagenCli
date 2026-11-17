@@ -827,29 +827,28 @@ imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST
 Imagen ships skills that teach coding agents when to use it, how to discover commands and schemas, how to follow the plan and approval lifecycle, how to handle unknown outcomes, and how to respect cost, credential, and weight-download boundaries.
 
 ```bash
-imagen skills list
-imagen skills install                     # asks which agents, in a terminal
-imagen skills install --target universal  # the shared .agents/skills directory
-imagen skills install --target claude-code --target codex
-imagen skills install --scope global --target claude-code
-imagen skills list imagen --scope global --target claude-code
+imagen                                   # terminal launcher: workbench, skills, or help
+imagen skills                            # unified interactive skill manager
+imagen skills install                    # scope → agents → skill subset → review
+imagen skills update                     # same workflow; updates existing copies
+imagen skills uninstall                  # same workflow; safe removal by default
+imagen skills list --no-interactive       # direct status, without prompts
+imagen skills install imagen --scope global --target claude-code
 imagen skills update imagen --scope global --target claude-code
-imagen skills update                      # same agent picker as install
-imagen skills uninstall --target codex
 ```
 
-<img src="assets/screenshots-0.1.10/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
+In a human terminal, `imagen skills` offers Status, Install, Update, and Uninstall. Bare subcommands enter the same workflow at the scope step. Choose project or global scope, agent destinations, and a subset of `imagen`, `imagen-assets`, and `imagen-batch`. The review shows exactly which operation, scope, skills, and directories will be affected, followed by an equivalent CLI command.
 
-- Default scope is the current project; `--scope global` installs into user directories.
-- Bare `imagen skills install`, `update`, and `uninstall` select all bundled skills. Their terminal checklist selects agents only: it does not ask for scope, skill names, `--force`, or `--yes`. Use flags for those choices, or **More actions → Agent skills** in the TUI. `imagen` shows help; `imagen skills` alone is not a setup wizard.
-- Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
-- For install, update, and uninstall in a terminal without `--target`, Imagen opens a scope-aware checklist: arrows move, space selects, `a` selects all, enter confirms, `q` cancels. The shared directory and any agent directory already present in the project start ticked. Without a terminal — or with `--no-interactive` — the command installs into the default target and never prompts.
-- Project-only agents are reported when global installation is requested.
-- Installation writes a managed manifest (`.imagen-install.json`). Uninstall refuses unmanaged directories and symlinked paths. A locally modified managed skill needs `--force --yes`.
+- Numbered action/scope/review menus accept Enter for the shown default. In checklists, arrows move, Space toggles, `a` toggles all, and Enter accepts the selected entries. `b` goes back and `q` cancels. No files change before the review is accepted. Empty selections cannot silently choose a different target.
+- Safe mode is the default. Override mode requires typing `overwrite` for install/update or `remove` for uninstall. It applies only to managed copies; unmanaged directories and symlinked paths remain protected. Canceling or going back at confirmation preserves local edits.
+- The initial scope is project. The shared `universal` target and detected agent directories start selected; all bundled skills start selected. Global scope only offers agents that support it. Inspect the displayed destination paths, especially when agent-specific environment variables override them.
+- Explicit skill options remain supported and do not open the full wizard. An interactive install/update/uninstall without `--target` still offers the agent checklist. Use repeated `--target` or `--target all`, positional skill names or repeated `--skill`, and `--scope global` (or `--global`).
+- Without a terminal, with `--no-interactive`, or with machine output, no prompts appear. Existing subcommands retain their defaults: project scope, `universal` target, all bundled skills, and no force. Bare `skills list` in scripts still inspects both scopes. `imagen skills` itself requires a human terminal; scripts must name a subcommand. Bare `imagen` still prints help outside an interactive terminal.
+- `skills update` uses the skills bundled with the installed CLI; it does not upgrade the CLI package. Missing copies show an install command. Repeat install reports existing copies and points to update; repeat update/uninstall is safe. Explicit CLI `--force` retains its existing meaning; removing modified managed skills additionally requires `--yes`.
 
-Use **More actions → Agent skills** in the TUI for status, install, update, and uninstall. Choose skills, scope, and agent destinations in the same form. `skills update` refreshes existing copies from the installed CLI package; it does not download a new CLI release. Upgrade the CLI first to receive newer bundled skills. Missing copies show an install command; locally edited copies remain protected unless you explicitly pass `--force`. Positional skill names and repeated `--skill` flags are equivalent.
+The TUI exposes the same choices through **More actions → Agent skills**, or `skills` in the command palette. Force-enabled actions open a separate confirmation; confirming removal supplies the CLI's `--yes`. The command palette keeps invalid values editable, including invalid execution options such as timeout.
 
-The bundled skills are `imagen`, `imagen-assets`, and `imagen-batch`.
+The interactive launcher and TUI cover common image and provider workflows, but are not a universal replacement for every CLI option. Machine formatting (`--agent`, `--output json/jsonl`) and unattended execution (`--no-interactive`) stay explicit. Workspace selection (`--workspace`) remains a startup option; bulk JSON batch input and advanced deployment settings retain their CLI/schema interfaces and command-palette forms.
 
 ## Machine interface
 

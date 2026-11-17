@@ -3812,6 +3812,9 @@ class WorkbenchApp(App[None]):
         self.push_screen(CommandPaletteScreen(), chosen)
 
     def _open_command(self, command: str) -> None:
+        if command == "skills":
+            self.action_skills()
+            return
         if self.deps.execute is None:
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
@@ -3835,6 +3838,8 @@ class WorkbenchApp(App[None]):
 
     def _open_command_form(self, command: str) -> None:
         fields, optional = command_fields(command)
+        if command == "skills uninstall":
+            fields = [field for field in fields if field[0] != "yes"]
         controls = _control_fields(command)
         control_names = {name for name, _, _ in controls}
         fields = [field for field in fields if field[0] not in control_names] + controls
@@ -3859,6 +3864,24 @@ class WorkbenchApp(App[None]):
                 )
             except (ValueError, TypeError) as error:
                 self._say(t("Parameter error: ", "参数错误：") + _sanitize(error), "error")
+                return
+            if command.startswith("skills ") and arguments.get("force"):
+                scope = arguments.get("scope", "project")
+                targets = ", ".join(arguments.get("target", []))
+                names = ", ".join(arguments.get("skill", []))
+
+                def confirmed(answer: bool | None) -> None:
+                    if answer is True:
+                        if command == "skills uninstall":
+                            arguments["yes"] = True
+                        self._run_command(command, arguments, options)
+
+                self.push_screen(ConfirmScreen(t(
+                    f"Discard local edits in managed skills? {command}: {names}; "
+                    f"scope {scope}; targets {targets}. Unmanaged paths remain protected.",
+                    f"丢弃受管技能的本地修改？{command}：{names}；范围 {scope}；"
+                    f"目标 {targets}。非受管目录仍受保护。",
+                )), confirmed)
                 return
             self._run_command(command, arguments, options)
 
@@ -3911,7 +3934,18 @@ class WorkbenchApp(App[None]):
             arguments = _convert_arguments(
                 command, {key: value for key, value in values.items() if key not in control_names}
             )
-            _convert_controls({key: value for key, value in values.items() if key in control_names})
+            from imagen_cli.cli.usage import describe_pydantic
+
+            try:
+                converted = _convert_controls(
+                    {key: value for key, value in values.items() if key in control_names}
+                )
+                _control_options(self.deps.options, converted)
+                if converted.get("timeout") == 0 and command not in LOCAL_TIMEOUT_COMMANDS:
+                    raise ValueError(t("timeout must be positive", "timeout 必须为正数"))
+            except ValueError as error:
+                described = describe_pydantic(error)
+                raise ValueError(str(described or error)) from error
             try:
                 validate(arguments, discover(command)["input_schema"])
             except ValidationError as error:

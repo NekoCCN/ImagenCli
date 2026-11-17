@@ -419,7 +419,9 @@ class Container:
             try:
                 from imagen_cli.cli.tui.app import Deps, WorkbenchApp
             except ImportError as error:  # optional extra
-                raise ValueError("tui extra is not installed") from error
+                raise ValueError(
+                    "TUI is not installed. Install the imagen-cli[tui] extra, then run imagen tui."
+                ) from error
             WorkbenchApp(
                 Deps(
                     self.repositories,

@@ -131,3 +131,61 @@ def test_scope_change_never_substitutes_another_target(tmp_path, monkeypatch):
                 assert targets.selected == []
 
     asyncio.run(exercise())
+
+
+def test_force_uninstall_requires_confirmation(tmp_path, monkeypatch):
+    from imagen_cli.application import skills_service
+    from imagen_cli.cli.tui.app import ConfirmScreen
+
+    monkeypatch.chdir(tmp_path)
+    skills_service.install_(['imagen'])
+    target = tmp_path / '.agents/skills/imagen/SKILL.md'
+    target.write_text('keep edits')
+
+    async def exercise():
+        with Container(workspace=str(tmp_path / 'workspace')) as container:
+            app = WorkbenchApp(Deps(container.repositories, container.artifact_store,
+                                    execute=container.execute))
+            async with app.run_test() as pilot:
+                for accept in (False, True):
+                    app._open_command('skills')
+                    await pilot.pause()
+                    app.screen.query_one('#more-uninstall').press()
+                    await pilot.pause()
+                    form = app.screen
+                    form.query_one('#target', SelectionList).deselect_all()
+                    form.query_one('#target', SelectionList).select('universal')
+                    form.query_one('#skill', SelectionList).deselect_all()
+                    form.query_one('#skill', SelectionList).select('imagen')
+                    form.query_one('#force', Select).value = 'true'
+                    await pilot.press('ctrl+enter')
+                    await pilot.pause()
+                    assert isinstance(app.screen, ConfirmScreen)
+                    assert target.read_text() == 'keep edits'
+                    await pilot.press("y" if accept else "enter")
+                    await pilot.pause()
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+                    assert target.exists() is not accept
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("timeout", ["-1", "0", "bad", "86401"])
+def test_invalid_shared_options_keep_form_open(tmp_path, timeout):
+    async def exercise():
+        with Container(workspace=str(tmp_path / 'workspace')) as container:
+            app = WorkbenchApp(Deps(container.repositories, container.artifact_store,
+                                    execute=container.execute))
+            async with app.run_test() as pilot:
+                app._open_command('job wait')
+                await pilot.pause()
+                form = app.screen
+                form.query_one('#job_id', Input).value = 'job_' + 'a' * 32
+                form.query_one('#timeout', Input).value = timeout
+                await pilot.press('ctrl+enter')
+                await pilot.pause()
+                assert app.screen is form
+                assert form.query_one('#timeout', Input).value == timeout
+
+    asyncio.run(exercise())

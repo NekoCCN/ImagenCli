@@ -1,6 +1,6 @@
 ---
 name: imagen
-version: 1.4.1
+version: 1.4.2
 description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 
@@ -23,6 +23,8 @@ imagen profile list --agent
 Use the installed version's help and schema; do not guess flags. For machine calls, use `--agent` or `--output json` and check the exit code plus `ok/status/data/error`. Ask the user to choose when profiles or models are missing or ambiguous. Never print credentials or inspect secret files to discover a key.
 
 ## Skill maintenance
+
+Humans can run `imagen skills` (or a bare Skills subcommand) for scope, agent and skill selection, review, and explicit override confirmation. Agents and scripts must name a subcommand and use `--agent` or `--no-interactive` with explicit scope and targets; do not drive the human wizard.
 
 Use the same explicit target and scope throughout: `imagen skills install imagen --target codex --scope project --agent`, then `imagen skills list imagen --target codex --scope project --agent` and `imagen skills update imagen --target codex --scope project --agent`. Use `--scope global` for user-wide copies. Update reads bundled content from the installed CLI; upgrade the CLI separately to obtain newer skills. A missing copy needs install. Inspect conflicts before considering `--force`; never overwrite local edits without authorization. Unmanaged directories are never taken over.
 
