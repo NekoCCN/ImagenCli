@@ -123,6 +123,7 @@ class ErrorType(StrEnum):
     WAIT_TIMEOUT = "wait_timeout"
     OUTCOME_UNKNOWN = "outcome_unknown"
     APPROVAL_REQUIRED = "approval_required"
+    RATE_LIMITED = "rate_limited"
     PROVIDER_ERROR = "provider_error"
     TRANSPORT_ERROR = "transport_error"
     SAVE_FAILED = "save_failed"

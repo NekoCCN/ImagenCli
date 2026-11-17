@@ -40,6 +40,9 @@ COMMANDS = {
             for name, summary in (
                 ("generate", "生成执行计划并要求批准；--async 入队由本地 worker 执行"),
                 ("edit", "冻结输入并生成编辑计划；--async 入队由本地 worker 执行"),
+                ("vibe plan", "离线准备 Vibe 编码计划；可能单独收费，金额未知"),
+                ("vibe execute", "凭精确摘要执行一次 Vibe 编码；不自动重试"),
+                ("vibe status", "查看 Vibe 准备状态；不发送请求"),
                 ("plan show", "查看持久执行计划；不发送请求"),
                 ("plan approve", "显式批准计划摘要；不发送请求"),
                 ("plan execute", "执行已批准计划；最多发送一次供应商创建请求"),
@@ -147,6 +150,9 @@ COMMANDS = {
 
 
 _SUMMARY_EN = {
+    "vibe plan": "Plan Vibe encoding offline; possible separate charge, amount unknown",
+    "vibe execute": "Execute exact approved Vibe digest once; never retries automatically",
+    "vibe status": "Observe persisted Vibe preparation; sends no request",
     "help": "Show command help; --agent returns the safe-call manual",
     "schema": "Inspect input, output, defaults and delivery status offline",
     "generate": "Create an execution plan requiring approval; --async queues it for the "
@@ -450,6 +456,20 @@ def _input_schema(name: str) -> dict[str, Any]:
                     text,
                 )
             )
+            properties["models_path"] = {"anyOf": [text, {"type": "null"}]}
+            properties["novelai_options"] = {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "auth_mode": {"enum": ["bearer", "x-api-key"]},
+                    "reference_transport": {"enum": ["encoded", "raw"]},
+                    "vibe_encoding_transport": {"enum": ["json", "multipart"], "default": "json"},
+                },
+                "description": (
+                    "NovelAI explicit authentication/reference transport; "
+                    "model support is unverified."
+                ),
+            }
             properties["key_file"] = text
             properties["revision"] = {"type": "integer", "minimum": 1, "default": 1}
             required += ("provider", "family", "base_url", "model_default")
@@ -493,6 +513,20 @@ def _input_schema(name: str) -> dict[str, Any]:
             properties["force"] = {"type": "boolean", "default": False}
         if name == "skills uninstall":
             properties["yes"] = {"type": "boolean", "default": False}
+    elif name == "vibe plan":
+        properties = {
+            "artifact_id": {"type": "string", "pattern": "^art_[0-9a-f]{32}$"},
+            "profile": {"type": "string", "minLength": 1},
+            "model": {"type": "string", "minLength": 1, "maxLength": 256},
+            "information_extracted": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+        }
+        required = ("artifact_id", "profile", "model")
+    elif name in {"vibe execute", "vibe status"}:
+        properties = {"preparation_id": {"type": "string", "pattern": "^vib_[0-9a-f]{32}$"}}
+        required = ("preparation_id",)
+        if name == "vibe execute":
+            properties["digest"] = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            required += ("digest",)
     elif name.startswith(("job ", "batch ", "plan ")) and name != "batch submit":
         entity = name.split()[0]
         field = entity + "_id"
@@ -1162,6 +1196,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
         return _object(
             {"recovered": {"type": "array", "items": {"type": "object"}}}, ("recovered",)
         )
+    if command.name.startswith("vibe "):
+        return _object({"preparation": {"type": "object"}}, ("preparation",))
     if command.name == "plan show":
         return _object({"plan": {"type": "object"}}, ("plan",))
     if command.name == "plan approve":

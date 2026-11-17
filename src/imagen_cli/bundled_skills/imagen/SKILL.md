@@ -1,6 +1,6 @@
 ---
 name: imagen
-version: 1.3.3
+version: 1.4.0
 description: Use when configuring image endpoints or models, generating or editing images, or managing image tasks with the Imagen CLI.
 ---
 
@@ -62,3 +62,10 @@ For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and in
 ## Related tasks
 
 Use `imagen-assets` for sessions, artifacts, transforms, exports, upscaling, watermarks on images or video, remote GPU workers (including the shipped Modal and Salad deploy assets), and local directory batches; use `imagen-batch` for multiple paid provider requests. Postprocessing is experimental and creates new artifacts. Never overwrite originals. Weight downloads, inference dependency installs, deletion, and forced overwrites require explicit approval. Local processing exposes the same controls to agents and users (`--timeout`, `IMAGEN_POSTPROCESS_TIMEOUT`, `IMAGEN_POSTPROCESS_MEMORY_MB`); use them when a run needs more time or memory.
+
+## NovelAI-compatible requests
+
+Read [references/novelai.md](references/novelai.md) before configuring or dispatching NovelAI-compatible work.
+Keep encoding approval separate from generation approval, including batches; no hidden retries
+or preparation. Unknown outcomes may already be charged. Preserve explicit image roles and
+private-cache provenance. Offline tests do not establish live service compatibility.

@@ -16,7 +16,9 @@ __all__ = ["ConfiguredAdapter", "SUPPORTED_ROUTES", "resolve_credential"]
 
 
 def resolve_credential(
-    reference: str, *, private_store: Any = None,
+    reference: str,
+    *,
+    private_store: Any = None,
 ) -> str:
     if re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference):
         value = os.environ.get(reference[4:], "")
@@ -62,6 +64,14 @@ class ConfiguredAdapter:
         profile = ProfileService().load(row)
         if (profile.provider, profile.family) not in SUPPORTED_ROUTES:
             raise ProviderFailure("unsupported_capability")
+        if (profile.provider, profile.family) == ("novelai", "generate_image"):
+            from imagen_cli.providers.novelai import NovelAIAdapter
+
+            return NovelAIAdapter(
+                profile,
+                resolve_credential=self._resolve,
+                read_timeout=self.timeout,
+            ).create(request)
         if (profile.provider, profile.family) == ("gemini", "generate_content"):
             if self.private_store is None:
                 raise ProviderFailure("unsupported_capability")
@@ -73,5 +83,7 @@ class ConfiguredAdapter:
         if (profile.provider, profile.family) != ("openai", "images"):
             raise ProviderFailure("unsupported_capability")
         return OpenAIImagesAdapter(
-            profile, resolve_credential=self._resolve, read_timeout=self.timeout,
+            profile,
+            resolve_credential=self._resolve,
+            read_timeout=self.timeout,
         ).create(request)

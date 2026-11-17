@@ -1,6 +1,6 @@
 ---
 name: imagen-batch
-version: 1.2.0
+version: 1.3.0
 description: Use when submitting multiple Imagen image requests, choosing provider concurrency, inspecting batch child jobs, or handling partial batch failures.
 ---
 
@@ -69,3 +69,10 @@ imagen batch wait bat_... --timeout 600 --agent
 ```
 
 Judge success per child, including saved artifacts. `batch wait` observes only; it does not retry. Never resubmit the entire batch automatically after partial failure. Replan only definitely failed children with fresh authorization. For `unknown`, `outcome_unknown`, or `accepted_maybe=true`, stop creation and inspect the corresponding job's local facts before asking the user what to do.
+
+## NovelAI-compatible requests
+
+Read [../imagen/references/novelai.md](../imagen/references/novelai.md) before configuring or dispatching NovelAI-compatible work.
+Keep encoding approval separate from generation approval, including batches; no hidden retries
+or preparation. Unknown outcomes may already be charged. Preserve explicit image roles and
+private-cache provenance. Offline tests do not establish live service compatibility.

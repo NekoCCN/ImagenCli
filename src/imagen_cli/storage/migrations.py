@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -165,6 +165,18 @@ CREATE INDEX remote_jobs_provider ON remote_jobs(provider);
 """
 
 
+SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS vibe_preparations (
+ id TEXT PRIMARY KEY,
+ cache_key TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('planned','unknown','failed','succeeded')),
+ consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1)),
+ payload TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS vibe_preparation_cache ON vibe_preparations(cache_key,state);
+"""
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     if connection.in_transaction:
         raise ValueError("migration requires no active transaction")
@@ -195,6 +207,7 @@ def migrate(connection: sqlite3.Connection) -> None:
         steps = [(3, SCHEMA_V3), (4, SCHEMA_V4)]
     else:
         steps = [(4, SCHEMA_V4)]
+    steps.append((5, SCHEMA_V5))
     try:
         for target, script in steps:
             if target <= version:

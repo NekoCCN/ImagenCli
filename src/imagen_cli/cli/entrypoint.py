@@ -217,6 +217,7 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                 "image-size",
                 "provider-params-file",
                 "digest",
+                "information-extracted",
                 "scope",
                 "concurrency",
                 "to",
@@ -410,7 +411,8 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
                             )
                         ) from None
                 elif name in {"strength", "humanize", "unsharp", "controlnet-scale",
-                              "noise-std", "fps", "modal-cpu", "edge-shift"}:
+                              "noise-std", "fps", "modal-cpu", "edge-shift",
+                              "information-extracted"}:
                     try:
                         value = float(value)
                     except ValueError:
@@ -557,6 +559,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
     if command in {"providers", "models"}:
         if words:
             raise _no_positional(command, words)
+        validate(parameters, schema)
+        return command, parameters, options
+    if command.startswith("vibe "):
+        if len(words) != 1:
+            raise _need(command, words, 1, "one artifact or preparation id", "一个产物或准备标识")
+        parameters["artifact_id" if command == "vibe plan" else "preparation_id"] = words[0]
         validate(parameters, schema)
         return command, parameters, options
     if command in {"plan show", "plan approve", "plan execute", "plan retry"}:

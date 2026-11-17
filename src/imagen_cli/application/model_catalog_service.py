@@ -72,6 +72,10 @@ def fetch(
 
     base_url = endpoint_url(str(profile["base_url"]))
     path = profile.get("models_path")
+    if profile.get("provider") == "novelai" and not path:
+        raise ValueError(
+            "NovelAI discovery requires an explicit models_path; use manual IDs otherwise"
+        )
     parsed = urlsplit(base_url)
     url = (
         f"{parsed.scheme}://{parsed.netloc}{models_path(path)}"
@@ -90,7 +94,14 @@ def fetch(
         timeout=TIMEOUT, follow_redirects=False, trust_env=False,
     )
     try:
-        response = http.get(url, headers=_headers(str(profile["family"]), credential))
+        headers = _headers(str(profile["family"]), credential)
+        if profile.get("provider") == "novelai":
+            from imagen_cli.domain.models import NovelAIOptions
+
+            options = NovelAIOptions.model_validate(profile.get("novelai_options") or {})
+            if credential is not None and options.auth_mode == "x-api-key":
+                headers = {"X-API-Key": credential}
+        response = http.get(url, headers=headers)
     except httpx.TimeoutException as error:
         raise ValueError("catalog request timed out") from error
     except httpx.HTTPError as error:

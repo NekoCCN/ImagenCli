@@ -50,3 +50,10 @@ def test_every_example_is_minimal_and_valid(name: str) -> None:
     example = docs.example_input(name)
     jsonschema.validate(example, discover(name)["input_schema"])
     assert set(example) <= set(discover(name)["input_schema"]["properties"])
+
+
+def test_novelai_preparation_examples_are_typed_and_offline():
+    for name in ("vibe plan", "vibe execute", "vibe status"):
+        jsonschema.validate(docs.example_input(name), discover(name)["input_schema"])
+    properties = discover("vibe plan")["input_schema"]["properties"]
+    assert properties["information_extracted"]["type"] == "number"

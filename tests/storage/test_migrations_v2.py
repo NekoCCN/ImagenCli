@@ -20,7 +20,9 @@ def test_v1_workspace_upgrades_without_data_loss(tmp_path):
     migrations.migrate(connection)
 
     assert connection.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
-    assert {"provider_models", "artifact_links", "remote_jobs"} <= tables(connection)
+    assert {"provider_models", "artifact_links", "remote_jobs", "vibe_preparations"} <= tables(
+        connection
+    )
     assert connection.execute("SELECT id FROM sessions").fetchall() == [("ses_x",)]
 
 
@@ -28,7 +30,9 @@ def test_fresh_database_is_created_at_current_version(tmp_path):
     connection = sqlite3.connect(tmp_path / "state.sqlite3")
     migrations.migrate(connection)
     assert connection.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
-    assert {"provider_models", "artifact_links", "remote_jobs"} <= tables(connection)
+    assert {"provider_models", "artifact_links", "remote_jobs", "vibe_preparations"} <= tables(
+        connection
+    )
 
 
 def test_v3_remote_job_artifact_ids_survive_upgrade_without_foreign_keys(tmp_path):
@@ -49,7 +53,7 @@ def test_v3_remote_job_artifact_ids_survive_upgrade_without_foreign_keys(tmp_pat
 
     migrations.migrate(connection)
 
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
     assert connection.execute(
         "SELECT input_artifact_id,artifact_id FROM remote_jobs WHERE id='rmt_x'"
     ).fetchone() == ("art_in", "art_out")
@@ -66,3 +70,25 @@ def test_newer_database_is_refused(tmp_path):
         assert "newer" in str(error)
     else:  # pragma: no cover - the refusal is the assertion
         raise AssertionError("newer schema must be refused")
+
+
+def test_v4_workspace_gains_private_vibe_records_without_rewriting_old_rows(tmp_path):
+    connection = sqlite3.connect(tmp_path / "v4.sqlite3")
+    connection.executescript(
+        migrations.SCHEMA
+        + migrations.SCHEMA_V2
+        + migrations.SCHEMA_V3
+        + migrations.SCHEMA_V4
+        + "\nPRAGMA user_version=4;"
+    )
+    connection.execute(
+        "INSERT INTO profiles(id,name,payload) VALUES ('old','old','{\"revision\":1}')"
+    )
+    connection.commit()
+    migrations.migrate(connection)
+    assert "vibe_preparations" in tables(connection)
+    assert connection.execute("SELECT id,name,payload FROM profiles").fetchall() == [
+        ("old", "old", '{"revision":1}')
+    ]
+    assert connection.execute("SELECT COUNT(*) FROM vibe_preparations").fetchone()[0] == 0
+    assert (tmp_path / "v4.sqlite3.v4.bak").is_file()

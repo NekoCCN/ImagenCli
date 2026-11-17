@@ -139,9 +139,7 @@ class ChoiceForm(Modal[dict[str, str] | None]):
         if event.value != "custom":
             self.query_one("#" + name, Input).value = event.value
 
-    def on_selection_list_selected_changed(
-        self, event: SelectionList.SelectedChanged[str]
-    ) -> None:
+    def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged[str]) -> None:
         """Keep the written tick honest: Textual draws one glyph for both states."""
         lister = event.selection_list
         ticked = set(lister.selected)
@@ -198,6 +196,7 @@ class ChoiceForm(Modal[dict[str, str] | None]):
 
 class ProviderForm(ChoiceForm):
     ENDPOINTS = {
+        "novelai": ("generate_image", "https://image.novelai.net"),
         "openai": ("images", "https://api.openai.com/v1"),
         "gemini": ("generate_content", "https://generativelanguage.googleapis.com/v1beta"),
     }
@@ -226,7 +225,14 @@ class ProviderForm(ChoiceForm):
             ("provider", "", self.previous_provider),
             ("family", "", defaults.get("family", family)),
             ("base_url", "https://…", defaults.get("base_url") or endpoint),
-            ("models_path", "/v1/models", defaults.get("models_path", "/v1/models")),
+            (
+                "models_path",
+                t("Optional explicit catalog path", "可选显式目录路径"),
+                defaults.get("models_path", "/v1/models"),
+            ),
+            ("auth_mode", "", defaults.get("auth_mode", "bearer")),
+            ("reference_transport", "", defaults.get("reference_transport", "encoded")),
+            ("vibe_encoding_transport", "", defaults.get("vibe_encoding_transport", "json")),
             ("credential_mode", "", "keep" if self.original_reference else "key"),
             ("api_key", t("API key", "API key"), ""),
             ("credential_ref", t("Variable name or reference", "变量名或引用"), ""),
@@ -240,11 +246,22 @@ class ProviderForm(ChoiceForm):
         super().__init__(
             title,
             entries,
-            optional={"api_key", "credential_ref"},
+            optional={"api_key", "credential_ref", "models_path"},
             secrets={"api_key"},
             choices={
-                "provider": [("OpenAI-compatible", "openai"), ("Gemini native", "gemini")],
+                "provider": [
+                    ("OpenAI-compatible", "openai"),
+                    ("Gemini native", "gemini"),
+                    ("NovelAI-compatible (unverified / 未验证)", "novelai"),
+                ],
                 "family": [(family, family)],
+                "auth_mode": [("Bearer", "bearer"), ("X-API-Key", "x-api-key")],
+                "vibe_encoding_transport": [("Official JSON", "json"),
+                                            ("Gateway multipart / 网关", "multipart")],
+                "reference_transport": [
+                    ("Encoded Vibe (separate approval / 单独批准)", "encoded"),
+                    ("Raw compatible service / 原始兼容模式", "raw"),
+                ],
                 "credential_mode": modes,
             },
         )
@@ -299,6 +316,7 @@ class ProviderForm(ChoiceForm):
     def on_mount(self) -> None:
         super().on_mount()
         self._credential_visibility()
+        self._novelai_visibility()
         self.query_one("#family", Select).disabled = True
         for name, selector in (
             ("base_url", "endpoint-choice"),
@@ -306,6 +324,12 @@ class ProviderForm(ChoiceForm):
             ("model_default", "model-choice"),
         ):
             self.custom_input(name, self.query_one("#" + selector, Select).value == "custom")
+
+    def _novelai_visibility(self) -> None:
+        enabled = self.previous_provider == "novelai"
+        for name in ("auth_mode", "reference_transport", "vibe_encoding_transport"):
+            self.query_one("#" + name).display = enabled
+            self.query_one("#label-" + name).display = enabled
 
     def _credential_visibility(self) -> None:
         mode = self.query_one("#credential_mode", Select).value
@@ -333,6 +357,14 @@ class ProviderForm(ChoiceForm):
                 old_endpoint = self.ENDPOINTS.get(self.previous_provider, ("", ""))[1]
                 family, endpoint = self.ENDPOINTS[event.value]
                 self.previous_provider = event.value
+                self.request_version += 1
+                self._novelai_visibility()
+                self.query_one("#auth_mode", Select).value = "bearer"
+                self.query_one("#reference_transport", Select).value = "encoded"
+                self.query_one("#vibe_encoding_transport", Select).value = "json"
+                if event.value == "novelai":
+                    self.query_one("#models_path", Input).value = ""
+                    self.query_one("#models-path-choice", Select).value = "custom"
                 selector = self.query_one("#family", Select)
                 selector.set_options([(family, family)])
                 selector.value = family
@@ -415,10 +447,17 @@ class ProviderForm(ChoiceForm):
                 provider=values["provider"],
                 family=values["family"],
                 base_url=values["base_url"],
-                models_path=values["models_path"],
+                models_path=values["models_path"] or None,
                 model_default=values["model_default"],
                 credential_ref=values.get("credential_ref") or "private:draft",
                 revision=int(values["revision"]),
+                novelai_options={
+                    key: values[key] for key in (
+                        "auth_mode", "reference_transport", "vibe_encoding_transport"
+                    )
+                }
+                if values["provider"] == "novelai"
+                else None,
             )
             if not values.get("api_key") and not values.get("credential_ref"):
                 raise ValueError("credential required")
@@ -506,10 +545,12 @@ class SheetForm(ChoiceForm):
         lister = self.query_one("#artifacts", SelectionList)
         # set_options keeps the previous ticks, which would name another session's artifacts.
         lister.clear_options()
-        lister.add_options([
-            Selection(Text(f"[x] {label}"), value, True)
-            for label, value in self.artifacts_for(self.field_value("session"))
-        ])
+        lister.add_options(
+            [
+                Selection(Text(f"[x] {label}"), value, True)
+                for label, value in self.artifacts_for(self.field_value("session"))
+            ]
+        )
 
     def on_select_changed(self, event: Select.Changed) -> None:
         super().on_select_changed(event)
@@ -534,9 +575,15 @@ class CreationForm(ChoiceForm):
         optional: set[str] | None = None,
         fetch_models: Callable[[str], list[str]] | None = None,
         add_profile: Callable[[], None] | None = None,
+        artifacts: list[tuple[str, str]] | None = None,
+        vibe_action: Callable[[str], None] | None = None,
+        operation: str = "generate",
     ) -> None:
         self.fetch_models = fetch_models
         self.add_profile = add_profile
+        self.artifacts = artifacts or []
+        self.vibe_action = vibe_action
+        self.operation = operation
         self.request_version = 0
         self.profiles = {str(row["id"]): row for row in profiles}
         self.models = models
@@ -577,6 +624,75 @@ class CreationForm(ChoiceForm):
             )
 
     def extra_fields(self) -> ComposeResult:
+        from imagen_cli.providers.novelai_parameters import PARAMETER_KINDS
+
+        # The shared table defines every numeric/boolean/structured prompt field.
+        if "prompt" in {name for name, _, _ in self.fields}:
+            yield Static(
+                t(
+                    "NovelAI: model/service combinations remain unverified. "
+                    "Vibe preparation is separate and may cost money.",
+                    "NovelAI：模型/服务组合仍未验证。Vibe 预处理独立批准，可能收费。",
+                ),
+                classes="nai-field",
+            )
+            for name, kind in PARAMETER_KINDS.items():
+                if name in {"size", "count", "n_samples"}:
+                    continue
+                yield Static(f"{name} ({kind})", classes="nai-field")
+                yield Input(placeholder=kind, id="nai_" + name, classes="nai-field")
+            for name, options in (
+                ("primary", self.artifacts),
+                ("reference", self.artifacts),
+                (
+                    "role",
+                    [
+                        ("Vibe inspiration / 灵感", "vibe"),
+                        ("Precise guidance / 精确参考", "precise"),
+                    ],
+                ),
+                (
+                    "ref_mode",
+                    [
+                        ("Character / 角色", "character"),
+                        ("Character and style / 角色与风格", "character&style"),
+                    ],
+                ),
+            ):
+                yield Static(t("Explicit " + name, "显式选择 " + name), classes="nai-field")
+                yield Select[str](options, id="nai_" + name, classes="nai-field")
+            yield Static(
+                t(
+                    "Ordered references (advanced): JSON artifact IDs + aligned role/settings. "
+                    "Overrides single reference; paths are refused.",
+                    "多图有序参考（高级）：JSON 产物 ID 列表及对应角色/设置。覆盖单图；拒绝路径。",
+                ),
+                classes="nai-field",
+            )
+            yield Input(placeholder='["art_…", "art_…"]', id="nai_references", classes="nai-field")
+            yield Input(
+                placeholder='[{"kind":"vibe","settings":{"strength":0.5}}]',
+                id="nai_reference_options",
+                classes="nai-field",
+            )
+            for name in ("strength", "information_extracted", "fidelity"):
+                yield Static("Reference / 参考 " + name, classes="nai-field")
+                yield Input(placeholder="0..1", id="nai_ref_" + name, classes="nai-field")
+            yield Static(
+                t(
+                    "Prepare: review source/model/extraction/destination, then approve digest. "
+                    "Exact successful cache is reused without another encoding request; "
+                    "status never sends.",
+                    "预处理：审阅源图/模型/提取率/目标后单独批准摘要。精确匹配成功缓存直接复用，不再编码；状态查询不会发送。",
+                ),
+                classes="nai-field",
+            )
+            for action, label in (
+                ("plan", "Prepare / reuse review · 预处理/复用审阅"),
+                ("execute", "Approve preparation digest · 批准预处理摘要"),
+                ("status", "Preparation status · 预处理状态"),
+            ):
+                yield Button(label, id="nai-vibe-" + action, classes="nai-field")
         if not self.profiles and self.add_profile:
             yield Button(t("Add a provider first", "先添加 provider"), id="add-profile")
         if self.fetch_models:
@@ -593,6 +709,26 @@ class CreationForm(ChoiceForm):
     def on_mount(self) -> None:
         super().on_mount()
         self._models(self.initial_profile, reset=False)
+        self._novelai_fields()
+
+    def _novelai_fields(self, *, clear: bool = False) -> None:
+        enabled = self.profiles.get(self.initial_profile, {}).get("provider") == "novelai"
+        for widget in self.query(".nai-field"):
+            widget.display = enabled
+            if clear and isinstance(widget, Input):
+                widget.value = ""
+            elif clear and isinstance(widget, Select):
+                widget.value = Select.NULL
+
+    def values(self) -> dict[str, str]:
+        values = super().values()
+        if self.profiles.get(self.initial_profile, {}).get("provider") == "novelai":
+            for widget in self.query(".nai-field"):
+                if isinstance(widget, Input) and widget.value:
+                    values[str(widget.id)] = widget.value
+                elif isinstance(widget, Select) and isinstance(widget.value, str):
+                    values[str(widget.id)] = widget.value
+        return values
 
     def _models(self, identity: str, *, reset: bool) -> None:
         default = str(self.profiles.get(identity, {}).get("model_default") or "")
@@ -613,11 +749,14 @@ class CreationForm(ChoiceForm):
     def _geometry_values(self, identity: str) -> dict[str, tuple[str, ...]]:
         """Documented values the selected route takes, as Select candidates only."""
         row = self.profiles.get(identity) or {}
-        table = specs(
-            str(row.get("provider", "")),
-            str(row.get("family", "")),
-            str(row.get("model_default", "")),
-        ) or ()
+        table = (
+            specs(
+                str(row.get("provider", "")),
+                str(row.get("family", "")),
+                str(row.get("model_default", "")),
+            )
+            or ()
+        )
         return {
             name: next((spec.values for spec in table if spec.name == name), ())
             for name in (*GEOMETRY, "size")
@@ -645,6 +784,10 @@ class CreationForm(ChoiceForm):
                 self.initial_profile = identity
                 self._models(identity, reset=True)
                 self._refresh_geometry(identity)
+                for name in (*GEOMETRY,):
+                    if name in {field for field, _, _ in self.fields}:
+                        self.query_one("#" + name, Input).value = ""
+                self._novelai_fields(clear=True)
         elif event.select.id == "model-choice" and isinstance(event.value, str):
             self.custom_input("model", event.value == "custom")
             if event.value != "custom":
@@ -653,7 +796,14 @@ class CreationForm(ChoiceForm):
             super().on_select_changed(event)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "add-profile" and self.add_profile:
+        if str(event.button.id).startswith("nai-vibe-") and self.vibe_action:
+            event.stop()
+            action = str(event.button.id).removeprefix("nai-vibe-")
+            self.action_cancel()
+            # Open on the app message pump after dismissal, so the result callback
+            # belongs to the live app rather than this closing form.
+            self.app.call_later(self.vibe_action, action)
+        elif event.button.id == "add-profile" and self.add_profile:
             self.action_cancel()
             self.add_profile()
         elif event.button.id == "fetch-models" and self.fetch_models:
@@ -686,14 +836,32 @@ class CreationForm(ChoiceForm):
     def submit(self) -> None:
         values = self.values()
         try:
+            if self.profiles.get(values.get("profile", ""), {}).get("provider") == "novelai":
+                from .novelai_forms import parameters, reference
+
+                parameters(
+                    values,
+                    operation="edit" if values.get("nai_primary") else self.operation,
+                    model=values.get("model", ""),
+                )
+                reference(values)
             if "count" in values and int(values["count"]) < 1:
                 raise ValueError("count must be positive")
-        except ValueError:
-            self.query_one("#form-status", Static).update(
-                t(
-                    "Count must be a positive integer",
-                    "数量必须是正整数",
+        except ValueError as error:
+            from imagen_cli.providers.novelai_parameters import PARAMETER_KINDS
+
+            field = next(
+                (name for name in PARAMETER_KINDS
+                 if str(error).startswith(f"Invalid JSON in {name} /")),
+                None,
+            )
+            message = (
+                t(f"Invalid JSON in {field}", f"{field} JSON 格式错误")
+                if field else t(
+                    "Check count, typed NovelAI parameters and aligned reference roles/settings",
+                    "请检查数量、NovelAI 类型参数及对齐的参考角色/设置",
                 )
             )
+            self.query_one("#form-status", Static).update(message)
             return
         super().submit()

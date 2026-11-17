@@ -12,7 +12,7 @@ from imagen_cli.application.session_service import SessionService
 from imagen_cli.cli.input_readers import read_prompt
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.models import ProviderProfile
-from imagen_cli.providers.base import ValidatedRequest
+from imagen_cli.providers.base import ReferenceInput, ValidatedRequest
 from imagen_cli.providers.vocabulary import check
 
 
@@ -24,6 +24,7 @@ class CreationSnapshot:
     input_hashes: tuple[str, ...]
     disclosure: str = field(repr=False)
     inputs: tuple[bytes, ...] = field(repr=False)
+    references: tuple[ReferenceInput, ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,16 @@ class CreateHandler:
                 value = getattr(creation, name)
                 if value is not None:
                     parameters[name] = value
+            if profile.provider == "novelai":
+                from imagen_cli.providers.novelai_parameters import validate_request_shape
+
+                try:
+                    validate_request_shape(operation=creation.operation,
+                                           primary_count=len(creation.inputs), mask=creation.mask)
+                except ValueError as error:
+                    return "validation_error", {
+                        "error": {"type": "validation_error", "detail": str(error)}
+                    }
             if check(profile.provider, profile.family, model, creation.operation, parameters):
                 return "validation_error", {}
             digest = hashlib.sha256(json.dumps({
@@ -84,7 +95,7 @@ class CreateHandler:
                 "model": model, "revision": model_revision,
                 "operation": creation.operation, "parameters": parameters,
             }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-            if creation.references or creation.retry_of_job_id:
+            if creation.retry_of_job_id or (creation.references and profile.provider != "novelai"):
                 return "unsupported_capability", {}
             session = self.sessions.resume(creation.session)["session"]
             contents: list[bytes] = []
@@ -92,6 +103,11 @@ class CreateHandler:
             sources = [("input", item) for item in creation.inputs]
             if creation.mask is not None:
                 sources.append(("mask", creation.mask))
+            sources.extend(("reference", item) for item in creation.references)
+            manifest = []
+            primary = []
+            reference_inputs: list[ReferenceInput] = []
+            mask = None
             for role, source in sources:
                 if source.startswith("artifact:"):
                     identity = source.removeprefix("artifact:")
@@ -106,8 +122,37 @@ class CreateHandler:
                 if not content or len(content) > 64 * 1024 * 1024:
                     raise ValueError("input byte limit exceeded")
                 contents.append(content)
+                item: dict[str, Any] = {
+                    "role": role, "source": source,
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                }
+                if role == "input":
+                    primary.append(content)
+                elif role == "mask":
+                    mask = content
+                else:
+                    option = creation.reference_options[len(reference_inputs)]
+                    item.update(option.model_dump(mode="json"))
+                    reference_inputs.append(ReferenceInput(content, option.kind, option.settings))
+                manifest.append(item)
             if sum(map(len, contents)) > 256 * 1024 * 1024:
                 raise ValueError("total input byte limit exceeded")
+            if reference_inputs:
+                from imagen_cli.providers.novelai_references import (
+                    bind_precise_reference,
+                    map_references,
+                )
+
+                map_references(tuple(reference_inputs), model=model,
+                               mode=(profile.novelai_options.reference_transport
+                                     if profile.novelai_options else "encoded"))
+                reference_inputs = [bind_precise_reference(reference)
+                                    for reference in reference_inputs]
+                entries = [item for item in manifest if item["role"] == "reference"]
+                for entry, reference in zip(entries, reference_inputs, strict=True):
+                    transform = dict(reference.transformation)
+                    if transform:
+                        entry["transformation"] = transform
             hashes = tuple(hashlib.sha256(item).hexdigest() for item in contents)
             disclosure = json.dumps(
                 {
@@ -122,6 +167,7 @@ class CreateHandler:
                     "parameters": parameters,
                     "input_hashes": hashes,
                     "input_sources": [source for _, source in sources],
+                    "input_manifest": manifest,
                     "capability": digest,
                 },
                 sort_keys=True,
@@ -134,12 +180,19 @@ class CreateHandler:
                 prompt,
                 hashes,
                 disclosure,
-                tuple(contents),
+                tuple(primary),
+                tuple(reference_inputs),
             )
             if self.planning_gate is None:
                 return "approval_required", {}
             approved = self.planning_gate(snapshot)
             if not isinstance(approved, AuthorizedPlan) or approved.digest != snapshot.digest:
+                return "approval_required", {}
+            current_profile = self.sessions.repositories.get("profiles", profile.id)
+            if current_profile is not None and (
+                self.profiles.load(current_profile).model_dump(mode="json")
+                != profile.model_dump(mode="json")
+            ):
                 return "approval_required", {}
             # shortcut: approval persistence is injected, integrate T059/T060 before CLI wiring.
             with self.sessions.repositories.transaction():
@@ -159,9 +212,13 @@ class CreateHandler:
                     requested_count=creation.count,
                     parent_turn_id=session.current_turn_id,
                     references=references,
+                    reference_options=[
+                        option.model_dump(mode="json") for source, option in
+                        zip(creation.references, creation.reference_options, strict=True)
+                        if source.startswith("artifact:")
+                    ],
                 )
-            mask = contents[-1] if creation.mask is not None else None
-            inputs = tuple(contents[:-1] if mask is not None else contents)
+            inputs = tuple(primary)
             request = ValidatedRequest(
                 approved.plan_id,
                 turn.job_id,
@@ -177,6 +234,7 @@ class CreateHandler:
                 dispatch_intent_recorded=False,
                 inputs=inputs,
                 mask=mask,
+                references=tuple(reference_inputs),
             )
         except (ValueError, KeyError, OSError):
             return "validation_error", {}

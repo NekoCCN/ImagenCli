@@ -99,6 +99,8 @@ class SessionService:
         requested_count: int = 1,
         parent_turn_id: str | None = None,
         references: dict[str, list[str]] | None = None,
+        reference_options: list[JsonObject] | None = None,
+        reference_evidence: list[JsonObject] | None = None,
     ) -> Turn:
         with self.repositories.transaction():
             session = self._session(session_id)
@@ -153,6 +155,44 @@ class SessionService:
                 {"artifact_id": ref.artifact_id, "role": ref.role.value, "index": ref.index}
                 for ref in refs
             ]
+            if reference_options:
+                selected = [item for item in turn.input_manifest if item["role"] == "reference"]
+                if len(selected) != len(reference_options):
+                    raise ValueError("reference options must align with reference artifacts")
+                for entry in turn.input_manifest:
+                    row = self.repositories.get("artifacts", str(entry["artifact_id"]))
+                    entry["sha256"] = row["sha256"]
+                from imagen_cli.domain.contracts import ReferenceOptions
+
+                for item, option in zip(selected, reference_options, strict=True):
+                    validated = ReferenceOptions.model_validate(option)
+                    item.update(validated.model_dump(mode="json"))
+                    if validated.kind == "precise":
+                        from imagen_cli.providers.base import ReferenceInput
+                        from imagen_cli.providers.novelai_references import reference_transformation
+
+                        path = self.artifact_store.get(str(item["artifact_id"]))
+                        if path is None:
+                            raise ValueError("reference unavailable")
+                        item["transformation"] = reference_transformation(
+                            ReferenceInput(
+                                path.read_bytes(),
+                                validated.kind,
+                                validated.settings,
+                            )
+                        )
+            if reference_evidence:
+                selected = [item for item in turn.input_manifest if item["role"] == "reference"]
+                if len(selected) != len(reference_evidence):
+                    raise ValueError("reference evidence must align")
+                for item, evidence in zip(selected, reference_evidence, strict=True):
+                    if any(
+                        item.get(key) != evidence.get(key)
+                        for key in ("artifact_id", "kind", "settings", "sha256")
+                    ):
+                        raise ValueError("reference evidence drifted")
+                    if "encoding" in evidence:
+                        item["encoding"] = evidence["encoding"]
             # The schema has a circular turn/job FK; bind the job after both inserts.
             self.repositories.insert(
                 "turns",

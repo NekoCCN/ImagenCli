@@ -43,3 +43,14 @@ def test_installed_guide_has_workflow_reference(tmp_path, monkeypatch):
         ["skills", "install", "--target", "codex", "--agent"],
     ):
         _parse(args)
+
+
+def test_novelai_workflow_is_discoverable_and_explicit():
+    guide = skills_service.BUNDLED / "imagen" / "references" / "novelai.md"
+    text = guide.read_text()
+    for term in ("/ai/generate-image", "/ai/encode-vibe", "vibe plan", "vibe execute",
+                 "vibe status", "information_extracted", "reference_options",
+                 "unknown", "multipart", "duplicate", "private", "x-api-key"):
+        assert term in text
+    for relative in ("imagen/SKILL.md", "imagen-batch/SKILL.md", "imagen/references/workflows.md"):
+        assert "novelai.md" in (skills_service.BUNDLED / relative).read_text()

@@ -6,10 +6,18 @@ repository transaction; explicit relationship checks are provided for its caller
 
 import re
 from datetime import date, datetime
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import AfterValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from .contracts import JsonObject, enum_value
 from .enums import (
@@ -305,6 +313,22 @@ class CapabilityRecord(StrictModel):
         return self
 
 
+class NovelAIOptions(StrictModel):
+    auth_mode: Literal["bearer", "x-api-key"] = "bearer"
+    reference_transport: Literal["encoded", "raw"] = "encoded"
+    vibe_encoding_transport: Literal["json", "multipart"] = "json"
+
+    @model_serializer(mode="wrap")
+    def serialize_options(
+        self, handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        # Keep existing default JSON profile snapshots/digests byte-for-byte stable.
+        if self.vibe_encoding_transport == "json":
+            result.pop("vibe_encoding_transport", None)
+        return result
+
+
 class ProviderProfile(StrictModel):
     id: NonEmptyString
     name: NonEmptyString
@@ -316,6 +340,16 @@ class ProviderProfile(StrictModel):
     credential_ref: NonEmptyString
     trust_policy: JsonObject
     revision: PositiveInt
+    novelai_options: NovelAIOptions | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_profile(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        if self.novelai_options is None:
+            result.pop("novelai_options", None)
+        return result
 
 
 class NativeContext(StrictModel):

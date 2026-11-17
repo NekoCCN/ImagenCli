@@ -45,3 +45,45 @@ def test_profile_revision_is_explicit_and_positive():
         ProfileService().load(profile_data(revision=0))
     with pytest.raises(ValidationError):
         ProfileService().load(profile_data(revision="1"))
+
+
+def test_old_profile_serialized_shape_unchanged():
+    profile = ProfileService().load(profile_data())
+    assert "novelai_options" not in profile.model_dump()
+    assert 'novelai_options' not in profile.model_dump_json()
+    assert ProfileService().load(profile.model_dump()).model_dump() == profile.model_dump()
+
+
+def test_novelai_options_roundtrip_and_build():
+    options = {"auth_mode": "x-api-key", "reference_transport": "raw"}
+    service = ProfileService()
+    profile = service.load(profile_data(novelai_options=options))
+    assert profile.model_dump()["novelai_options"] == options
+    assert service.load(profile.model_dump()).novelai_options == profile.novelai_options
+    built = service.build(identity="nai", provider="novelai", family="generate_image",
+                          base_url="https://example.test", model_default="custom",
+                          credential_ref="env:NAI_KEY", novelai_options=options)
+    assert built.novelai_options == profile.novelai_options
+
+
+@pytest.mark.parametrize("options", [
+    {"auth_mode": "basic"}, {"reference_transport": "automatic"}, {"headers": {}},
+])
+def test_novelai_options_are_strict(options):
+    with pytest.raises(ValidationError):
+        ProfileService().load(profile_data(novelai_options=options))
+
+
+def test_novelai_options_survive_repository_reopen(tmp_path):
+    from imagen_cli.application.container import Container
+
+    workspace = str(tmp_path / "work")
+    service = ProfileService()
+    profile = service.load(profile_data(novelai_options={}))
+    assert profile.novelai_options.auth_mode == "bearer"
+    assert profile.novelai_options.reference_transport == "encoded"
+    with Container(workspace=workspace) as container:
+        container.repositories.insert("profiles", profile.model_dump())
+    with Container(workspace=workspace) as container:
+        stored = container.repositories.get("profiles", profile.id)
+    assert service.load(stored).model_dump() == profile.model_dump()

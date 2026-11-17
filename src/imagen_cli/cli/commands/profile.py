@@ -65,6 +65,7 @@ def build_set(parameters: dict[str, Any]) -> dict[str, Any]:
         model_default=parameters["model_default"],
         credential_ref=parameters["credential_ref"],
         revision=parameters.get("revision", 1),
+        novelai_options=parameters.get("novelai_options"),
     )
     data = profile.model_dump(mode="json")
     if "models_path" not in parameters:

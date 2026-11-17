@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from imagen_cli.domain.models import ProviderProfile
+from imagen_cli.domain.models import NovelAIOptions, ProviderProfile
 
 
 class ProfileService:
@@ -29,6 +29,7 @@ class ProfileService:
         revision: int = 1,
         name: str | None = None,
         models_path: str | None = "/v1/models",
+        novelai_options: NovelAIOptions | Mapping[str, Any] | None = None,
     ) -> ProviderProfile:
         """Non-interactive profile construction; only env references are accepted."""
         if self._REFERENCE.fullmatch(credential_ref) is None:
@@ -44,6 +45,7 @@ class ProfileService:
             "credential_ref": credential_ref,
             "trust_policy": {"allowed_upload_targets": [base_url]},
             "revision": revision,
+            "novelai_options": novelai_options,
         })
 
     def load(self, data: Mapping[str, Any]) -> ProviderProfile:

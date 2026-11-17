@@ -51,7 +51,7 @@ WorkerId = typed_id("wrk")
 
 def new_id(prefix: str) -> str:
     if prefix not in {"ses", "trn", "art", "job", "bat", "apr", "pln", "ctx", "evt", "wrk",
-                      "rmt"}:
+                      "rmt", "vib"}:
         raise ValueError("unknown ID prefix")
     return f"{prefix}_{uuid4().hex}"
 

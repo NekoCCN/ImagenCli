@@ -80,6 +80,11 @@ class InvocationEvent(StrictModel):
         return value
 
 
+class ReferenceOptions(StrictModel):
+    kind: Literal["vibe", "precise"]
+    settings: JsonObject = Field(default_factory=dict)
+
+
 class CreationInput(StrictModel):
     schema_version: SchemaVersion
     operation: Literal["generate", "edit"]
@@ -90,6 +95,7 @@ class CreationInput(StrictModel):
     inputs: Annotated[list[AssetInput], Field(max_length=100)] = Field(default_factory=list)
     mask: AssetInput | None = None
     references: Annotated[list[AssetInput], Field(max_length=100)] = Field(default_factory=list)
+    reference_options: list[ReferenceOptions] = Field(default_factory=list)
     count: Annotated[int, Field(strict=True, ge=1, le=100)] = 1
     size: NonEmptyString | None = None
     aspect_ratio: NonEmptyString | None = None
@@ -122,6 +128,8 @@ class CreationInput(StrictModel):
 
     @model_validator(mode="after")
     def edit_requires_inputs(self) -> Self:
+        if len(self.references) != len(self.reference_options):
+            raise ValueError("each reference requires explicit aligned reference_options")
         if self.operation == "edit" and not self.inputs:
             raise ValueError("edit requires at least one input")
         return self

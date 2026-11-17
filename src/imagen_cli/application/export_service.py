@@ -69,7 +69,7 @@ def public_value(value: Any) -> Any:
         return [public_value(child) for child in value]
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError("non-finite JSON number")
-    if value is None or isinstance(value, str | int | bool):
+    if value is None or isinstance(value, str | int | bool | float):
         return value
     raise ValueError("unsupported JSON value")
 

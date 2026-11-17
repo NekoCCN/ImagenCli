@@ -17,7 +17,7 @@
           "type": "object", "additionalProperties": false,
           "required": ["type", "message", "retryable", "accepted_maybe", "next_actions"],
           "properties": {
-            "type": {"enum": ["validation_error", "unsupported_capability", "authentication_error", "permission_denied", "not_found", "conflict", "wait_timeout", "outcome_unknown", "approval_required", "provider_error", "transport_error", "save_failed", "canceled", "safety_refusal", "partial_failure", "internal_error"]},
+            "type": {"enum": ["validation_error", "unsupported_capability", "authentication_error", "permission_denied", "not_found", "conflict", "wait_timeout", "outcome_unknown", "approval_required", "rate_limited", "provider_error", "transport_error", "save_failed", "canceled", "safety_refusal", "partial_failure", "internal_error"]},
             "message": {"type": "string", "minLength": 1},
             "retryable": {"type": "boolean"},
             "accepted_maybe": {"type": "boolean"},

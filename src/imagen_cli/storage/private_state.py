@@ -182,12 +182,14 @@ class PrivateStateStore:
                 if path.name.endswith(".bin") and path.is_file()
             )
 
-    def read(self, identity: str, expected_sha256: str) -> bytes:
+    def read(self, identity: str, expected_sha256: str, *, max_bytes: int | None = None) -> bytes:
         with self._directory():
             path = safe_path(self.root, storage_id(identity) + ".bin")
             fd = self._open(path, create=False)
             with os.fdopen(fd, "rb") as source:
-                data = source.read()
+                data = source.read() if max_bytes is None else source.read(max_bytes + 1)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ValueError("private state byte limit exceeded")
         if hashlib.sha256(data).hexdigest() != expected_sha256:
             raise ValueError("private state hash mismatch")
         return data

@@ -10,7 +10,7 @@
 
 Browse and work with images in the terminal, or let a coding agent use the same workspace through structured JSON commands. Both interfaces keep the same sessions, plans, jobs, and saved artifacts, so you can inspect and continue each other's work.
 
-Connect an OpenAI-compatible Images endpoint or Gemini native `generateContent` for generation and editing. Requests are planned locally before you approve and execute them. Local transforms, model-based restoration, and upscaling save new artifacts without overwriting their inputs.
+Connect an OpenAI-compatible Images endpoint, Gemini native `generateContent`, or a NovelAI-compatible `generate_image` endpoint for generation and editing. Requests are planned locally before you approve and execute them. Local transforms, model-based restoration, and upscaling save new artifacts without overwriting their inputs.
 
 <p align="center"><img src="assets/screenshots-0.1.10/imagen-tui.png" alt="Imagen TUI workspace with a saved session and image preview" width="960"></p>
 
@@ -34,12 +34,70 @@ Help, errors, and TUI text support English and Simplified Chinese. JSON keys, st
 
 ## What's new
 
-The upcoming `0.1.22` release adds Replicate-hosted matting and a local downscale→super-resolution watermark operation, alongside the watermark workbench and media batches:
+The current release is [v0.1.24](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.24).
+
+- **NovelAI-compatible generation:** text-to-image, single-image img2img, Vibe inspiration, and precise character references in the CLI and TUI.
+- **Separate Vibe preparation:** review encoding uploads and possible charges before execution; reuse matching private local encodings.
+- **Explicit gateway transport:** Vibe encoding uses official JSON by default, with opt-in multipart for documented gateways. Generation remains JSON.
+- **Updated bundled skills:** NovelAI workflows and batch inspection guidance.
+
+Compatibility has been tested offline, not against live or paid services. Hosted matting, local watermark resampling, and remote-job cleanup remain available.
+
+The watermark workbench also includes:
 
 - **Images:** `watermark identify`, `metadata`, `visible`, `erase`, `invisible`, `all`, and `classify`, with explicit license and memory-budget gates.
 - **Video:** `watermark video identify`, `metadata`, `visible`, `all`, and `invisible`, including stream-copy metadata removal and stable visible-mark removal.
 - **Batches:** `watermark batch` and `watermark video batch` process a directory into a new, empty output directory without touching the source.
 - **Isolated extras:** `watermark setup --extras ...` installs only the dependency groups a task needs, such as `visible,video,diffusion`.
+
+## NovelAI-compatible (offline-tested, not live-verified)
+
+Use `novelai / generate_image` for text-to-image, single-image img2img, Vibe inspiration,
+and precise character or character-and-style references. Model capabilities must be declared;
+they are not inferred from model names. Parameters are validated without adding tags or negative
+prompts, substituting models/samplers, or silently clamping values.
+
+```bash
+imagen profile set novelai --provider novelai --family generate_image --base-url https://images.example.test/prefix --model-default USER_SELECTED_MODEL --credential-ref env:IMAGEN_API_KEY
+imagen schema generate
+imagen schema vibe plan
+```
+
+Configuration and schema inspection are offline. Supply an HTTPS API root, not a full route:
+`/prefix` becomes `/prefix/ai/generate-image` or `/prefix/ai/encode-vibe`. Keep credentials
+in the referenced environment variable. Bearer is the default; `novelai_options.auth_mode:
+"x-api-key"` selects X-API-Key instead. Model discovery needs an explicitly configured catalog
+path. There are no credential-bearing probes, host fallbacks, or automatic retries.
+
+Img2img requires exactly one primary `inputs` image, no mask, and explicit strength/noise.
+Ordered `references` and aligned `reference_options` select Vibe or precise guidance;
+these roles are not interchangeable, and Vibe/precise mixing is refused. Precise references
+record deterministic fit/pad transformations. Count defaults to one; larger counts require
+declared capability and are never split into hidden calls.
+
+Encoded Vibe has a separate approval: `vibe plan`, review, then `vibe execute --digest`.
+Encoding may be charged separately; pricing is unknown. Status only observes. Exact cache
+matches bind endpoint/profile, source hash, model, and extraction settings. Encoded bytes stay
+private and are not portable exported assets. Raw mode is only for documented raw-reference
+servers. Generation still needs its own plan, approval, and execution.
+
+Vibe encoding defaults to the official JSON contract: base64 `image`, `model`, and
+`information_extracted`, with a binary response including HTTP 201. For a gateway that documents
+multipart encoding, explicitly set `novelai_options.vibe_encoding_transport: "multipart"` in
+profile set JSON, profile add TOML, or the TUI profile editor. This sends one validated `image`
+file with its detected MIME type and ordinary `model` / `information_extracted` form fields.
+Generation remains JSON; multipart-only generation servers are unsupported. There is no hostname
+inference or automatic fallback. Changing transport invalidates prepared approvals and cache
+reuse, so prepare and approve again. Existing default JSON identities need no cache migration.
+
+Inspect actual returned counts and seed metadata. Unknown completion may already be charged;
+queue recovery never resends or prepares automatically. A new attempt needs duplicate-cost review.
+Inpainting, streaming previews, tag suggestions, Director Tools augmentation, upscaling endpoints,
+account/subscription management, balance tracking, price tables, and automatic cost optimization
+are not supported. No live or paid service verification is claimed.
+
+See the [complete CLI workflow and JSON examples](src/imagen_cli/bundled_skills/imagen/references/novelai.md).
+The TUI uses the same typed controls and separate preparation plan, execute, and status commands.
 
 ## Install
 
@@ -170,7 +228,7 @@ The workbench has Import and Save as buttons. More (or `F10`) opens the remainin
 | Ordinary image processing | `t`; `p` edits parameters | `ops`, `transform`, `compare`, `sheet` |
 | Model restoration / upscaling | `u`; `s` manages runtimes and weights | `superres run`, `superres models`, `superres install`, `superres fetch`, `superres benchmark`, `superres doctor` |
 | Local matting / cutouts | transform page preset; `s` lists the model | `matting run`, `matting models`, `matting install`, `matting fetch`, `matting doctor`, `transform --preset '抠图贴纸 (Cutout Sticker)'` |
-| Watermark inspect / remove | command palette; no dedicated page | `watermark identify`, `watermark metadata`, `watermark visible`, `watermark erase`, `watermark invisible`, `watermark all`, `watermark classify`, `watermark batch`, `watermark video ...`, `watermark status` |
+| Watermark inspect / remove | command palette; no dedicated page | `watermark identify`, `watermark metadata`, `watermark visible`, `watermark erase`, `watermark invisible`, `watermark all`, `watermark classify`, `watermark resample`, `watermark batch`, `watermark video ...`, `watermark status` |
 | Remote GPU job | command palette; no dedicated page | `remote ...`, `watermark ... --remote NAME` |
 | Open image / folder | `o` / `O` | `asset open [--folder]` |
 | Import image / save a copy | `i` / `S` | `session import-image`, `asset save` |
@@ -531,7 +589,7 @@ Before trusting a backend for a full image, `imagen superres doctor --backend cu
 
 ## Local matting
 
-Matting predicts an alpha channel locally and writes a new RGBA artifact; the source is never modified. It is what makes the alpha-only operators usable: `sticker_outline` and `background_blur` both refuse an ordinary RGB artifact.
+By default, matting predicts an alpha channel locally and writes a new RGBA artifact; the source is never modified. It is what makes the alpha-only operators usable: `sticker_outline` and `background_blur` both refuse an ordinary RGB artifact.
 
 ```bash
 imagen matting models
@@ -620,7 +678,7 @@ Imagen installs the upscaling runtime and weights only when you run the install 
 
 ## Watermark removal
 
-Watermark commands run in a separate, isolated `remove-ai-watermarks` environment and always write a new artifact; the source image is never modified. Start read-only:
+Except for the local `watermark resample` operation, watermark processing runs in a separate, isolated `remove-ai-watermarks` environment. Read-only inspection publishes no artifact; processing writes a new artifact without modifying the source image. Start read-only:
 
 ```bash
 imagen watermark status
@@ -869,7 +927,7 @@ imagen tui
 
 **Upscaling fails before inference.** The runtime or weights are missing. For the runtime, run `superres install --backend cpu --accept`. For weights, run `superres models`, then `superres fetch --model NAME --accept` after reviewing the license.
 
-**Watermark commands report a missing environment.** Run `imagen watermark setup --accept` after reviewing the plan, then check `imagen watermark status`. Watermark work stays in an isolated environment and is never imported into the TUI or CLI process.
+**Watermark commands report a missing environment.** Run `imagen watermark setup --accept` after reviewing the plan, then check `imagen watermark status`. These operations stay in an isolated environment and are never imported into the TUI or CLI process. `watermark resample` is the exception: it runs locally in-process using super-resolution weights.
 
 **Video commands report a missing ffmpeg or dependency.** Install `ffmpeg` and `ffprobe`, run `imagen watermark setup --extras visible,video,diffusion --accept`, then restart Imagen. `video invisible` and `--include-invisible` are lossy and cannot certify SynthID removal.
 

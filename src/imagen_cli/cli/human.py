@@ -143,6 +143,20 @@ def _detail_result_lines(data: dict[str, Any]) -> list[str]:
             child = row.get("job_id") or row.get("id") or ""
             lines.append(f"  {child} · {row.get('state') or row.get('remote_state') or ''}")
     approval = data.get("approval")
+    preparation = data.get("preparation")
+    if isinstance(preparation, dict):
+        lines.append(f"Vibe {preparation['id']} · {preparation['state']}")
+        lines.append(str(preparation["charge_disclosure"]))
+        lines.append("digest: " + str(preparation["digest"]))
+        lines.append(json.dumps(preparation.get("plan", {}), ensure_ascii=False))
+        if preparation["state"] == "planned":
+            lines.append(
+                f"imagen vibe execute {preparation['id']} --digest {preparation['digest']}"
+            )
+        elif preparation["state"] == "unknown":
+            lines.append(
+                t("Outcome unknown; do not resubmit automatically.", "结果未知；不要自动重发。")
+            )
     if isinstance(approval, dict) and approval.get("plan_id"):
         lines.append(f"plan {approval.get('plan_id')} · {approval.get('state') or ''}")
     if isinstance(data.get("model"), str) and data.get("sha256"):
@@ -351,6 +365,27 @@ def _import_line(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _reference_lines(plan: dict[str, Any]) -> list[str]:
+    references = (plan.get("portable_context") or {}).get("references", [])
+    lines = []
+    target = plan.get("target_snapshot") or {}
+    options = target.get("novelai_options")
+    if isinstance(options, dict):
+        lines.append("Endpoint: " + str(target.get("endpoint_origin")))
+        lines.append("Authentication: " + str(options.get("auth_mode")))
+        lines.append("Reference transport: " + str(options.get("reference_transport")))
+    for index, item in enumerate(references):
+        lines.append(f"Reference {index + 1}: {item.get('kind')} · "
+                     + json.dumps(item.get("settings", {}), ensure_ascii=False, sort_keys=True))
+        if item.get("sha256"):
+            lines.append("  SHA256 " + str(item["sha256"]))
+        if item.get("encoding"):
+            lines.append("  Vibe preparation " + json.dumps(item["encoding"], sort_keys=True))
+        if item.get("transformation"):
+            lines.append("  " + json.dumps(item["transformation"], sort_keys=True))
+    return lines
+
+
 def _plain_lines(value: dict[str, Any]) -> list[str]:
     data = value.get("data") or {}
     lines: list[str] = []
@@ -370,6 +405,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
             )
         )
         lines.append(t(f"Digest: {plan.get('plan_digest')}", f"摘要：{plan.get('plan_digest')}"))
+        lines.extend(_reference_lines(plan))
         if plan.get("id") and plan.get("plan_digest"):
             lines.append(
                 t("Next: ", "下一步：")
@@ -636,6 +672,7 @@ def _rich(value: dict[str, Any], console: Any) -> None:
             lines.append(
                 f"[cyan]imagen plan approve {plan['id']} --digest {plan['plan_digest']}[/cyan]"
             )
+        lines.extend(_reference_lines(plan))
         console.print(Panel("\n".join(lines), title=t("Plan", "计划"), border_style="blue"))
     job = data.get("job") or {}
     if job:

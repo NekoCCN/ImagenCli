@@ -6,4 +6,6 @@ Kept free of provider imports so an offline plan never touches an HTTP client.
 
 __all__ = ["SUPPORTED_ROUTES"]
 
-SUPPORTED_ROUTES = frozenset({("gemini", "generate_content"), ("openai", "images")})
+SUPPORTED_ROUTES = frozenset(
+    {("gemini", "generate_content"), ("openai", "images"), ("novelai", "generate_image")}
+)

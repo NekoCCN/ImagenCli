@@ -134,7 +134,12 @@ def audit(
             if isinstance(row.get("credential_ref"), str)
             and row["credential_ref"].startswith("private:")
         }
-        claimed: set[str] = set()
+        # Preparation bytes are not generation-job payloads. Keep even unknown
+        # attempts pinned: an orphaned durable response must not invite resubmission.
+        claimed: set[str] = {
+            row["id"] + ".bin"
+            for row in queries.iter_all(repositories, "vibe_preparations")
+        }
         for row in queries.iter_all(repositories, "native_contexts", include_private=True):
             relpath = row.get("private_relpath")
             if not isinstance(relpath, str):

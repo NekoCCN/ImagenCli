@@ -154,3 +154,10 @@ imagen skills uninstall --target codex --agent
 ```
 
 The default scope is project; `--scope global` affects other projects. `--target all` may create many agent directories: explain the scope first. Report conflicts or modified installed guides rather than adding `--force` or `--yes` without approval.
+
+## NovelAI-compatible requests
+
+Read [novelai.md](novelai.md) before configuring or dispatching NovelAI-compatible work.
+Keep encoding approval separate from generation approval, including batches; no hidden retries
+or preparation. Unknown outcomes may already be charged. Preserve explicit image roles and
+private-cache provenance. Offline tests do not establish live service compatibility.

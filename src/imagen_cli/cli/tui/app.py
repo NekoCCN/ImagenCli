@@ -2160,6 +2160,16 @@ class ProvidersScreen(Modal[bool]):
         parameters: dict[str, Any] = {
             key: value for key, value in values.items() if key != "api_key"
         }
+        auth_mode = parameters.pop("auth_mode", "bearer")
+        reference_transport = parameters.pop("reference_transport", "encoded")
+        vibe_encoding_transport = parameters.pop("vibe_encoding_transport", "json")
+        if parameters.get("provider") == "novelai":
+            parameters["novelai_options"] = {
+                "auth_mode": auth_mode,
+                "reference_transport": reference_transport,
+                "vibe_encoding_transport": vibe_encoding_transport,
+            }
+            parameters["models_path"] = parameters.get("models_path") or None
         secret = values.get("api_key", "")
         if secret:
             if self.deps.secret_ref is None:
@@ -2184,8 +2194,15 @@ class ProvidersScreen(Modal[bool]):
                 private_store=self.deps.private_store,
             )
 
+        draft = {**values, "credential_ref": values.get("credential_ref") or "private:draft"}
+        if values.get("provider") == "novelai":
+            draft["novelai_options"] = {  # type: ignore[assignment]
+                "auth_mode": values.get("auth_mode", "bearer"),
+                "reference_transport": values.get("reference_transport", "encoded"),
+                "vibe_encoding_transport": values.get("vibe_encoding_transport", "json"),
+            }
         catalog = fetch(
-            {**values, "credential_ref": values.get("credential_ref") or "private:draft"},
+            draft,
             send_credential=True,
             resolve_credential=credential,
         )
@@ -2239,15 +2256,24 @@ class ProvidersScreen(Modal[bool]):
         from urllib.parse import urlsplit
 
         profile = dict(profile)
-        if profile.get("models_path") is None:
+        if profile.get("models_path") is None and profile.get("provider") != "novelai":
             profile["models_path"] = urlsplit(str(profile["base_url"])).path.rstrip("/") + "/models"
+        if profile.get("provider") == "novelai" and profile.get("models_path") is None:
+            profile["models_path"] = ""
+        if profile.get("novelai_options"):
+            profile.update(profile["novelai_options"])
         defaults = [
             (
                 name,
                 placeholder,
                 _sanitize(profile["id"] if name == "profile" else profile.get(name, value)),
             )
-            for name, placeholder, value in self.FIELDS
+            for name, placeholder, value in [
+                *self.FIELDS,
+                ("auth_mode", "", "bearer"),
+                ("reference_transport", "", "encoded"),
+                ("vibe_encoding_transport", "", "json"),
+            ]
         ]
 
         def done(values: dict[str, str] | None) -> None:
@@ -2840,6 +2866,19 @@ def _creation_arguments(values: dict[str, str], operation: str, session: str) ->
         "prompt": values["prompt"],
         "count": int(values.get("count", "1")),
     }
+    if any(key.startswith("nai_") for key in values):
+        from .novelai_forms import parameters, reference
+
+        if values.get("nai_primary"):
+            operation = "edit"
+            arguments["operation"] = operation
+            arguments["inputs"] = ["artifact:" + values["nai_primary"]]
+        arguments["provider_params"] = parameters(
+            values, operation=operation, model=values.get("model", "")
+        )
+        references, options = reference(values)
+        arguments["references"] = references
+        arguments["reference_options"] = options
     for name in ("size", "aspect_ratio", "image_size"):
         if values.get(name):
             arguments[name] = values[name]
@@ -4028,6 +4067,7 @@ class WorkbenchApp(App[None]):
         fields: list[tuple[str, str, str]],
         *,
         optional: set[str],
+        operation: str = "generate",
     ) -> CreationForm:
         profiles = queries.iter_all(self.deps.repositories, "profiles")
         models = self._declared_models()
@@ -4058,10 +4098,13 @@ class WorkbenchApp(App[None]):
             title,
             fields,
             profiles=profiles,
+            operation=operation,
             models=models,
             optional=optional,
             fetch_models=fetch_models,
             add_profile=self.action_providers,
+            artifacts=self._artifact_choices(),
+            vibe_action=lambda action: self._open_command("vibe " + action),
         )
 
     def action_new_session(self) -> None:
@@ -4193,7 +4236,7 @@ class WorkbenchApp(App[None]):
                 return
             arguments = _creation_arguments(values, "generate", session["name"])
             options = _control_options(self.deps.options, _convert_controls(values))
-            self._run_creation("generate", arguments, t("Generate", "生成"), options)
+            self._run_creation(arguments["operation"], arguments, t("Generate", "生成"), options)
 
         profile_default, model_default = self._creation_defaults(session)
         self.push_screen(
@@ -4232,7 +4275,7 @@ class WorkbenchApp(App[None]):
             if not values or self.deps.execute is None:
                 return
             arguments = _creation_arguments(values, "edit", session["name"])
-            arguments["inputs"] = ["artifact:" + identity]
+            arguments.setdefault("inputs", ["artifact:" + identity])
             options = _control_options(self.deps.options, _convert_controls(values))
             self._run_creation("edit", arguments, t("Edit", "编辑"), options)
 
@@ -4255,6 +4298,7 @@ class WorkbenchApp(App[None]):
                     ("async", "true | false", ""),
                 ],
                 optional={"profile", "model", "async", "size", "aspect_ratio", "image_size"},
+                operation="edit",
             ),
             done,
         )

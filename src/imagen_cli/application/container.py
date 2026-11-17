@@ -252,6 +252,7 @@ class Container:
                     self.artifact_store,
                     creation,
                     asynchronous=self.options.async_,
+                    private_store=self.private_state_store,
                 )
                 if status != "approval_required" or "plan" not in data:
                     raise ValueError("batch child is not executable")
@@ -280,6 +281,17 @@ class Container:
                 BatchService(self.repositories, prepare=prepare, run=run),
                 args["requests"],
                 args.get("concurrency", 2),
+            )
+        if command.startswith("vibe "):
+            from imagen_cli.application.novelai_vibe_service import VibePreparationService
+            from imagen_cli.cli.commands import vibe
+
+            return vibe.execute(
+                VibePreparationService(
+                    self.repositories, self.artifact_store, self.private_state_store
+                ),
+                command,
+                args,
             )
         if command == "plan execute":
             from imagen_cli.application.artifact_service import ArtifactService
@@ -314,6 +326,13 @@ class Container:
                 model_revision=row["target_snapshot"]["model_revision"],
                 input_artifact_ids=tuple(row["portable_context"].get("input_artifact_ids", [])),
                 mask_artifact_id=row["portable_context"].get("mask_artifact_id"),
+                reference_artifact_ids=tuple(
+                    item["artifact_id"] for item in row["portable_context"].get("references", [])
+                ),
+                reference_options=tuple(
+                    {"kind": item["kind"], "settings": item["settings"]}
+                    for item in row["portable_context"].get("references", [])
+                ),
             )
             return facts["status"], {
                 "job": facts["job"],
@@ -324,7 +343,7 @@ class Container:
             }
         if command == "plan retry":
             from imagen_cli.application.preflight import plan_creation
-            from imagen_cli.domain.contracts import CreationInput
+            from imagen_cli.domain.contracts import CreationInput, ReferenceOptions
 
             row = self.repositories.get("plans", args["plan_id"], include_private=True)
             if row is None:
@@ -360,6 +379,11 @@ class Container:
                 profile=row["target_snapshot"]["profile_identity"],
                 model=row["model"],
                 inputs=["artifact:" + item for item in context.get("input_artifact_ids", [])],
+                references=["artifact:" + item["artifact_id"]
+                            for item in context.get("references", [])],
+                reference_options=[ReferenceOptions.model_validate(
+                    {"kind": item["kind"], "settings": item["settings"]},
+                ) for item in context.get("references", [])],
                 count=count,
                 provider_params=parameters,
                 **({"size": size} if size is not None else {}),
@@ -370,6 +394,7 @@ class Container:
                 creation,
                 dry_run=self.options.dry_run,
                 asynchronous=self.options.async_,
+                private_store=self.private_state_store,
             )
         if command in {"plan show", "plan approve"}:
             from imagen_cli.cli.commands import plan
@@ -388,6 +413,7 @@ class Container:
                 creation,
                 dry_run=self.options.dry_run,
                 asynchronous=self.options.async_,
+                private_store=self.private_state_store,
             )
         if command == "tui":
             try:

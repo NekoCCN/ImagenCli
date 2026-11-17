@@ -10,7 +10,7 @@
 
 在终端中浏览和处理图片，也可以让 coding agent 通过结构化 JSON 命令操作同一工作区。两种界面使用相同的会话、计划、任务和已保存产物，你和 agent 可以查看并接续彼此的工作。
 
-连接 OpenAI-compatible Images 端点或 Gemini 原生 `generateContent`，完成生成与编辑。请求先在本地形成计划，再由你批准并执行。普通后处理、模型恢复和超分会另存新产物，不覆盖输入图片。
+连接 OpenAI-compatible Images、Gemini 原生 `generateContent` 或 NovelAI 兼容 `generate_image` 端点，完成生成与编辑。请求先在本地形成计划，再由你批准并执行。普通后处理、模型恢复和超分会另存新产物，不覆盖输入图片。
 
 <p align="center"><img src="assets/screenshots-0.1.10/imagen-tui-zh-CN.png" alt="Imagen TUI 工作区：已保存的会话与图片预览" width="960"></p>
 
@@ -34,12 +34,62 @@
 
 ## 新更新
 
-即将发布的 `0.1.22` 增加 Replicate 托管抠图与本地「降采样→超分」水印处理，同时包含水印工作台和媒体批处理：
+当前版本为 [v0.1.24](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.24)。
+
+- **NovelAI 兼容生成**：CLI 与 TUI 支持文生图、单图 img2img、Vibe 灵感参考和精确角色参考。
+- **独立 Vibe 准备流程**：执行前审阅编码上传与潜在费用，完全匹配的编码可从本地私有缓存复用。
+- **显式网关传输方式**：Vibe 编码默认采用官方 JSON，按网关文档可选择 multipart；生成请求仍用 JSON。
+- **更新随包 Skills**：补充 NovelAI 工作流与批量任务检查指引。
+
+兼容性仅经离线测试，未经实际或付费服务验证。托管抠图、本地水印重采样和远程任务清理仍可使用。
+
+水印工作台还包括：
 
 - **图片**：`watermark identify`、`metadata`、`visible`、`erase`、`invisible`、`all`、`classify`，并保留许可证与内存预算确认。
 - **视频**：`watermark video identify`、`metadata`、`visible`、`all`、`invisible`，包括流复制元数据移除与稳定可见标记移除。
 - **批处理**：`watermark batch` 与 `watermark video batch` 把目录处理到新的空输出目录，不修改源目录。
 - **隔离 extras**：`watermark setup --extras ...` 只安装任务需要的依赖组，例如 `visible,video,diffusion`。
+
+## NovelAI 兼容接口（仅离线测试，未验证实际服务）
+
+`novelai / generate_image` 支持文生图、单图 img2img、Vibe 灵感参考和精确角色／角色与风格参考。
+模型能力需明确声明，不能根据模型名推断；不会自动添加标签或负面提示词、替换模型／采样器，或静默修正无效参数。
+
+```bash
+imagen profile set novelai --provider novelai --family generate_image --base-url https://images.example.test/prefix --model-default USER_SELECTED_MODEL --credential-ref env:IMAGEN_API_KEY
+imagen schema generate
+imagen schema vibe plan
+```
+
+配置与 schema 查看均为离线操作。填写 HTTPS API 根地址，而非完整操作 URL：
+`/prefix` 会追加为 `/prefix/ai/generate-image` 或 `/prefix/ai/encode-vibe`。
+凭证保存在引用的环境变量中。默认使用 Bearer，`novelai_options.auth_mode: "x-api-key"`
+可切换为 X-API-Key，不会同时发送两种认证。模型发现需显式配置目录路径，
+不会携带凭证自动探测、切换主机或自动重试。
+
+img2img 的主输入 `inputs` 必须恰好一张、无蒙版，并显式设置 strength/noise。
+有序的 `references` 与对齐的 `reference_options` 用于 Vibe 或精确参考，角色不能互换，也不能混用。
+精确参考会记录确定性的缩放与填边变换。默认数量为一，更高数量需声明能力，不拆分成隐藏请求。
+
+编码 Vibe 需单独批准：先 `vibe plan`，审阅后再 `vibe execute --digest`。
+编码可能单独收费，价格未知；status 仅查看状态。缓存仅在端点／配置身份、源图哈希、
+模型与提取设置完全匹配时复用。编码字节保留在本地私有缓存，不作为可移植资源导出。
+raw 模式仅用于明确说明支持原始参考图的服务。生成仍需单独规划、批准和执行。
+
+Vibe 编码默认使用官方 JSON 契约：base64 `image`、`model`、`information_extracted`，
+接收包括 HTTP 201 在内的二进制响应。若网关文档要求 multipart，可在 profile set JSON、
+profile add TOML 或 TUI 配置编辑器中显式设置 `novelai_options.vibe_encoding_transport: "multipart"`。
+该模式发送一个名为 `image` 的已校验图片文件及检测到的 MIME 类型，
+并以普通表单字段发送 `model` 与 `information_extracted`。生成仍用 JSON，
+不支持仅接受 multipart 生成请求的服务；不会按主机名推断或自动回退。
+更改传输方式后需重新准备并批准，不能复用原批准与编码缓存；默认 JSON 的旧标识无需迁移。
+
+请检查实际返回数量与种子元数据。结果未知时可能已经收费，队列恢复不会自动重发或编码；
+重新尝试前需审查重复收费风险。不支持局部重绘、流式预览、标签建议、Director Tools 增强、
+放大端点、账号／订阅管理、余额查询、价格表或自动成本优化。未进行实际或付费服务验证。
+
+参见[完整 CLI 流程与 JSON 示例](src/imagen_cli/bundled_skills/imagen/references/novelai.md)。
+TUI 使用相同的类型校验，并单独提供准备计划、执行与状态命令。
 
 ## 安装
 
@@ -170,7 +220,7 @@ request ──► plan (review) ──► approve ──► execute ──► jo
 | 普通图像处理 | `t`；`p` 调参 | `ops`、`transform`、`compare`、`sheet` |
 | 模型恢复／超分 | `u`；`s` 管理运行时与权重 | `superres run`、`superres models`、`superres install`、`superres fetch`、`superres benchmark`、`superres doctor` |
 | 本地抠图／透明底 | 变换页预设；`s` 列出对应模型 | `matting run`、`matting models`、`matting install`、`matting fetch`、`matting doctor`、`transform --preset '抠图贴纸 (Cutout Sticker)'` |
-| 水印检查／移除 | 命令面板；无独立页面 | `watermark identify`、`watermark metadata`、`watermark visible`、`watermark erase`、`watermark invisible`、`watermark all`、`watermark classify`、`watermark batch`、`watermark video ...`、`watermark status` |
+| 水印检查／移除 | 命令面板；无独立页面 | `watermark identify`、`watermark metadata`、`watermark visible`、`watermark erase`、`watermark invisible`、`watermark all`、`watermark classify`、`watermark resample`、`watermark batch`、`watermark video ...`、`watermark status` |
 | 远程 GPU 任务 | 命令面板；无独立页面 | `remote ...`、`watermark ... --remote NAME` |
 | 打开图片／目录 | `o` / `O` | `asset open [--folder]` |
 | 导入图片／另存副本 | `i` / `S` | `session import-image`、`asset save` |
@@ -529,7 +579,7 @@ TUI 命令面板提供同样的后端与确认选项。
 
 ## 本地抠图
 
-抠图在本地预测 alpha 通道并生成新的 RGBA 产物，原图不会被修改。它正是那两个只认透明通道的算子的前提：`sticker_outline` 与 `background_blur` 对普通 RGB 产物都会直接报错。
+抠图默认在本地预测 alpha 通道并生成新的 RGBA 产物，原图不会被修改。它正是那两个只认透明通道的算子的前提：`sticker_outline` 与 `background_blur` 对普通 RGB 产物都会直接报错。
 
 ```bash
 imagen matting models
@@ -609,7 +659,7 @@ imagen transform ARTIFACT_ID --op 'cel_banding_reduce:strength=0.4'
 
 ## 水印移除
 
-水印命令运行在独立的 `remove-ai-watermarks` 环境中，并且总是生成新产物；原图不会被修改。先做只读检查：
+除本地 `watermark resample` 外，水印处理运行在独立的 `remove-ai-watermarks` 环境中。只读检查不发布产物，处理操作生成新产物，不修改原图。先做只读检查：
 
 ```bash
 imagen watermark status
@@ -847,7 +897,7 @@ imagen tui
 
 **超分在推理前失败。** 缺少运行依赖或权重。运行时用 `superres install --backend cpu --accept` 安装；权重先运行 `superres models`，审阅许可后执行 `superres fetch --model NAME --accept`。
 
-**水印命令报告缺少环境。** 审阅计划后运行 `imagen watermark setup --accept`，再用 `imagen watermark status` 检查。水印处理始终留在隔离环境中，不会导入 TUI 或 CLI 进程。
+**水印命令报告缺少环境。** 审阅计划后运行 `imagen watermark setup --accept`，再用 `imagen watermark status` 检查。这些操作留在隔离环境中，不会导入 TUI 或 CLI 进程。`watermark resample` 是例外：它使用超分权重，在本地主进程内运行。
 
 **视频命令报告缺少 ffmpeg 或依赖。** 安装 `ffmpeg` 与 `ffprobe`，运行 `imagen watermark setup --extras visible,video,diffusion --accept`，然后重启 Imagen。`video invisible` 与 `--include-invisible` 是有损的，无法证明 SynthID 已被移除。
 

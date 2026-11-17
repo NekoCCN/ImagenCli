@@ -11,15 +11,22 @@ from imagen_cli.application.session_service import SessionService
 from imagen_cli.domain.contracts import CreationInput
 from imagen_cli.domain.primitive import new_id, sha256_bytes
 from imagen_cli.i18n import t
+from imagen_cli.providers.base import ReferenceInput
 from imagen_cli.providers.routes import SUPPORTED_ROUTES
 from imagen_cli.providers.vocabulary import check
 from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
+from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 
 def plan_creation(
-    repositories: Repositories, artifacts: ArtifactStore, creation: CreationInput,
-    *, dry_run: bool = False, asynchronous: bool = False,
+    repositories: Repositories,
+    artifacts: ArtifactStore,
+    creation: CreationInput,
+    *,
+    dry_run: bool = False,
+    asynchronous: bool = False,
+    private_store: PrivateStateStore | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if asynchronous:
         from imagen_cli.execution import worker
@@ -61,17 +68,27 @@ def plan_creation(
         value = getattr(creation, name)
         if value is not None:
             parameters[name] = value
+    if profile.provider == "novelai":
+        from imagen_cli.providers.novelai_parameters import validate_request_shape
+
+        try:
+            validate_request_shape(operation=creation.operation,
+                                   primary_count=len(creation.inputs), mask=creation.mask)
+        except ValueError as error:
+            return "validation_error", {"error": {"type": "validation_error", "detail": str(error)}}
     reason = check(profile.provider, profile.family, model, creation.operation, parameters)
     if reason is not None:
         # Refuse here, not at dispatch: an approved plan must be sendable as approved.
         return "validation_error", {"error": {"type": "validation_error", "detail": reason}}
-    if creation.mask or creation.references or creation.retry_of_job_id:
+    if creation.mask or creation.retry_of_job_id:
         return "unsupported_capability", {}
     input_hashes: list[str] = []
     input_artifact_ids: list[str] = []
+    reference_artifact_ids: list[str] = []
+    reference_inputs: list[ReferenceInput] = []
     total_bytes = 0
     pending_inputs: list[tuple[str, bytes]] = []
-    for source in creation.inputs:
+    for index, source in enumerate([*creation.inputs, *creation.references]):
         try:
             if source.startswith("artifact:"):
                 identity = source.removeprefix("artifact:")
@@ -92,17 +109,70 @@ def plan_creation(
             if source.startswith("file:"):
                 pending_inputs.append((identity, content))
             input_hashes.append(sha256_bytes(content))
-            input_artifact_ids.append(identity)
+            if index < len(creation.inputs):
+                input_artifact_ids.append(identity)
+            else:
+                option = creation.reference_options[index - len(creation.inputs)]
+                reference_artifact_ids.append(identity)
+                reference_inputs.append(ReferenceInput(content, option.kind, option.settings))
         except (OSError, ValueError):
             return "validation_error", {}
+    if reference_inputs:
+        from imagen_cli.providers.novelai_references import (
+            map_references,
+            reference_encoding,
+            reference_transformation,
+        )
+
+        if profile.provider != "novelai":
+            return "unsupported_capability", {}
+        try:
+            if (
+                profile.novelai_options is None
+                or profile.novelai_options.reference_transport == "encoded"
+            ) and any(ref.kind == "vibe" for ref in reference_inputs):
+                from imagen_cli.application.novelai_vibe_service import VibePreparationService
+
+                if private_store is None:
+                    raise ValueError("private Vibe cache unavailable")
+                vibe = VibePreparationService(repositories, artifacts, private_store)
+                reference_inputs = [vibe.bind(profile, ref, model) for ref in reference_inputs]
+            map_references(
+                tuple(reference_inputs),
+                model=model,
+                mode=(
+                    profile.novelai_options.reference_transport
+                    if profile.novelai_options
+                    else "encoded"
+                ),
+            )
+        except ValueError as error:
+            return "validation_error", {"error": {"type": "validation_error", "detail": str(error)}}
     for identity, content in pending_inputs:
         artifacts.stage(identity, content, origin_manifest={"kind": "input"})
         artifacts.publish(identity)
-    context = (
-        {"kind": "explicit_images", "input_artifact_ids": input_artifact_ids,
-         "mask_artifact_id": None}
-        if input_artifact_ids else {"kind": "none"}
+    context: dict[str, Any] = (
+        {
+            "kind": "explicit_images",
+            "input_artifact_ids": input_artifact_ids,
+            "mask_artifact_id": None,
+        }
+        if input_artifact_ids
+        else {"kind": "none"}
     )
+    if reference_artifact_ids:
+        context["references"] = [
+            {"artifact_id": identity, **option.model_dump(mode="json")}
+            for identity, option in zip(reference_artifact_ids, creation.reference_options,
+                                        strict=True)
+        ]
+        for entry, reference in zip(context["references"], reference_inputs, strict=True):
+            entry["sha256"] = sha256_bytes(reference.content)
+            transform = reference_transformation(reference)
+            if transform:
+                entry["transformation"] = transform
+            if reference.encoding:
+                entry["encoding"] = reference_encoding(reference)
     target: dict[str, Any] = {
         "profile_identity": profile.id, "profile_revision": profile.revision,
         "endpoint_origin": profile.base_url,
@@ -112,13 +182,22 @@ def plan_creation(
         "provider": profile.provider, "family": profile.family,
         "model_revision": model_revision,
     }
+    if profile.provider == "novelai":
+        target["novelai_options"] = (
+            profile.novelai_options.model_dump(mode="json") if profile.novelai_options
+            else {"auth_mode": "bearer", "reference_transport": "encoded"}
+        )
     if asynchronous and not dry_run:
         # Durable queue entry only: no approval is consumed and nothing is sent.
         turn = sessions.create_turn(
             session.id, instruction=creation.prompt, operation=creation.operation,
             resolved_profile_snapshot=target, model=model, parameters=parameters,
             requested_count=creation.count, parent_turn_id=session.current_turn_id,
-            references={"input": input_artifact_ids} if input_artifact_ids else None,
+            references={"input": input_artifact_ids, "reference": reference_artifact_ids},
+            reference_options=[
+                option.model_dump(mode="json") for option in creation.reference_options
+            ],
+            reference_evidence=context.get("references"),
         )
         repositories.update("jobs", turn.job_id, {"worker_queued": True})
         return "accepted", {

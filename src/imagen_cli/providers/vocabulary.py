@@ -114,6 +114,9 @@ def specs(
 ) -> tuple[Spec, ...] | None:
     """Parameters the route accepts, or ``None`` when no table covers it."""
     leaf = _leaf(model)
+    if (provider, family) == ("novelai", "generate_image"):
+        from .novelai_parameters import PARAMETER_KINDS
+        return tuple(Spec(name, kind) for name, kind in PARAMETER_KINDS.items())
     if (provider, family) == ("openai", "images"):
         table = _openai_specs(leaf, operation)
     elif (provider, family) == ("gemini", "generate_content"):
@@ -131,6 +134,13 @@ def check(
     parameters: Mapping[str, Any],
 ) -> str | None:
     """Localized reason the route would refuse these parameters, or ``None``."""
+    if (provider, family) == ("novelai", "generate_image"):
+        from .novelai_parameters import normalize_parameters
+        try:
+            normalize_parameters(parameters, model=model, operation=operation)
+        except ValueError as exc:
+            return str(exc)
+        return None
     table = specs(provider, family, model, operation)
     if table is None:
         return None

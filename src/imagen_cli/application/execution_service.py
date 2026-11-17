@@ -6,9 +6,10 @@ from typing import Any
 
 from imagen_cli.application.planning_service import PlanningService
 from imagen_cli.application.profile_service import ProfileService
+from imagen_cli.domain.contracts import ReferenceOptions
 from imagen_cli.domain.primitive import new_id
 from imagen_cli.execution.foreground import ForegroundExecutor
-from imagen_cli.providers.base import ValidatedRequest
+from imagen_cli.providers.base import ReferenceInput, ValidatedRequest
 from imagen_cli.storage.artifacts import MAX_BYTES, ArtifactStore, inspect_media
 from imagen_cli.storage.repositories import Repositories
 
@@ -44,6 +45,8 @@ class ExecutionService:
         model_revision: str,
         input_artifact_ids: tuple[str, ...] = (),
         mask_artifact_id: str | None = None,
+        reference_artifact_ids: tuple[str, ...] = (),
+        reference_options: tuple[dict[str, Any], ...] = (),
     ) -> dict[str, Any]:
         if self.repositories.connection.in_transaction:
             raise ValueError("execution requires an independently committed transaction")
@@ -60,6 +63,11 @@ class ExecutionService:
             if profile_row is None:
                 raise ValueError("profile is unavailable")
             profile = ProfileService().load(profile_row)
+            options = [ReferenceOptions.model_validate(item) for item in reference_options]
+            if reference_artifact_ids and profile.provider != "novelai":
+                raise ValueError("references unsupported by this provider")
+            if len(reference_artifact_ids) != len(options):
+                raise ValueError("references require aligned explicit options")
             context: dict[str, Any] = {"kind": "none"}
             if input_artifact_ids or mask_artifact_id is not None:
                 context = {
@@ -67,11 +75,21 @@ class ExecutionService:
                     "input_artifact_ids": list(input_artifact_ids),
                     "mask_artifact_id": mask_artifact_id,
                 }
+            if reference_artifact_ids:
+                context["references"] = [
+                    {"artifact_id": identity, **option.model_dump(mode="json")}
+                    for identity, option in zip(reference_artifact_ids, options, strict=True)
+                ]
             sources = [("input", index, identity)
                        for index, identity in enumerate(input_artifact_ids)]
             if mask_artifact_id is not None:
                 sources.append(("mask", 0, mask_artifact_id))
+            sources.extend(("reference", index, identity)
+                           for index, identity in enumerate(reference_artifact_ids))
             contents, manifest = [], []
+            primary: list[bytes] = []
+            references: list[ReferenceInput] = []
+            mask: bytes | None = None
             for role, index, identity in sources:
                 path = self.artifact_store.get(identity)
                 if path is None:
@@ -85,10 +103,53 @@ class ExecutionService:
                 contents.append(content)
                 if sum(map(len, contents)) > 256 * 1024 * 1024:
                     raise ValueError("total input byte limit exceeded")
+                if role == "input":
+                    primary.append(content)
+                elif role == "mask":
+                    mask = content
+                else:
+                    option = options[index]
+                    references.append(ReferenceInput(content, option.kind, option.settings))
                 manifest.append({
                     "artifact_id": identity, "role": role, "index": index,
                     "sha256": hashlib.sha256(content).hexdigest(),
                 })
+                if role == "reference":
+                    from imagen_cli.providers.novelai_references import (
+                        bind_precise_reference,
+                        reference_encoding,
+                    )
+
+                    manifest[-1].update(options[index].model_dump(mode="json"))
+                    context["references"][index]["sha256"] = manifest[-1]["sha256"]
+                    references[-1] = bind_precise_reference(references[-1])
+                    if (
+                        profile.novelai_options is None
+                        or profile.novelai_options.reference_transport == "encoded"
+                    ) and references[-1].kind == "vibe":
+                        from imagen_cli.application.novelai_vibe_service import (
+                            VibePreparationService,
+                        )
+
+                        references[-1] = VibePreparationService(
+                            self.repositories,
+                            self.artifact_store,
+                            self.executor.private_state_store,
+                        ).bind(
+                            profile,
+                            references[-1],
+                            plan["model"],
+                            expected=plan["portable_context"]["references"][index].get(
+                                "encoding", {}
+                            ),
+                        )
+                        evidence = reference_encoding(references[-1])
+                        manifest[-1]["encoding"] = evidence
+                        context["references"][index]["encoding"] = evidence
+                    transform = dict(references[-1].transformation)
+                    if transform:
+                        manifest[-1]["transformation"] = transform
+                        context["references"][index]["transformation"] = transform
             session = self.repositories.get("sessions", plan["session_id"])
             if session is None or session.get("deleted_at") is not None:
                 raise ValueError("session is unavailable")
@@ -103,6 +164,11 @@ class ExecutionService:
                 "family": profile.family,
                 "model_revision": model_revision,
             }
+            if profile.provider == "novelai":
+                target["novelai_options"] = (
+                    profile.novelai_options.model_dump(mode="json") if profile.novelai_options
+                    else {"auth_mode": "bearer", "reference_transport": "encoded"}
+                )
             snapshot = {
                 **plan,
                 "target_snapshot": target,
@@ -138,17 +204,25 @@ class ExecutionService:
             # Circular turn/job FKs require binding after both inserts, before commit.
             self.repositories.update("turns", turn_id, {"job_id": job_id})
             for item in manifest:
-                self.repositories.insert("artifact_references", {
-                    "session_id": plan["session_id"], "turn_id": turn_id,
-                    **{key: value for key, value in item.items() if key != "sha256"},
-                })
+                self.repositories.insert(
+                    "artifact_references",
+                    {
+                        "session_id": plan["session_id"],
+                        "turn_id": turn_id,
+                        **{
+                            key: value
+                            for key, value in item.items()
+                            if key in {"artifact_id", "role", "index"}
+                        },
+                    },
+                )
             request = ValidatedRequest(
                 plan_id, job_id, profile.id, profile.revision, plan["operation"],
                 plan["model"], model_revision, plan["prompt_snapshot"],
                 plan["normalized_parameters"], plan["capability_digest"],
                 authorized=True, dispatch_intent_recorded=False,
-                inputs=tuple(contents[:-1] if mask_artifact_id is not None else contents),
-                mask=contents[-1] if mask_artifact_id is not None else None,
+                inputs=tuple(primary),
+                mask=mask, references=tuple(references),
             )
         self.executor.execute(request, requested_count=count)
         with self.repositories.transaction():

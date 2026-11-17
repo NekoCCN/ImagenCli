@@ -12,6 +12,7 @@ from imagen_cli.cli.registry import COMMANDS, discover
 
 BUNDLED = Path(__file__).resolve().parents[2] / "src" / "imagen_cli" / "bundled_skills"
 PLACEHOLDERS = {
+    "PREPARATION_ID": "vib_" + "c" * 32,
     "ARTIFACT_ID": "art_" + "a" * 32,
     "SOURCE_ID": "art_" + "b" * 32,
     "JOB_ID": "job_" + "a" * 32,
@@ -127,3 +128,30 @@ def test_salad_control_plane_examples_name_their_org_and_project():
                     if "--salad-org" not in line or "--salad-project" not in line:
                         missing.append(f"{path.name}: {line}")
     assert not missing, "\n".join(missing)
+
+
+def test_novelai_documented_json_executes_offline(tmp_path, monkeypatch, capsys):
+    import json
+    import socket
+
+    from imagen_cli.cli.entrypoint import main
+
+    guide = BUNDLED / "imagen" / "references" / "novelai.md"
+    examples = [json.loads(_substitute("\n".join(lines)))
+                for kind, lines in _blocks(guide.read_text()) if kind == "json"]
+    profile = tmp_path / "profile.toml"
+    profile.write_text(next(_substitute("\n".join(lines))
+                            for kind, lines in _blocks(guide.read_text()) if kind == "toml"))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: pytest.fail("network forbidden"))
+    assert main(["profile", "add", "novelai", "--config-file", str(profile),
+                 "--workspace", str(tmp_path / "work"), "--output", "json",
+                 "--no-interactive"]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["data"]["profile"]["novelai_options"] == {
+        "auth_mode": "bearer", "reference_transport": "encoded"
+    }
+    from imagen_cli.domain.contracts import CreationInput
+
+    creation = CreationInput.model_validate(examples[0])
+    assert creation.references and not creation.inputs
+    assert creation.reference_options[0].kind == "vibe"

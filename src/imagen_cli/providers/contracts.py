@@ -16,6 +16,9 @@ class ProviderContract:
 
 
 _CONTRACTS = {
+    ("novelai", "generate_image"): ProviderContract(
+        "novelai", "generate_image", idempotency_scope="none",
+    ),
     ("openai", "images"): ProviderContract(
         "openai", "images", idempotency_scope="none",
     ),

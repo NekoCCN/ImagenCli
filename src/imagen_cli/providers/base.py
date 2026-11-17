@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError, dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 
 def _freeze(value: Any) -> Any:
@@ -16,6 +16,27 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, bytearray):
         return bytes(value)
     return value
+
+
+@dataclass(frozen=True)
+class ReferenceInput:
+    content: bytes = field(repr=False)
+    kind: Literal["vibe", "precise"]
+    settings: Mapping[str, Any]
+    prepared_content: bytes | None = field(default=None, repr=False)
+    transformation: Mapping[str, Any] = field(default_factory=dict)
+
+    encoding: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "encoding", _freeze(self.encoding))
+        if self.kind not in {"vibe", "precise"}:
+            raise ValueError("unsupported reference role")
+        object.__setattr__(self, "content", bytes(self.content))
+        object.__setattr__(self, "settings", _freeze(self.settings))
+        object.__setattr__(self, "transformation", _freeze(self.transformation))
+        if self.prepared_content is not None:
+            object.__setattr__(self, "prepared_content", bytes(self.prepared_content))
 
 
 @dataclass(frozen=True)
@@ -42,7 +63,10 @@ class ValidatedRequest:
     mask: bytes | None = field(default=None, repr=False)
     native_context: Any | None = field(default=None, repr=False)
 
+    references: tuple[ReferenceInput, ...] = field(default=(), repr=False)
+
     def __post_init__(self) -> None:
+        object.__setattr__(self, "references", tuple(self.references))
         object.__setattr__(self, "normalized_parameters", _freeze(self.normalized_parameters))
         object.__setattr__(self, "inputs", tuple(bytes(item) for item in self.inputs))
         if self.mask is not None:

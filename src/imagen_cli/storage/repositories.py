@@ -4,6 +4,7 @@ Structural relationships are SQL columns/FKs; entity detail fields use JSON, not
 an untyped entity bucket. Domain validation remains the application boundary.
 """
 
+import builtins
 import json
 import sqlite3
 from collections.abc import Iterator
@@ -15,6 +16,10 @@ from uuid import uuid4
 from imagen_cli.storage.safety import PRIVATE_FIELDS, relative_path, validate_manifest
 
 FIELDS = {
+    "vibe_preparations": (
+        "id cache_key state consumed plan digest encoding_sha256 private_relpath "
+        "byte_size accepted_maybe error_type created_at expires_at updated_at reused_preparation_id"
+    ),
     "sessions": (
         "id name intent default_profile_id default_model current_turn_id version "
         "created_at deleted_at origin_session_id origin_turn_id"
@@ -44,7 +49,7 @@ FIELDS = {
     ),
     "profiles": (
         "id name provider family base_url models_path model_default "
-        "credential_ref trust_policy revision"
+        "credential_ref trust_policy revision novelai_options"
     ),
     "native_contexts": (
         "id provider family profile_identity model format_version private_relpath sha256 "
@@ -267,15 +272,68 @@ class Repositories:
         )
         return [self._decode(row, include_private) for row in rows]
 
+    def unresolved_vibe_preparations(self, cache_key: str) -> builtins.list[str]:
+        rows = self.connection.execute(
+            "SELECT * FROM vibe_preparations WHERE cache_key=? AND state='unknown' "
+            "AND consumed=1 ORDER BY id", (cache_key,),
+        )
+        result: builtins.list[str] = []
+        for raw in rows:
+            row = self._decode(raw, include_private=True)
+            if row.get("accepted_maybe"):
+                result.append(row["id"])
+        return result
+
+    def latest_vibe_preparation(
+        self,
+        cache_key: str,
+        *,
+        state: str = "succeeded",
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM vibe_preparations WHERE cache_key=? AND state=? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (cache_key, state),
+        ).fetchone()
+        result = self._decode(row, include_private=True)
+        return result if isinstance(result, dict) else None
+
     def update(self, table: str, identity: str, changes: dict[str, Any]) -> Any:
         if table in {"plans", "capabilities"}:
             raise ValueError("immutable entity; create a new record")
+        if table == "vibe_preparations" and set(changes) - {
+            "state",
+            "consumed",
+            "encoding_sha256",
+            "private_relpath",
+            "byte_size",
+            "accepted_maybe",
+            "error_type",
+            "updated_at",
+            "reused_preparation_id",
+        }:
+            raise ValueError("preparation plan is immutable")
         if "id" in changes:
             raise ValueError("identity is immutable")
         with self.transaction():
             existing = self.get(table, identity, include_private=True)
             if existing is None:
                 raise KeyError(identity)
+            if table == "vibe_preparations":
+                state = changes.get("state", existing["state"])
+                consumed = changes.get("consumed", existing["consumed"])
+                allowed = {
+                    "planned": {"unknown"},
+                    "unknown": {"unknown", "succeeded", "failed"},
+                    "succeeded": set(),
+                    "failed": set(),
+                }
+                if (
+                    state not in allowed[existing["state"]]
+                    or consumed != 1
+                    or (not existing["consumed"] and existing["state"] != "planned")
+                ):
+                    raise ValueError("invalid preparation transition")
             if table == "turns" and set(changes) - {
                 "creation_state",
                 "publication_state",
