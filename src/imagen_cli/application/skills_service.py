@@ -321,6 +321,10 @@ def update_(
     for agent, root in _roots(scope, agents):
         for name in selected:
             target = root / name
+            if not _safe(target):
+                conflicts.append({"name": name, "path": str(target), "agent": agent,
+                                  "reason": "unsafe"})
+                continue
             if not (target / "SKILL.md").is_file():
                 missing.append({"name": name, "path": str(target), "agent": agent})
                 continue
@@ -373,14 +377,17 @@ def update_(
         status, data = install_(agent_names, scope=scope, force=True, agents=[agent])
         installed.extend(data.get("installed", []))
         failed.extend(data.get("failed", []))
+        if status == "conflict":
+            conflicts.extend(data.get("existing", []))
         if status == "internal_error" and not failed:
             failed.append({"agent": agent, "names": agent_names})
-    return ("internal_error" if failed else "succeeded"), {
+    result_status = "internal_error" if failed else "conflict" if conflicts else "succeeded"
+    return result_status, {
         "scope": scope,
         "missing": missing,
         "updated": sorted({str(row["name"]) for row in installed}),
         "current": sorted({row["name"] for row in current}),
-        "conflicts": [],
+        "conflicts": conflicts,
         "installed": installed,
         "failed": failed,
     }

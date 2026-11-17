@@ -103,3 +103,31 @@ def test_invalid_command_form_retains_values(tmp_path):
                 assert app.screen is not screen
 
     asyncio.run(exercise())
+
+
+def test_scope_change_never_substitutes_another_target(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+
+    async def exercise():
+        with Container(workspace=str(tmp_path / 'workspace')) as container:
+            app = WorkbenchApp(Deps(container.repositories, container.artifact_store,
+                                    execute=container.execute))
+            async with app.run_test() as pilot:
+                app._open_command('skills uninstall')
+                await pilot.pause()
+                form = app.screen
+                targets = form.query_one('#target', SelectionList)
+                targets.deselect_all()
+                targets.select('eve')  # project-only
+                form.query_one('#scope', Select).value = 'global'
+                await pilot.pause()
+                assert targets.selected == []
+                await pilot.press('ctrl+enter')
+                assert app.screen is form
+                assert 'target' in str(form.query_one('#form-status', Static).render())
+                form.query_one('#scope', Select).value = 'project'
+                await pilot.pause()
+                assert targets.selected == []
+
+    asyncio.run(exercise())

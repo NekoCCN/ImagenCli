@@ -890,10 +890,10 @@ class SkillsForm(ChoiceForm):
         from imagen_cli.application.skill_targets import prompt_order, root_for
 
         scope = str(event.value)
-        labels, defaults = prompt_order(scope)
+        labels, _ = prompt_order(scope)
         picker = self.query_one("#target", SelectionList)
         picked = set(picker.selected)
-        selected = picked.intersection(labels) or set(defaults)
+        selected = picked.intersection(labels)
         picker.clear_options()
         picker.add_options([
             Selection(Text(f"[{'x' if name in selected else ' '}] {name} → "

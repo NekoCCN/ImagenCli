@@ -86,3 +86,24 @@ def test_maintenance_results_match_discovery_schema(isolated):
     for action, name in [("list", "unknown"), ("update", "unknown"), ("update", "imagen")]:
         _, result = run("skills", action, name, "--target", "universal")
         validate(result["data"], discover("skills " + action)["data_schema"])
+
+
+@pytest.mark.parametrize('flags', [
+    ['--no-interactive'], ['--agent'], ['--output', 'json'], ['--output=jsonl'],
+])
+def test_unattended_modes_never_open_picker(isolated, monkeypatch, flags):
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(entrypoint.sys, 'stdin', Terminal())
+
+    def forbid_picker(*args, **kwargs):
+        raise AssertionError('unattended command prompted')
+
+    monkeypatch.setattr(selection, 'choose', forbid_picker)
+    out = Terminal()
+    code = entrypoint.main(['skills', 'update', 'imagen', *flags],
+                           stdout=out, stderr=io.StringIO())
+    assert code == 0
+    assert out.getvalue()
