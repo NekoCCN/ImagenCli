@@ -10,6 +10,16 @@ from imagen_cli.cli.tui.app import Deps, WorkbenchApp
 from imagen_cli.cli.tui.forms import SkillsForm
 
 
+@pytest.fixture(autouse=True)
+def isolated_agent_homes(tmp_path, monkeypatch):
+    """Keep inherited CI/desktop agent configuration out of filesystem checks."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home/.config"))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+
 @pytest.mark.parametrize("scope", ["project", "global"])
 @pytest.mark.parametrize("size", [(80, 24), (140, 40)])
 def test_skills_menu_scope_and_empty_selection(tmp_path, monkeypatch, size, scope):

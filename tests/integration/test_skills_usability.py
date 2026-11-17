@@ -14,6 +14,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGEN_LANG", "en")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home/.config"))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     return tmp_path
