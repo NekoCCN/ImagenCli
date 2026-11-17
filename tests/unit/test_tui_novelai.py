@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from textual.app import App
 from textual.widgets import Input, Select
 
@@ -131,7 +132,8 @@ def test_ordered_references_refuse_paths_and_misalignment():
             reference({"nai_references": refs, "nai_reference_options": options})
 
 
-def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes):
+@pytest.mark.parametrize("defer_dispatch", [False, True])
+def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes, defer_dispatch):
     from imagen_cli.application.container import Container
     from imagen_cli.cli.commands.vibe import execute
     from imagen_cli.cli.tui.app import Deps, ResultScreen, WorkbenchApp
@@ -155,10 +157,24 @@ def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes)
         async def run():
             app = WorkbenchApp(Deps(container.repositories, container.artifact_store,
                                     execute=run_command))
+            open_command = app._open_command
+
+            dispatch_started = asyncio.Event()
+            dispatch_allowed = asyncio.Event()
+
+            async def deferred_open_command(command):
+                dispatch_started.set()
+                await dispatch_allowed.wait()
+                open_command(command)
+
+            if defer_dispatch:
+                app._open_command = deferred_open_command
             async with app.run_test(size=(120, 50)) as pilot:
                 await pilot.pause()
                 async def open_preparation(action):
-                    app.push_screen(app._creation_form(
+                    dispatch_started.clear()
+                    dispatch_allowed.clear()
+                    await app.push_screen(app._creation_form(
                         "Generate", [("prompt", "", "kite"),
                                      ("profile", "", profile.id),
                                      ("model", "", profile.model_default),
@@ -166,8 +182,19 @@ def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes)
                     ))
                     await pilot.pause()
                     app.screen.query_one("#nai-vibe-" + action).press()
+                    if defer_dispatch:
+                        # Hold the app callback after the creation form closes.
+                        # This is the valid intermediate state seen on slow CI.
+                        async with asyncio.timeout(5):
+                            await dispatch_started.wait()
+                        assert not hasattr(app.screen, "heading")
+                        dispatch_allowed.set()
+                    # pause() drains a snapshot of message queues, not callbacks
+                    # posted later by a closing screen. Wait for the destination.
+                    async with asyncio.timeout(5):
+                        while not getattr(app.screen, "heading", "").endswith("vibe " + action):
+                            await pilot.pause()
                     await pilot.pause()
-                    assert app.screen.heading.endswith("vibe " + action), type(app.screen)
 
                 await open_preparation("plan")
                 for key, value in {"artifact_id": identity, "profile": profile.id,
