@@ -2,6 +2,9 @@
 
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 from imagen_cli.application import cancel_service
 
@@ -16,6 +19,14 @@ def test_linux_start_is_available_for_the_current_process():
         return
     assert cancel_service.process_start(99999999) is None
     assert cancel_service.process_start(__import__("os").getpid())
+
+
+@pytest.mark.parametrize("state", ["Z", "X", "x", "S", "R"])
+def test_linux_dead_process_is_not_an_executor(monkeypatch, state):
+    # The command name may itself contain spaces and parentheses.
+    stat = "123 (worker (child)) " + " ".join([state] + ["0"] * 18 + ["456"])
+    monkeypatch.setattr(Path, "read_text", lambda self: stat)
+    assert cancel_service._linux_start(123) == (None if state in {"Z", "X", "x"} else "456")
 
 
 def test_darwin_start_parses_ps_output(monkeypatch):

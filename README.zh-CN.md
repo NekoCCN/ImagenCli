@@ -34,7 +34,11 @@
 
 ## 新更新
 
-当前版本为 [v0.1.25](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.25)。
+当前版本为 [v0.1.26](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.26)。
+
+- **交互式入口：**运行 `imagen`，选择图片工作区、打开工作台或进入 Skills 管理。
+- **一致的 Skills 维护：**安装、状态、更新和卸载共用范围、Agent 和技能子集选择，执行前可审阅，保护本地修改。
+- **可恢复的表单：**TUI 校验失败保留输入，覆盖技能修改需要单独确认。
 
 - **NovelAI 兼容生成**：CLI 与 TUI 支持文生图、单图 img2img、Vibe 灵感参考和精确角色参考。
 - **独立 Vibe 准备流程**：执行前审阅编码上传与潜在费用，完全匹配的编码可从本地私有缓存复用。
@@ -818,7 +822,7 @@ imagen skills update imagen --scope global --target claude-code
 
 TUI 中通过 **更多操作 → Agent 技能** 或命令面板的 `skills` 进入同样的选择流程。强制操作会额外确认；确认强制卸载时自动提供 CLI 所需的 `--yes`。命令表单遇到错误时保留输入，包括 timeout 等执行选项错误。
 
-交互入口和 TUI 覆盖常见图片、端点工作流，但不代表所有 CLI 参数都有专用向导。机器格式（`--agent`、`--output json/jsonl`）和无人值守（`--no-interactive`）仍显式指定。工作区（`--workspace`）仍作为启动参数；批量 JSON 输入和高级部署配置保留 CLI/schema 接口及命令面板表单。
+交互入口和 TUI 覆盖常见图片、端点工作流，但不代表所有 CLI 参数都有专用向导。机器格式（`--agent`、`--output json/jsonl`）和无人值守（`--no-interactive`）仍显式指定。可在 `imagen` 启动菜单中选择图片工作区，也可使用 `--workspace`；批量 JSON 输入和高级部署配置保留 CLI/schema 接口及命令面板表单。
 
 ## 机器接口
 

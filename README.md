@@ -34,7 +34,13 @@ Help, errors, and TUI text support English and Simplified Chinese. JSON keys, st
 
 ## What's new
 
-The current release is [v0.1.25](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.25).
+The current release is [v0.1.26](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.26).
+
+- **Interactive setup:** start with `imagen`, choose an image workspace or open the workbench and Skills manager.
+- **Consistent Skills maintenance:** install, status, update, and uninstall share scope, agent, and subset choices, with review and protected local edits.
+- **Recoverable forms:** TUI validation keeps your input; Skills overrides require separate confirmation.
+
+Also available:
 
 - **NovelAI-compatible generation:** text-to-image, single-image img2img, Vibe inspiration, and precise character references in the CLI and TUI.
 - **Separate Vibe preparation:** review encoding uploads and possible charges before execution; reuse matching private local encodings.
@@ -848,7 +854,7 @@ In a human terminal, `imagen skills` offers Status, Install, Update, and Uninsta
 
 The TUI exposes the same choices through **More actions → Agent skills**, or `skills` in the command palette. Force-enabled actions open a separate confirmation; confirming removal supplies the CLI's `--yes`. The command palette keeps invalid values editable, including invalid execution options such as timeout.
 
-The interactive launcher and TUI cover common image and provider workflows, but are not a universal replacement for every CLI option. Machine formatting (`--agent`, `--output json/jsonl`) and unattended execution (`--no-interactive`) stay explicit. Workspace selection (`--workspace`) remains a startup option; bulk JSON batch input and advanced deployment settings retain their CLI/schema interfaces and command-palette forms.
+The interactive launcher and TUI cover common image and provider workflows, but are not a universal replacement for every CLI option. Machine formatting (`--agent`, `--output json/jsonl`) and unattended execution (`--no-interactive`) stay explicit. Choose an image workspace from the `imagen` launcher or pass `--workspace`; bulk JSON batch input and advanced deployment settings retain their CLI/schema interfaces and command-palette forms.
 
 ## Machine interface
 

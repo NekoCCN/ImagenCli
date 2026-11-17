@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
 from typing import Any, TextIO
 
 from imagen_cli.application import skill_targets, skills_service
@@ -29,21 +30,43 @@ def answer(
 
 
 def launcher(*, stdin: TextIO, stderr: TextIO) -> list[str]:
-    try:
-        selected = answer(
-            t(
-                "Imagen\n1. Image workbench (TUI)\n2. Agent skills\n3. CLI help\n"
-                "Choose [3], q cancel: ",
-                "Imagen\n1. 图片工作台（TUI）\n2. Agent 技能\n3. CLI 帮助\n选择 [3]，q 取消：",
-            ),
-            {"1", "2", "3"},
-            stdin=stdin,
-            stderr=stderr,
-            default="3",
-        )
-    except selection.Back:
-        raise KeyboardInterrupt from None
-    return {"1": ["tui"], "2": ["skills"], "3": ["help"]}[selected]
+    workspace = ""
+    while True:
+        try:
+            selected = answer(
+                t(
+                    "Imagen\n1. Image workbench (TUI)\n2. Agent skills\n3. CLI help\n"
+                    "4. Choose image workspace\nChoose [3], q cancel: ",
+                    "Imagen\n1. 图片工作台（TUI）\n2. Agent 技能\n3. CLI 帮助\n"
+                    "4. 选择图片工作区\n选择 [3]，q 取消：",
+                ),
+                {"1", "2", "3", "4"},
+                stdin=stdin,
+                stderr=stderr,
+                default="3",
+            )
+            if selected == "4":
+                stderr.write(t(
+                    "Workspace path (blank = default, b back, q cancel): ",
+                    "工作区路径（留空为默认，b 返回，q 取消）：",
+                ))
+                stderr.flush()
+                raw = stdin.readline()
+                if not raw or raw.strip().lower() == "q":
+                    raise KeyboardInterrupt
+                if raw.strip().lower() == "b":
+                    continue
+                workspace = str(Path(raw.strip()).expanduser()) if raw.strip() else ""
+                stderr.write(t(
+                    f"Image workspace: {workspace or '(default)'}\n"
+                    "Project Skills still use the current directory.\n",
+                    f"图片工作区：{workspace or '（默认）'}\n项目技能仍使用当前目录。\n",
+                ))
+                continue
+        except selection.Back:
+            continue
+        command = {"1": ["tui"], "2": ["skills"], "3": ["help"]}[selected]
+        return command + (["--workspace", workspace] if workspace else [])
 
 
 def configure(command: str, *, stdin: TextIO, stderr: TextIO) -> tuple[str, dict[str, Any]]:

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.26
+
+### English
+
+- Add an interactive `imagen` launcher with image workspace selection and a unified `imagen skills` manager. Bare Skills maintenance commands guide scope, agents, skill subsets, and final review; back and cancel paths make no changes.
+- Keep explicit options and unattended behavior compatible. Support positional skill names, scope-aware target selection, and consistent install/update/uninstall guidance in CLI, TUI, help, and bundled Skills.
+- Protect locally edited managed Skills and unmanaged content; reject unsafe symlink updates. Require explicit interactive confirmation before overriding managed edits.
+- Keep invalid TUI form input for correction, improve array entry hints, validate shared execution controls, and explain how to install the optional TUI extra.
+- Recognize terminated Linux workers even when their parent has not reaped them.
+
+### 中文
+
+- 新增 `imagen` 交互式启动菜单，可选择图片工作区并进入统一的 `imagen skills` 管理。无参数 Skills 维护命令引导选择范围、Agent、技能子集并审阅，支持返回和取消。
+- 保留显式选项与无人值守行为。支持位置参数技能名、按范围选择目标，并同步 CLI、TUI、帮助和内置 Skills 的安装、更新及卸载指引。
+- 保护已托管技能的本地修改和非托管内容，拒绝不安全的符号链接更新；覆盖修改需明确确认。
+- TUI 校验失败保留输入，改善数组输入提示、执行选项校验及可选 TUI 依赖安装指引。
+- 修复 Linux 工作进程已结束但尚未回收时仍被误报存活的问题。
+
 ## 0.1.25
 
 ### English
