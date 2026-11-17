@@ -34,7 +34,7 @@
 
 ## 新更新
 
-当前版本为 [v0.1.24](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.24)。
+当前版本为 [v0.1.25](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.25)。
 
 - **NovelAI 兼容生成**：CLI 与 TUI 支持文生图、单图 img2img、Vibe 灵感参考和精确角色参考。
 - **独立 Vibe 准备流程**：执行前审阅编码上传与潜在费用，完全匹配的编码可从本地私有缓存复用。

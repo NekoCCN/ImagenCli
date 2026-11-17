@@ -30,11 +30,22 @@ def test_provider_manual_novelai_never_fetches():
     asyncio.run(run())
 
 
-def test_creation_parameters_roles_and_provider_reset():
+@pytest.mark.parametrize("defer_dispatch", [False, True])
+def test_creation_parameters_roles_and_provider_reset(defer_dispatch):
     from imagen_cli.cli.tui.app import _creation_arguments
     from imagen_cli.cli.tui.forms import CreationForm
 
     calls = []
+    callback_started = asyncio.Event()
+    callback_allowed = asyncio.Event()
+    callback_finished = asyncio.Event()
+
+    async def record_action(action):
+        callback_started.set()
+        if defer_dispatch:
+            await callback_allowed.wait()
+        calls.append(action)
+        callback_finished.set()
 
     class Harness(App):
         def on_mount(self):
@@ -53,7 +64,7 @@ def test_creation_parameters_roles_and_provider_reset():
                     ],
                     models={},
                     artifacts=[("source", "art_test")],
-                    vibe_action=calls.append,
+                    vibe_action=record_action,
                 )
             )
 
@@ -102,7 +113,12 @@ def test_creation_parameters_roles_and_provider_reset():
             await pilot.pause()
             assert calls == []
             screen.query_one("#nai-vibe-status").press()
-            await pilot.pause()
+            async with asyncio.timeout(5):
+                if defer_dispatch:
+                    await callback_started.wait()
+                    assert calls == []
+                    callback_allowed.set()
+                await callback_finished.wait()
             assert calls == ["status"]
 
     asyncio.run(run())
@@ -196,15 +212,22 @@ def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes,
                             await pilot.pause()
                     await pilot.pause()
 
+                async def submit_preparation():
+                    app.screen.submit()
+                    # The submit callback starts a worker asynchronously. Waiting
+                    # for current workers alone can miss one not yet registered.
+                    async with asyncio.timeout(5):
+                        while not isinstance(app.screen, ResultScreen):
+                            await pilot.pause()
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+
                 await open_preparation("plan")
                 for key, value in {"artifact_id": identity, "profile": profile.id,
                                    "model": profile.model_default,
                                    "information_extracted": "0.6"}.items():
                     app.screen.query_one("#" + key, Input).value = value
-                app.screen.submit()
-                await pilot.pause()
-                await app.workers.wait_for_complete()
-                await pilot.pause()
+                await submit_preparation()
                 assert isinstance(app.screen, ResultScreen)
                 assert "preparation" in app.screen.data, app.screen.data
                 row = app.screen.data["preparation"]
@@ -217,10 +240,7 @@ def test_workbench_preparation_forms_plan_execute_and_reuse(tmp_path, png_bytes,
                     await open_preparation("execute")
                     app.screen.query_one("#preparation_id", Input).value = row["id"]
                     app.screen.query_one("#digest", Input).value = row["digest"]
-                    app.screen.submit()
-                    await pilot.pause()
-                    await app.workers.wait_for_complete()
-                    await pilot.pause()
+                    await submit_preparation()
                     assert isinstance(app.screen, ResultScreen)
                     assert app.screen.data["preparation"]["state"] == "succeeded"
                 assert len(encoder.calls) == 1
@@ -242,6 +262,11 @@ def test_existing_edit_form_validates_as_edit_without_new_primary():
     from imagen_cli.cli.tui.forms import CreationForm
 
     results = []
+    submitted = asyncio.Event()
+
+    def record_result(result):
+        results.append(result)
+        submitted.set()
 
     class Harness(App):
         def on_mount(self):
@@ -251,7 +276,7 @@ def test_existing_edit_form_validates_as_edit_without_new_primary():
                  ("model", "", "manual"), ("count", "", "1")],
                 profiles=[{"id": "nai", "provider": "novelai", "family": "generate_image"}],
                 models={}, operation="edit",
-            ), results.append)
+            ), record_result)
 
     async def run():
         async with Harness().run_test(size=(100, 40)) as pilot:
@@ -262,7 +287,8 @@ def test_existing_edit_form_validates_as_edit_without_new_primary():
             screen.query_one("#nai_strength", Input).value = "0.5"
             screen.query_one("#nai_noise", Input).value = "0.1"
             screen.submit()
-            await pilot.pause()
+            async with asyncio.timeout(5):
+                await submitted.wait()
             assert len(results) == 1
             assert not results[0].get("nai_primary")
 

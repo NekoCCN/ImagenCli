@@ -34,7 +34,7 @@ Help, errors, and TUI text support English and Simplified Chinese. JSON keys, st
 
 ## What's new
 
-The current release is [v0.1.24](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.24).
+The current release is [v0.1.25](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.25).
 
 - **NovelAI-compatible generation:** text-to-image, single-image img2img, Vibe inspiration, and precise character references in the CLI and TUI.
 - **Separate Vibe preparation:** review encoding uploads and possible charges before execution; reuse matching private local encodings.

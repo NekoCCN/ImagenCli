@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.25
+
+### English
+
+- Fix timing-sensitive NovelAI TUI tests by waiting for form transitions and callbacks to finish.
+- Add regression coverage for delayed Vibe form dispatch. Runtime behavior and API compatibility are unchanged.
+
+### 中文
+
+- 修复 NovelAI TUI 测试的时序问题，等待表单切换和回调完成后再检查结果。
+- 补充 Vibe 表单延迟调度的回归测试。运行时行为与接口兼容性未变。
+
 ## 0.1.24
 
 ## English
