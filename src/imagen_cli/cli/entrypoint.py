@@ -890,26 +890,32 @@ def main(
         argv, chosen_language = i18n.take_argument(argv)
         if chosen_language is not None:
             language_token = i18n.set_language(chosen_language)
+        parsed_invocation = None
         if _interactive(renderer, stdout, argv):
             from imagen_cli.cli.selection import choose
 
             if (
-                argv[:2] in (["skills", "install"], ["skills", "update"], ["skills", "uninstall"])
+                "skills" in argv
+                and any(action in argv for action in ("install", "update", "uninstall"))
                 and not any(value == "--target" or value.startswith("--target=") for value in argv)
                 and not any(value in {"--help", "-h"} for value in argv)
             ):
                 from imagen_cli.application.skill_targets import prompt_order, root_for
 
-                _, parsed, _ = _parse(argv)
-                scope = parsed.get("scope", "project") if isinstance(parsed, dict) else "project"
-                labels, preselected = prompt_order(scope)
-                stderr.write(i18n.t("Skill scope: ", "Skill 范围：") + scope + "\n")
-                selected = choose(labels, stdin=sys.stdin, stderr=stderr, selected=preselected)
-                if not selected:
-                    raise KeyboardInterrupt
-                for name in selected:
-                    stderr.write(f"{scope}/{name} → {root_for(name, scope)}\n")
-                    argv.extend(["--target", name])
+                parsed_invocation = _parse(argv)
+                command, parsed, _ = parsed_invocation
+                if command in {"skills install", "skills update", "skills uninstall"}:
+                    assert isinstance(parsed, dict)
+                    scope = parsed.get("scope", "project")
+                    labels, preselected = prompt_order(scope)
+                    stderr.write(i18n.t("Skill scope: ", "Skill 范围：") + scope + "\n")
+                    selected = choose(labels, stdin=sys.stdin, stderr=stderr, selected=preselected)
+                    if not selected:
+                        raise KeyboardInterrupt
+                    parsed["target"] = selected
+                    for name in selected:
+                        stderr.write(f"{scope}/{name} → {root_for(name, scope)}\n")
+                        argv.extend(["--target", name])
             if (
                 argv[:2] == ["superres", "fetch"]
                 and not any(
@@ -944,7 +950,8 @@ def main(
                 argv.extend(["--model", model])
                 if "--accept" not in argv:
                     argv.append("--accept")
-        command, args, options = _parse(argv)
+                parsed_invocation = None
+        command, args, options = parsed_invocation or _parse(argv)
         if renderer.mode == "jsonl":
             renderer.start(command)
         data: dict[str, Any]

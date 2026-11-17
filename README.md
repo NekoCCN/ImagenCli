@@ -841,6 +841,7 @@ imagen skills uninstall --target codex
 <img src="assets/screenshots-0.1.10/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
 
 - Default scope is the current project; `--scope global` installs into user directories.
+- Bare `imagen skills install`, `update`, and `uninstall` select all bundled skills. Their terminal checklist selects agents only: it does not ask for scope, skill names, `--force`, or `--yes`. Use flags for those choices, or **More actions → Agent skills** in the TUI. `imagen` shows help; `imagen skills` alone is not a setup wizard.
 - Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
 - For install, update, and uninstall in a terminal without `--target`, Imagen opens a scope-aware checklist: arrows move, space selects, `a` selects all, enter confirms, `q` cancels. The shared directory and any agent directory already present in the project start ticked. Without a terminal — or with `--no-interactive` — the command installs into the default target and never prompts.
 - Project-only agents are reported when global installation is requested.

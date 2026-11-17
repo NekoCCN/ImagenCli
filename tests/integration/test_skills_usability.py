@@ -107,3 +107,23 @@ def test_unattended_modes_never_open_picker(isolated, monkeypatch, flags):
                            stdout=out, stderr=io.StringIO())
     assert code == 0
     assert out.getvalue()
+
+
+@pytest.mark.parametrize('args', [
+    ['--scope', 'global', 'skills', 'update'],
+    ['skills', '--scope', 'global', 'update'],
+    ['--workspace', 'state', 'skills', 'update', '--global'],
+])
+def test_picker_uses_parsed_command_regardless_of_option_order(isolated, monkeypatch, args):
+    monkeypatch.setattr(entrypoint, '_interactive', lambda *args: True)
+    calls = []
+
+    def choose(labels, **kwargs):
+        calls.append(labels)
+        return ['claude-code']
+
+    monkeypatch.setattr(selection, 'choose', choose)
+    out = io.StringIO()
+    assert entrypoint.main(args, stdout=out, stderr=io.StringIO()) == 0
+    assert len(calls) == 1
+    assert 'eve' not in calls[0]

@@ -818,6 +818,8 @@ imagen skills uninstall --target codex
 
 随包 skills 为 `imagen`、`imagen-assets` 和 `imagen-batch`。
 
+不带参数运行 `imagen skills install`、`update`、`uninstall` 时，默认选择全部内置技能和 project 范围。终端中的选择器只选择 agent，不询问范围、技能名称、`--force` 或 `--yes`；这些选项需使用参数，或在 TUI 的 **更多操作 → Agent 技能** 表单中选择。`imagen` 显示帮助，单独的 `imagen skills` 不是安装向导。
+
 TUI 中通过 **更多操作 → Agent 技能** 查看状态、安装、更新和卸载；同一个表单可选择技能、范围和目标目录。`skills update` 使用当前 CLI 内置的技能更新已有副本，不会下载新版 CLI；请先升级 CLI，再更新技能。未安装的副本会提示安装命令，本地修改默认受到保护。技能名称可以使用位置参数，也可重复传入 `--skill`。安装、更新和卸载在交互终端中使用相同的 agent 选择器；`--no-interactive` 或机器输出不弹出选择器，默认目标为 `universal`。
 
 ## 机器接口
