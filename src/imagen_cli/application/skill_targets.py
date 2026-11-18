@@ -18,10 +18,10 @@ def default_root(scope: str) -> Path:
     return root_for(DEFAULT_TARGET, scope)
 
 
-def prompt_order() -> tuple[list[str], list[str]]:
+def prompt_order(scope: str = "project") -> tuple[list[str], list[str]]:
     """Picker labels (shared directory first, then detected agents) and what starts ticked."""
-    found = set(detected()) - {DEFAULT_TARGET}
-    names = [row["name"] for row in targets() if row["name"] != DEFAULT_TARGET]
+    found = set(detected(scope)) - {DEFAULT_TARGET}
+    names = [row["name"] for row in targets() if row["name"] != DEFAULT_TARGET and row.get(scope)]
     first = [name for name in names if name in found]
     rest = [name for name in names if name not in found]
     return [DEFAULT_TARGET, *first, *rest], [DEFAULT_TARGET, *first]
@@ -48,12 +48,14 @@ def root_for(target: str, scope: str) -> Path:
     return Path(value).expanduser()
 
 
-def detected() -> list[str]:
-    """Agents whose directory already exists in this project; the shared one is implicit."""
-    shared = root_for(DEFAULT_TARGET, "project")
+def detected(scope: str = "project") -> list[str]:
+    """Agents whose directory exists in the chosen scope; the shared one is implicit."""
+    shared = root_for(DEFAULT_TARGET, scope)
     found = []
     for row in targets():
-        candidate = Path.cwd() / row["project"]
+        if not row.get(scope):
+            continue
+        candidate = root_for(row["name"], scope)
         if candidate == shared or candidate.parent == Path.cwd():
             continue
         if candidate.parent.is_dir():

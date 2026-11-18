@@ -6,9 +6,9 @@ from imagen_cli.application import skills_service
 
 
 def list_(
-    agents: list[str] | None = None, *, scope: str | None = None
+    agents: list[str] | None = None, *, scope: str | None = None, names: list[str] | None = None
 ) -> tuple[str, dict[str, Any]]:
-    return skills_service.list_(agents=agents, scope=scope)
+    return skills_service.list_(agents=agents, scope=scope, names=names)
 
 
 def install_(

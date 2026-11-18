@@ -85,6 +85,7 @@ COMMANDS = {
                 ("asset save", "把产物另存到指定路径；不覆盖已有文件"),
                 ("cache audit", "列出可回收空间与字节数；不删除"),
                 ("cache purge", "凭清单摘要确认后回收；默认 dry-run"),
+                ("skills", "交互式技能管理：选择操作、范围、agent 和技能"),
                 ("skills list", "列出可安装的 agent skill"),
                 ("skills install", "把 agent skill 安装到当前项目或全局"),
                 ("skills update", "把已安装的 agent skill 更新到当前版本"),
@@ -211,11 +212,12 @@ _SUMMARY_EN = {
     "asset save": "Save the artifact to a chosen path; never replaces an existing file",
     "cache audit": "List reclaimable entries and bytes; deletes nothing",
     "cache purge": "Reclaim after confirming the inventory digest; dry-run by default",
+    "skills": "Interactive skill manager: choose action, scope, agents and skills",
     "skills list": "List installable agent skills",
-    "skills install": "Install agent skills into the current project or globally",
-    "skills update": "Update installed agent skills to the bundled version",
+    "skills install": "Install agent skills; interactive setup when called without arguments",
+    "skills update": "Update installed skills; interactive setup when called without arguments",
     "update": "Check whether a newer release exists; installs nothing",
-    "skills uninstall": "Uninstall agent skills managed by Imagen",
+    "skills uninstall": "Uninstall managed skills; interactive setup when called without arguments",
     "models refresh": "Fetch the model list from the profile endpoint; writes provider_models only",
     "models add": "Declare a model manually with evidence=manual",
     "models use": "Set a model as the profile default; registers it as manual when undeclared",
@@ -506,8 +508,15 @@ def _input_schema(name: str) -> dict[str, Any]:
     elif name.startswith("skills "):
         properties = {
             "scope": {"enum": ["project", "global"], "default": "project"},
-            "skill": {"type": "array", "items": text, "minItems": 1},
-            "target": {"type": "array", "items": text, "minItems": 1},
+            "skill": {"type": "array", "items": text, "minItems": 1,
+                      "description": i18n.t(
+                          "Skill names (also positional); omit for all skills",
+                          "技能名称（也可用位置参数）；省略则选择全部技能")},
+            "target": {"type": "array", "items": text, "minItems": 1,
+                       "description": i18n.t(
+                           "Repeat for agents; terminal mutations open a picker; "
+                           "otherwise defaults to universal",
+                           "可重复指定 agent；终端中的修改操作打开选择器；否则默认 universal")},
         }
         if name != "skills list":
             properties["force"] = {"type": "boolean", "default": False}
@@ -1112,7 +1121,10 @@ def _data_schema(command: Command) -> dict[str, Any]:
             }
         )
     if command.name == "skills list":
-        return _object({"skills": {"type": "array", "items": {"type": "object"}}}, ("skills",))
+        return _object({
+            "skills": {"type": "array", "items": {"type": "object"}},
+            "available": {"type": "array", "items": {"type": "string"}},
+        }, ("skills",))
     if command.name == "skills uninstall":
         return _object(
             {
@@ -1128,6 +1140,8 @@ def _data_schema(command: Command) -> dict[str, Any]:
             {
                 "scope": {"type": "string"},
                 "updated": {"type": "array", "items": {"type": "string"}},
+                "missing": {"type": "array", "items": {"type": "object"}},
+                "available": {"type": "array", "items": {"type": "string"}},
                 "current": {"type": "array", "items": {"type": "string"}},
                 "conflicts": {"type": "array", "items": {"type": "object"}},
                 "installed": {"type": "array", "items": {"type": "object"}},

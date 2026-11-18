@@ -77,3 +77,42 @@ def test_failed_rollback_preserves_backup(tmp_path, monkeypatch):
     backups = list((tmp_path / '.agents/skills').rglob('user.txt'))
     assert len(backups) == 1 and backups[0].read_text() == 'preserve'
     assert Path(data['failed'][0]['backup']).is_dir()
+
+
+def test_update_refuses_symlinks_without_reading_them(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / '.agents/skills/imagen'
+    target.parent.mkdir(parents=True)
+    external = tmp_path / 'external'
+    external.mkdir()
+    (external / 'SKILL.md').write_text('private content')
+    target.symlink_to(external, target_is_directory=True)
+
+    def no_manifest(*args):
+        raise AssertionError('must not read unsafe content')
+
+    monkeypatch.setattr(skills_service, '_manifest', no_manifest)
+    for force in (False, True):
+        status, data = skills_service.update_(['imagen'], force=force)
+        assert status == 'conflict'
+        assert data['conflicts'][0]['reason'] == 'unsafe'
+        assert target.is_symlink()
+        assert (external / 'SKILL.md').read_text() == 'private content'
+
+
+def test_update_reports_conflicts_found_during_install(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    skills_service.install_(['imagen'])
+    target = tmp_path / '.agents/skills/imagen'
+    manifest_file = target / '.imagen-install.json'
+    manifest = json.loads(manifest_file.read_text())
+    manifest['skill_version'] = '0.0.0'
+    manifest_file.write_text(json.dumps(manifest))
+    conflict = {'name': 'imagen', 'path': str(target), 'agent': 'universal', 'reason': 'unsafe'}
+    monkeypatch.setattr(skills_service, 'install_', lambda *args, **kwargs: (
+        'conflict', {'existing': [conflict]},
+    ))
+    status, data = skills_service.update_(['imagen'])
+    assert status == 'conflict'
+    assert data['updated'] == []
+    assert data['conflicts'] == [conflict]

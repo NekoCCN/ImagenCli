@@ -16,6 +16,10 @@ def _linux_start(pid: int) -> str | None:
     except OSError:
         return None
     fields = text[text.rindex(")") + 2:].split()
+    # A dead child can remain in /proc until its parent reaps it. Its start
+    # time still exists, but it can no longer execute work or receive signals.
+    if fields and fields[0] in {"Z", "X", "x"}:
+        return None
     return fields[19] if len(fields) > 19 else None
 
 

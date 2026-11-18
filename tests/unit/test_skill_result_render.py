@@ -22,9 +22,18 @@ def test_a_conflict_still_lists_what_was_skipped():
         {
             "ok": False,
             "status": "conflict",
-            "data": {"existing": [{"name": "imagen", "path": "/p/imagen"}]},
+            "data": {"existing": [{"name": "imagen", "path": "/p/imagen", "reason": "exists"}]},
         },
         columns=100,
     )
     assert "imagen" in text and "/p/imagen" in text
-    assert "--force" in text
+    assert "imagen skills update" in text
+    assert "--force" not in text
+
+
+def test_unmanaged_conflict_does_not_offer_force():
+    text = render(value({"existing": [{
+        "name": "imagen", "path": "/p/imagen", "reason": "unmanaged",
+    }]}), columns=100)
+    assert "/p/imagen" in text
+    assert "--force" not in text

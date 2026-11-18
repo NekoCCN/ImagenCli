@@ -675,7 +675,12 @@ def _parse(argv: list[str]) -> tuple[str, list[str] | dict[str, Any], SharedOpti
         return command, parameters, options
     if command in {"skills list", "skills install", "skills update", "skills uninstall"}:
         if words:
-            raise _no_positional(command, words)
+            if "skill" in parameters:
+                raise UsageError(i18n.t(
+                    "Use positional skill names or --skill, not both.",
+                    "技能名称使用位置参数或 --skill，不能同时使用。",
+                ))
+            parameters["skill"] = words
         if parameters.pop("global", False):
             if parameters.get("scope") == "project":
                 raise UsageError(
@@ -885,22 +890,38 @@ def main(
         argv, chosen_language = i18n.take_argument(argv)
         if chosen_language is not None:
             language_token = i18n.set_language(chosen_language)
+        interactive = _interactive(renderer, stdout, argv)
+        if interactive and not argv:
+            from imagen_cli.cli.skills_wizard import launcher
+
+            argv = launcher(stdin=sys.stdin, stderr=stderr)
+        parsed_invocation = None
         if _interactive(renderer, stdout, argv):
             from imagen_cli.cli.selection import choose
 
-            if (
-                argv[:2] in (["skills", "install"], ["skills", "uninstall"])
-                and not any(value == "--target" or value.startswith("--target=") for value in argv)
-                and not any(value in {"--help", "-h"} for value in argv)
-            ):
-                from imagen_cli.application.skill_targets import prompt_order
+            if "skills" in argv and not any(value in {"--help", "-h"} for value in argv):
+                from imagen_cli.application.skill_targets import prompt_order, root_for
+                from imagen_cli.cli.skills_wizard import configure
 
-                labels, preselected = prompt_order()
-                selected = choose(labels, stdin=sys.stdin, stderr=stderr, selected=preselected)
-                if not selected:
-                    raise KeyboardInterrupt
-                for name in selected:
-                    argv.extend(["--target", name])
+                parsed_invocation = _parse(argv)
+                command, parsed, parsed_options = parsed_invocation
+                if command == "skills" or (command.startswith("skills ") and not parsed):
+                    command, parsed = configure(command, stdin=sys.stdin, stderr=stderr)
+                    parsed_invocation = command, parsed, parsed_options
+                elif command in {"skills install", "skills update", "skills uninstall"}:
+                    assert isinstance(parsed, dict)
+                    if "target" not in parsed:
+                        scope = parsed.get("scope", "project")
+                        labels, preselected = prompt_order(scope)
+                        stderr.write(i18n.t("Skill scope: ", "Skill 范围：") + scope + "\n")
+                        selected = choose(
+                            labels, stdin=sys.stdin, stderr=stderr, selected=preselected
+                        )
+                        if not selected:
+                            raise KeyboardInterrupt
+                        parsed["target"] = selected
+                        for name in selected:
+                            stderr.write(f"{scope}/{name} → {root_for(name, scope)}\n")
             if (
                 argv[:2] == ["superres", "fetch"]
                 and not any(
@@ -935,7 +956,15 @@ def main(
                 argv.extend(["--model", model])
                 if "--accept" not in argv:
                     argv.append("--accept")
-        command, args, options = _parse(argv)
+                parsed_invocation = None
+        command, args, options = parsed_invocation or _parse(argv)
+        if command == "skills":
+            raise UsageError(i18n.t(
+                "Skills setup needs an interactive terminal. Use imagen skills list, install, "
+                "update or uninstall with explicit options for scripts.",
+                "技能向导需要交互式终端。脚本请使用 imagen skills list、install、update 或 "
+                "uninstall 并显式指定选项。",
+            ), "imagen help skills")
         if renderer.mode == "jsonl":
             renderer.start(command)
         data: dict[str, Any]

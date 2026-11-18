@@ -44,7 +44,7 @@ from imagen_cli.storage.private_state import PrivateStateStore
 from imagen_cli.storage.repositories import Repositories
 
 from . import preview
-from .forms import ChoiceForm, CreationForm, ModelUseForm, ProviderForm, SheetForm
+from .forms import ChoiceForm, CreationForm, ModelUseForm, ProviderForm, SheetForm, SkillsForm
 from .modal import Modal
 from .model_process import ModelProcessScreen
 
@@ -2786,6 +2786,12 @@ def command_fields(command: str) -> tuple[list[tuple[str, str, str]], set[str]]:
         if isinstance(default, bool):
             default = "true" if default else "false"
         placeholder = str(kind or "value")
+        if kind == "array":
+            placeholder = t("Comma-separated values or JSON array", "逗号分隔的值或 JSON 数组")
+            if "," in ((spec.get("items") or {}).get("pattern") or ""):
+                placeholder = t(
+                    "Semicolon-separated regions or JSON array", "分号分隔的区域或 JSON 数组"
+                )
         if "enum" in spec:
             placeholder = " | ".join(str(item) for item in spec["enum"])
         fields.append((name, placeholder, str(default) if default != "" else ""))
@@ -3767,6 +3773,7 @@ class WorkbenchApp(App[None]):
             ("cache", t("Reclaim space", "清理缓存"), "c", False),
             ("providers", t("Providers", "端点"), "v", False),
             ("superres", t("Local models", "本地模型"), "s", False),
+            ("skills", t("Agent skills", "Agent 技能"), "", False),
             ("commands", t("All commands", "全部命令"), ":", False),
             ("help", t("Keyboard shortcuts", "快捷键"), "?", False),
             ("toggle_language", t("Switch language", "切换语言"), "l", False),
@@ -3783,6 +3790,20 @@ class WorkbenchApp(App[None]):
 
         self.push_screen(ActionsScreen(choices), selected)
 
+    def action_skills(self) -> None:
+        actions = [
+            ("list", t("Status / list", "状态 / 列表"), False),
+            ("install", t("Install", "安装"), False),
+            ("update", t("Update installed skills", "更新已安装技能"), False),
+            ("uninstall", t("Uninstall", "卸载"), False),
+        ]
+
+        def selected(action: str | None) -> None:
+            if action is not None:
+                self._open_command("skills " + action)
+
+        self.push_screen(ActionsScreen(actions), selected)
+
     def action_commands(self) -> None:
         def chosen(command: str | None) -> None:
             if command is not None:
@@ -3791,6 +3812,9 @@ class WorkbenchApp(App[None]):
         self.push_screen(CommandPaletteScreen(), chosen)
 
     def _open_command(self, command: str) -> None:
+        if command == "skills":
+            self.action_skills()
+            return
         if self.deps.execute is None:
             self._say(t("Executor unavailable", "执行器不可用"), "error")
             return
@@ -3814,6 +3838,8 @@ class WorkbenchApp(App[None]):
 
     def _open_command_form(self, command: str) -> None:
         fields, optional = command_fields(command)
+        if command == "skills uninstall":
+            fields = [field for field in fields if field[0] != "yes"]
         controls = _control_fields(command)
         control_names = {name for name, _, _ in controls}
         fields = [field for field in fields if field[0] not in control_names] + controls
@@ -3838,6 +3864,24 @@ class WorkbenchApp(App[None]):
                 )
             except (ValueError, TypeError) as error:
                 self._say(t("Parameter error: ", "参数错误：") + _sanitize(error), "error")
+                return
+            if command.startswith("skills ") and arguments.get("force"):
+                scope = arguments.get("scope", "project")
+                targets = ", ".join(arguments.get("target", []))
+                names = ", ".join(arguments.get("skill", []))
+
+                def confirmed(answer: bool | None) -> None:
+                    if answer is True:
+                        if command == "skills uninstall":
+                            arguments["yes"] = True
+                        self._run_command(command, arguments, options)
+
+                self.push_screen(ConfirmScreen(t(
+                    f"Discard local edits in managed skills? {command}: {names}; "
+                    f"scope {scope}; targets {targets}. Unmanaged paths remain protected.",
+                    f"丢弃受管技能的本地修改？{command}：{names}；范围 {scope}；"
+                    f"目标 {targets}。非受管目录仍受保护。",
+                )), confirmed)
                 return
             self._run_command(command, arguments, options)
 
@@ -3882,9 +3926,47 @@ class WorkbenchApp(App[None]):
                 done,
             )
             return
+        def validate_values(values: dict[str, str]) -> None:
+            from jsonschema import ValidationError, validate
+
+            from imagen_cli.cli.usage import describe_validation
+
+            arguments = _convert_arguments(
+                command, {key: value for key, value in values.items() if key not in control_names}
+            )
+            from imagen_cli.cli.usage import describe_pydantic
+
+            try:
+                converted = _convert_controls(
+                    {key: value for key, value in values.items() if key in control_names}
+                )
+                _control_options(self.deps.options, converted)
+                if converted.get("timeout") == 0 and command not in LOCAL_TIMEOUT_COMMANDS:
+                    raise ValueError(t("timeout must be positive", "timeout 必须为正数"))
+            except ValueError as error:
+                described = describe_pydantic(error)
+                raise ValueError(str(described or error)) from error
+            try:
+                validate(arguments, discover(command)["input_schema"])
+            except ValidationError as error:
+                raise ValueError(describe_validation(error)) from error
+
+        form = SkillsForm if command.startswith("skills ") else ChoiceForm
+        submit_label = t("Run", "执行")
+        if command.startswith("skills "):
+            optional -= {"scope", "skill", "target"}
+            order = {"scope": 0, "skill": 1, "target": 2, "force": 3, "yes": 4}
+            fields.sort(key=lambda field: order.get(field[0], 5))
+            submit_label = {
+                "skills list": t("Show status", "查看状态"),
+                "skills install": t("Install", "安装"),
+                "skills update": t("Update", "更新"),
+                "skills uninstall": t("Uninstall", "卸载"),
+            }[command]
         self.push_screen(
-            ChoiceForm(
-                title, fields, choices=choices, multiple=multiple, custom=custom, optional=optional
+            form(
+                title, fields, choices=choices, multiple=multiple, custom=custom, optional=optional,
+                validate_values=validate_values, submit_label=submit_label,
             ),
             done,
         )
@@ -3980,9 +4062,15 @@ class WorkbenchApp(App[None]):
                 choices["artifacts"] = known
                 multiple["artifacts"] = [value for _, value in known]
         if command.startswith("skills "):
+            from imagen_cli.application import skills_service
+            from imagen_cli.application.skill_targets import root_for
+
             labels, preselected = prompt_order()
-            choices["target"] = [(label, label) for label in labels]
+            choices["target"] = [(f"{label} → {root_for(label, 'project')}", label)
+                                 for label in labels]
             multiple["target"] = preselected
+            choices["skill"] = [(row["name"], row["name"]) for row in skills_service.available()]
+            multiple["skill"] = [value for _, value in choices["skill"]]
         if command in _EXISTING_PROFILE_COMMANDS:
             choices["profile"] = [
                 (

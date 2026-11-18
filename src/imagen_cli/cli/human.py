@@ -54,9 +54,14 @@ def _unknown_line(turn: dict[str, Any]) -> str:
 def _conflict_reason(code: object) -> str:
     if code == "unmanaged":
         return t(
-            "not installed by Imagen and the content differs; delete that folder and reinstall",
-            "不是 Imagen 安装的，内容也不同；删掉该目录后重新安装",
+            "not managed by Imagen; inspect and back up this folder before moving it aside",
+            "不是 Imagen 管理的；检查并备份该目录后再将其移走",
         )
+    if code == "unsafe":
+        return t("symlinked path; inspect the destination", "符号链接路径；请检查目标目录")
+    if code == "exists":
+        return t("already installed; use imagen skills update with the same target and scope",
+                 "已安装；使用相同目标和范围运行 imagen skills update")
     if code == "modified":
         return t("edited after install", "安装后被修改过")
     return str(code or t("not managed by Imagen", "不是 Imagen 安装的"))
@@ -198,6 +203,16 @@ def _detail_result_lines(data: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _skill_locations(installed: dict[str, Any]) -> str:
+    locations: list[str] = []
+    for scope, value in installed.items():
+        if isinstance(value, dict):
+            locations.extend(f"{scope}/{agent}" for agent, present in value.items() if present)
+        elif value is True:
+            locations.append(scope)
+    return ", ".join(locations) or t("not installed", "未安装")
+
+
 def _skill_result_lines(data: dict[str, Any]) -> list[str]:
     """What `skills install`, `update` and `uninstall` did, one line each."""
     lines: list[str] = []
@@ -211,6 +226,13 @@ def _skill_result_lines(data: dict[str, Any]) -> list[str]:
             t(f"Removed {row.get('name')} ({row.get('path')})",
               f"已卸载 {row.get('name')}（{row.get('path')}）")
         )
+    for row in _rows(data, "missing")[:_MAX_ROWS]:
+        lines.append(t(
+            f"Not installed: {row.get('path')}. Install with imagen skills install "
+            f"{row.get('name')} --target {row.get('agent')} --scope {data.get('scope')}",
+            f"尚未安装：{row.get('path')}。运行 imagen skills install "
+            f"{row.get('name')} --target {row.get('agent')} --scope {data.get('scope')}",
+        ))
     updated = data.get("updated")
     if isinstance(updated, list) and updated:
         names = ", ".join(str(name) for name in updated)
@@ -222,8 +244,10 @@ def _skill_result_lines(data: dict[str, Any]) -> list[str]:
     for row in _rows(data, "existing")[:_MAX_ROWS]:
         lines.append(
             t(
-                f"Skipped {row.get('name')}: {row.get('path')} exists (add --force to replace)",
-                f"跳过 {row.get('name')}：{row.get('path')} 已存在（加 --force 覆盖）",
+                f"Skipped {row.get('name')}: {row.get('path')} — "
+                f"{_conflict_reason(row.get('reason'))}",
+                f"跳过 {row.get('name')}：{row.get('path')} — "
+                f"{_conflict_reason(row.get('reason'))}",
             )
         )
     for row in _rows(data, "conflicts")[:_MAX_ROWS]:
@@ -255,6 +279,8 @@ def _schema_rows(data: dict[str, Any]) -> list[tuple[str, str, str]]:
         detail = t("required", "必填") if name in required else t("optional", "可选")
         if "default" in spec:
             detail += t(f" · default {spec['default']}", f" · 默认 {spec['default']}")
+        if spec.get("description"):
+            detail += " · " + str(spec["description"])
         rows.append((name, kind, detail))
     return rows
 
@@ -485,11 +511,7 @@ def _plain_lines(value: dict[str, Any]) -> list[str]:
     skills = _rows(data, "skills")
     for row in skills[:_MAX_ROWS]:
         installed = row.get("installed") or {}
-        where = ", ".join(
-            scope
-            for scope, value in installed.items()
-            if value is True or (isinstance(value, dict) and any(value.values()))
-        ) or t("not installed", "未安装")
+        where = _skill_locations(installed)
         stale = row.get("update_available") or {}
         stale_any = any(
             value is True or (isinstance(value, dict) and any(value.values()))
@@ -776,11 +798,7 @@ def _rich(value: dict[str, Any], console: Any) -> None:
             table.add_column(column, overflow="fold")
         for row in skills[:_MAX_ROWS]:
             installed = row.get("installed") or {}
-            where = ", ".join(
-                scope
-                for scope, value in installed.items()
-                if value is True or (isinstance(value, dict) and any(value.values()))
-            ) or t("no", "否")
+            where = _skill_locations(installed)
             stale = row.get("update_available") or {}
             stale_any = any(
                 value is True or (isinstance(value, dict) and any(value.values()))

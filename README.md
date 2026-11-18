@@ -34,7 +34,13 @@ Help, errors, and TUI text support English and Simplified Chinese. JSON keys, st
 
 ## What's new
 
-The current release is [v0.1.25](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.25).
+The current release is [v0.1.26](https://github.com/NekoCCN/ImagenCli/releases/tag/v0.1.26).
+
+- **Interactive setup:** start with `imagen`, choose an image workspace or open the workbench and Skills manager.
+- **Consistent Skills maintenance:** install, status, update, and uninstall share scope, agent, and subset choices, with review and protected local edits.
+- **Recoverable forms:** TUI validation keeps your input; Skills overrides require separate confirmation.
+
+Also available:
 
 - **NovelAI-compatible generation:** text-to-image, single-image img2img, Vibe inspiration, and precise character references in the CLI and TUI.
 - **Separate Vibe preparation:** review encoding uploads and possible charges before execution; reuse matching private local encodings.
@@ -236,7 +242,8 @@ The workbench has Import and Save as buttons. More (or `F10`) opens the remainin
 | Delete image | `d` | `session remove-artifact`, `asset delete` |
 | Profiles and endpoint models | `v` | `profile ...`, `models ...`, `providers` |
 | Cache audit / purge | `c` | `cache audit`, `cache purge` |
-| Jobs / batches / worker / skills | command palette; no dedicated pages | `job ...`, `batch ...`, `worker ...`, `skills ...` |
+| Agent skills | More actions → Agent skills; scope and destination selectors | `skills ...` |
+| Jobs / batches / worker | command palette; no dedicated pages | `job ...`, `batch ...`, `worker ...` |
 | Help / language | `?`, `l` | `help`, `schema`, `--zh`, `--en`, `language` |
 
 <details>
@@ -826,23 +833,28 @@ imagen matting run ARTIFACT_ID --remote worker --accept-remote DIGEST
 Imagen ships skills that teach coding agents when to use it, how to discover commands and schemas, how to follow the plan and approval lifecycle, how to handle unknown outcomes, and how to respect cost, credential, and weight-download boundaries.
 
 ```bash
-imagen skills list
-imagen skills install                     # asks which agents, in a terminal
-imagen skills install --target universal  # the shared .agents/skills directory
-imagen skills install --target claude-code --target codex
-imagen skills install --scope global --target claude-code
-imagen skills uninstall --target codex
+imagen                                   # terminal launcher: workbench, skills, or help
+imagen skills                            # unified interactive skill manager
+imagen skills install                    # scope → agents → skill subset → review
+imagen skills update                     # same workflow; updates existing copies
+imagen skills uninstall                  # same workflow; safe removal by default
+imagen skills list --no-interactive       # direct status, without prompts
+imagen skills install imagen --scope global --target claude-code
+imagen skills update imagen --scope global --target claude-code
 ```
 
-<img src="assets/screenshots-0.1.10/imagen-cli-skills.png" alt="Agent skill installation options" width="760">
+In a human terminal, `imagen skills` offers Status, Install, Update, and Uninstall. Bare subcommands enter the same workflow at the scope step. Choose project or global scope, agent destinations, and a subset of `imagen`, `imagen-assets`, and `imagen-batch`. The review shows exactly which operation, scope, skills, and directories will be affected, followed by an equivalent CLI command.
 
-- Default scope is the current project; `--scope global` installs into user directories.
-- Without `--target`, skills go to `universal` — the shared `.agents/skills` directory that most agents read. Add more agents with `--target`, which may be repeated; `--target all` selects every target in the bundled compatibility table.
-- In a terminal without `--target`, Imagen opens a checklist: arrows move, space selects, `a` selects all, enter confirms, `q` cancels. The shared directory and any agent directory already present in the project start ticked. Without a terminal — or with `--no-interactive` — the command installs into the default target and never prompts.
-- Project-only agents are reported when global installation is requested.
-- Installation writes a managed manifest (`.imagen-install.json`). Uninstall refuses unmanaged directories and symlinked paths. A locally modified managed skill needs `--force --yes`.
+- Numbered action/scope/review menus accept Enter for the shown default. In checklists, arrows move, Space toggles, `a` toggles all, and Enter accepts the selected entries. `b` goes back and `q` cancels. No files change before the review is accepted. Empty selections cannot silently choose a different target.
+- Safe mode is the default. Override mode requires typing `overwrite` for install/update or `remove` for uninstall. It applies only to managed copies; unmanaged directories and symlinked paths remain protected. Canceling or going back at confirmation preserves local edits.
+- The initial scope is project. The shared `universal` target and detected agent directories start selected; all bundled skills start selected. Global scope only offers agents that support it. Inspect the displayed destination paths, especially when agent-specific environment variables override them.
+- Explicit skill options remain supported and do not open the full wizard. An interactive install/update/uninstall without `--target` still offers the agent checklist. Use repeated `--target` or `--target all`, positional skill names or repeated `--skill`, and `--scope global` (or `--global`).
+- Without a terminal, with `--no-interactive`, or with machine output, no prompts appear. Existing subcommands retain their defaults: project scope, `universal` target, all bundled skills, and no force. Bare `skills list` in scripts still inspects both scopes. `imagen skills` itself requires a human terminal; scripts must name a subcommand. Bare `imagen` still prints help outside an interactive terminal.
+- `skills update` uses the skills bundled with the installed CLI; it does not upgrade the CLI package. Missing copies show an install command. Repeat install reports existing copies and points to update; repeat update/uninstall is safe. Explicit CLI `--force` retains its existing meaning; removing modified managed skills additionally requires `--yes`.
 
-The bundled skills are `imagen`, `imagen-assets`, and `imagen-batch`.
+The TUI exposes the same choices through **More actions → Agent skills**, or `skills` in the command palette. Force-enabled actions open a separate confirmation; confirming removal supplies the CLI's `--yes`. The command palette keeps invalid values editable, including invalid execution options such as timeout.
+
+The interactive launcher and TUI cover common image and provider workflows, but are not a universal replacement for every CLI option. Machine formatting (`--agent`, `--output json/jsonl`) and unattended execution (`--no-interactive`) stay explicit. Choose an image workspace from the `imagen` launcher or pass `--workspace`; bulk JSON batch input and advanced deployment settings retain their CLI/schema interfaces and command-palette forms.
 
 ## Machine interface
 
@@ -939,7 +951,7 @@ imagen tui
 - **Image quality:** expand evaluation across illustration, photography, and other domains, including visual comparison and user preference. Postprocessing stays experimental until this is complete.
 - **Platform support:** verify Windows on physical hardware and improve processing resource controls on Windows and macOS. Size, buffer, and timeout checks leave sandbox-level guarantees for later; Linux address-space limits cap virtual address space only, so RSS and GPU memory can still grow.
 - **Language support:** add more interface languages. English is the default; Chinese is available through `--lang zh-CN` or `IMAGEN_LANG=zh-CN`.
-- **Parity:** improve dedicated TUI workflows for batch, worker, and skills operations; the command palette and local-model management already exist.
+- **Parity:** improve dedicated TUI workflows for batch and worker operations; the command palette and local-model management already exist.
 
 ## Development
 

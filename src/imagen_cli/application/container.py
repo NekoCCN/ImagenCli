@@ -419,7 +419,9 @@ class Container:
             try:
                 from imagen_cli.cli.tui.app import Deps, WorkbenchApp
             except ImportError as error:  # optional extra
-                raise ValueError("tui extra is not installed") from error
+                raise ValueError(
+                    "TUI is not installed. Install the imagen-cli[tui] extra, then run imagen tui."
+                ) from error
             WorkbenchApp(
                 Deps(
                     self.repositories,
@@ -1338,7 +1340,9 @@ class Container:
 
             validate(args, discover(command)["input_schema"])
             if command == "skills list":
-                return skills.list_(agents=args.get("target"), scope=args.get("scope"))
+                return skills.list_(
+                    agents=args.get("target"), scope=args.get("scope"), names=args.get("skill")
+                )
             if command == "skills update":
                 return skills.update_(
                     args.get("skill"),

@@ -1592,7 +1592,8 @@ def test_palette_skills_install_offers_the_cli_target_checklist(deps):
             await pilot.pause()
             listing = app.screen.query_one("#target", SelectionList)
             prompts = [option.prompt.plain for option in listing._options]
-            assert [prompt[4:] for prompt in prompts] == labels
+            assert [prompt[4:].split(" → ", 1)[0] for prompt in prompts] == labels
+            assert all(" → " in prompt for prompt in prompts)
             assert [prompt[:3] for prompt in prompts] == [
                 "[x]" if label in preselected else "[ ]" for label in labels
             ]
@@ -1663,7 +1664,8 @@ def test_palette_skills_targets_submit_as_the_cli_flags(deps):
     asyncio.run(run())
     targets = [name for name in preselected if name != "claude-code"]
     assert calls == [
-        ("skills install", {"force": False, "scope": "project", "target": targets})
+        ("skills install", {"force": False, "scope": "project", "target": targets,
+                            "skill": ["imagen", "imagen-assets", "imagen-batch"]})
     ]
 
 
@@ -2147,7 +2149,7 @@ def test_palette_transform_offers_the_cli_operator_and_preset_names(deps):
     asyncio.run(run())
 
 
-def test_transform_panel_asks_before_running_a_local_model(deps):
+def test_transform_panel_asks_before_running_a_local_model(deps, tmp_path, monkeypatch):
     """Local weights are selectable, but the model and its licence are answered first."""
     from io import BytesIO
 
@@ -2163,6 +2165,7 @@ def test_transform_panel_asks_before_running_a_local_model(deps):
         return {"artifact": {"id": "art_" + "e" * 32}}
 
     deps_value.transform = transform
+    monkeypatch.setenv("IMAGEN_MODEL_DIR", str(tmp_path / "models"))
     weights = superres.weights_path("realesr-animevideov3")
     weights.parent.mkdir(parents=True, exist_ok=True)
     weights.write_bytes(b"weights")
